@@ -292,6 +292,11 @@ object Assembler {
         for {
           pReg <- parseReg(pClean).toRight(AsmError(lineNo, s"Invalid P register: $pStr"))
           qReg <- parseReg(qClean).toRight(AsmError(lineNo, s"Invalid Q register: $qStr"))
+          _ <- Either.cond(
+            pReg.index <= 15 && qReg.index <= 15,
+            (),
+            AsmError(lineNo, s"ByteIndirect ($mnemonic) only supports registers R0 through R15 (4-bit field), got $pReg, $qReg")
+          )
         } yield Instruction.ByteIndirect(op, pReg, pInd, qReg, qInd, bump)
 
       // Input: IN device, targetReg  or  IN targetReg, device

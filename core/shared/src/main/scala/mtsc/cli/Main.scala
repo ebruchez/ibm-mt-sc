@@ -4,15 +4,15 @@ import mtsc.types.*
 import mtsc.cpu.StepResult
 import mtsc.memory.CoreMemory
 import mtsc.periph.{MtscSystem, SystemIoBus, TapeCartridge, TapeReader}
-import mtsc.diag.{DiagnosticPrograms, EscapementRoutine}
+import mtsc.diag.{ContinuousComposerRoutine, DiagnosticPrograms, EscapementRoutine}
 import mtsc.console.{AnsiTerminal, CeConsoleState, CeConsoleView, CeConsoleMode}
 
 /**
  * Main Interactive Customer Engineer Console Debugger for the IBM MT/SC CCU.
  *
- * Supports single-step execution, continuous run, breakpoints, program loading,
- * memory inspection, live hardware display lamps, dual tape readers,
- * and Selectric Composer camera-ready galley proofs.
+ * Supports single-step execution, continuous run, real-time mechanical pacing (14 cps),
+ * breakpoints, program loading, memory inspection, live hardware display lamps,
+ * dual tape readers, arbitrary text file ingestion, and camera-ready galley proofs.
  */
 object Main {
 
@@ -23,10 +23,30 @@ object Main {
 
     val system = new MtscSystem()
     val consoleState = new CeConsoleState()
+    consoleState.viewGalley = true
     val terminal = new AnsiTerminal(width = 104, height = 38)
 
-    // Load initial demo: End-to-End Composition Demo
+    // Check command line arguments for initial text file or flags
+    var initialFile: Option[String] = None
+    for (arg <- args) {
+      if (arg == "--max" || arg == "--turbo" || arg == "--instant") {
+        consoleState.realTimePacing = false
+      } else if (arg == "--fast" || arg == "--2x") {
+        consoleState.pacingSpeed = 2.0
+      } else if (arg == "--5x") {
+        consoleState.pacingSpeed = 5.0
+      } else if (!arg.startsWith("-")) {
+        initialFile = Some(arg)
+      }
+    }
+
+    // Load initial demo: Continuous Document Composition
     loadProgram(DiagnosticPrograms.AllPrograms(0), system, consoleState)
+
+    // If an initial file was specified, mount it
+    initialFile.foreach { path =>
+      mountFile(path, system, consoleState)
+    }
 
     // Interactive event loop
     runInteractiveLoop(system, consoleState, terminal)
@@ -41,7 +61,12 @@ object Main {
     system.loadProgram(img)
     EscapementRoutine.initializeTable(system.memory)
 
-    if (prog == DiagnosticPrograms.EndToEndCompositionDemo || prog == DiagnosticPrograms.TapeBootstrapLoader) {
+    if (prog == DiagnosticPrograms.ContinuousCompositionDemo) {
+      if (!system.rightTape.isTapeLoaded) {
+        system.loadTape(Device.RightTape, TapeCartridge.fromText(TapeCartridge.HistoricalSampleText, "Historical MT Tape"))
+        consoleState.log("Mounted historical 4-paragraph MT cartridge on Right Tape Reader.")
+      }
+    } else if (prog == DiagnosticPrograms.EndToEndCompositionDemo || prog == DiagnosticPrograms.TapeBootstrapLoader) {
       val sampleText = "The electronic logic used in the CCU is in the SLD family."
       system.loadTape(Device.RightTape, TapeCartridge.fromText(sampleText, "MTSC Test Tape"))
       consoleState.log("Mounted sample tape cartridge on Right Tape Reader.")
@@ -56,11 +81,28 @@ object Main {
       for (i <- 0 until sampleText.length) {
         system.memory.writeByte(Address(316 + i), sampleText.charAt(i).toInt)
       }
-      system.memory.writeByte(Address(316 + sampleText.length), 0) // Null terminator
+      system.memory.writeByte(Address(316 + sampleText.length), 0)
     }
 
     consoleState.log(f"Program '${prog.name}' loaded at 0x${system.memory.psar.unsigned}%03X.")
-    consoleState.statusMessage = s"Loaded ${prog.name}. Press [s] to step, [r] to run."
+    val speedNote = if (consoleState.realTimePacing) " [Real-time 14 cps]" else " [Instant]"
+    consoleState.statusMessage = s"Loaded ${prog.name}.$speedNote Press [r] to run, [a] to toggle pacing."
+  }
+
+  def mountFile(path: String, system: MtscSystem, consoleState: CeConsoleState): Boolean = {
+    try {
+      val content = scala.io.Source.fromFile(path).mkString
+      val filename = new java.io.File(path).getName
+      system.loadTape(Device.RightTape, TapeCartridge.fromText(content, filename))
+      consoleState.log(f"Mounted '$filename' (${content.length} chars) on Right Tape Reader.")
+      consoleState.statusMessage = f"Tape mounted: '$filename' (${content.length} chars). Press [r] to compose."
+      true
+    } catch {
+      case e: Exception =>
+        consoleState.log(s"Error loading file '$path': ${e.getMessage}")
+        consoleState.statusMessage = s"Failed to load file '$path'."
+        false
+    }
   }
 
   private def runInteractiveLoop(
@@ -80,7 +122,7 @@ object Main {
         System.out.flush()
 
         val input = readCommand(rawModeEnabled)
-        running = handleCommand(input.trim, system, consoleState)
+        running = handleCommand(input.trim, system, consoleState, terminal, rawModeEnabled)
       }
     } finally {
       if (rawModeEnabled) {
@@ -93,7 +135,9 @@ object Main {
   private def handleCommand(
     cmd: String,
     system: MtscSystem,
-    consoleState: CeConsoleState
+    consoleState: CeConsoleState,
+    terminal: AnsiTerminal,
+    rawMode: Boolean
   ): Boolean = {
     if (cmd.equalsIgnoreCase("q") || cmd.equalsIgnoreCase("quit") || cmd.equalsIgnoreCase("exit")) {
       return false
@@ -120,33 +164,40 @@ object Main {
         }
 
       case "r" | "run" =>
-        // Run continuously until breakpoint, halt, or maxCycles
-        var steps = 0
-        var hitBreakpoint = false
-        var res: StepResult = StepResult.Normal
+        runPaced(system, consoleState, terminal, rawMode)
 
-        while (res == StepResult.Normal && !hitBreakpoint && steps < 50000) {
-          val prevPsar = system.memory.psar
-          res = system.step()
-          steps += 1
-          if (consoleState.breakpoints.contains(system.memory.psar)) {
-            hitBreakpoint = true
-          }
-          if (!system.cpu.state.multiplex && system.memory.psar == prevPsar && !system.cpu.state.inhibit) {
-            system.cpu.state.halted = true
-            res = StepResult.Halted
-          }
-        }
-
-        if (hitBreakpoint) {
-          consoleState.statusMessage = f"Breakpoint hit at 0x${system.memory.psar.unsigned}%03X after $steps steps."
-          consoleState.log(f"Breakpoint hit at 0x${system.memory.psar.unsigned}%03X")
-        } else if (res == StepResult.Halted) {
-          consoleState.statusMessage = f"Program completed in $steps steps (HALTED)."
-          consoleState.log(f"Execution halted after $steps cycles.")
+      case "a" | "anim" | "pacing" =>
+        consoleState.realTimePacing = !consoleState.realTimePacing
+        val stateStr = if (consoleState.realTimePacing) {
+          f"ENABLED at ${consoleState.pacingSpeed}%.0fx (${(14 * consoleState.pacingSpeed).toInt} cps)"
         } else {
-          consoleState.statusMessage = f"Ran $steps steps."
+          "DISABLED (instant/max speed)"
         }
+        consoleState.statusMessage = s"Mechanical pacing: $stateStr."
+        consoleState.log(s"Pacing $stateStr")
+
+      case "1" =>
+        consoleState.realTimePacing = true
+        consoleState.pacingSpeed = 1.0
+        consoleState.statusMessage = "Speed set to 1x (14 cps authentic typing speed)."
+        consoleState.log("Speed set to 1x (14 cps)")
+
+      case "2" =>
+        consoleState.realTimePacing = true
+        consoleState.pacingSpeed = 2.0
+        consoleState.statusMessage = "Speed set to 2x (28 cps double speed)."
+        consoleState.log("Speed set to 2x (28 cps)")
+
+      case "5" =>
+        consoleState.realTimePacing = true
+        consoleState.pacingSpeed = 5.0
+        consoleState.statusMessage = "Speed set to 5x (70 cps fast forward)."
+        consoleState.log("Speed set to 5x (70 cps)")
+
+      case "0" | "max" =>
+        consoleState.realTimePacing = false
+        consoleState.statusMessage = "Pacing disabled (instant execution)."
+        consoleState.log("Pacing disabled (instant)")
 
       case "v" =>
         consoleState.viewGalley = !consoleState.viewGalley
@@ -159,10 +210,13 @@ object Main {
         }
 
       case "t" =>
-        val sampleText = "The electronic logic used in the CCU is in the SLD family."
-        system.loadTape(Device.RightTape, TapeCartridge.fromText(sampleText, "MTSC Test Tape"))
-        consoleState.log("Mounted sample tape cartridge on Right Tape Reader.")
-        consoleState.statusMessage = "Mounted sample tape cartridge on Right Tape Reader."
+        system.loadTape(Device.RightTape, TapeCartridge.fromText(TapeCartridge.HistoricalSampleText, "Historical MT Tape"))
+        consoleState.log("Mounted historical 4-paragraph tape on Right Tape Reader.")
+        consoleState.statusMessage = "Mounted historical 4-paragraph tape cartridge on Right Tape Reader."
+
+      case s if s.startsWith("t ") || s.startsWith("tape ") =>
+        val path = s.substring(s.indexOf(' ') + 1).trim
+        mountFile(path, system, consoleState)
 
       case "e" =>
         if (system.rightTape.injectParityError()) {
@@ -214,9 +268,93 @@ object Main {
         }
 
       case _ =>
-        consoleState.statusMessage = s"Unknown command '$cmd'. Press [s] Step, [r] Run, [v] Galley, [t] Tape, [e] Err, [l] Load, [q] Quit."
+        consoleState.statusMessage = s"Unknown command '$cmd'. Press [s] Step, [r] Run, [a] Pacing, [v] Galley, [t] Tape, [e] Err, [l] Load, [q] Quit."
     }
     true
+  }
+
+  private def runPaced(
+    system: MtscSystem,
+    consoleState: CeConsoleState,
+    terminal: AnsiTerminal,
+    rawMode: Boolean
+  ): Unit = {
+    var steps = 0
+    var hitBreakpoint = false
+    var res: StepResult = StepResult.Normal
+    var interrupted = false
+    val delayMs = consoleState.printDelayMs
+
+    if (consoleState.realTimePacing && delayMs > 0) {
+      print("\u001b[?25l") // Hide cursor during animated typing
+      System.out.flush()
+    }
+
+    try {
+      var lastPrintCount = system.translator.printCount
+
+      while (res == StepResult.Normal && !hitBreakpoint && !interrupted && steps < 100000) {
+        val prevPsar = system.memory.psar
+        res = system.step()
+        steps += 1
+
+        if (consoleState.breakpoints.contains(system.memory.psar)) {
+          hitBreakpoint = true
+        }
+
+        // Animated typing refresh: whenever translator prints a character
+        if (consoleState.realTimePacing && delayMs > 0 && system.translator.printCount > lastPrintCount) {
+          lastPrintCount = system.translator.printCount
+
+          CeConsoleView.render(terminal, system.cpu, consoleState)
+          print(terminal.renderToString())
+          System.out.flush()
+
+          try {
+            Thread.sleep(delayMs)
+          } catch {
+            case _: InterruptedException => interrupted = true
+          }
+
+          // Check if user hit a key to interrupt
+          if (tryCheckInputAvailable()) {
+            val _ = System.in.read()
+            interrupted = true
+          }
+        }
+
+        if (!system.cpu.state.multiplex && system.memory.psar == prevPsar && !system.cpu.state.inhibit) {
+          system.cpu.state.halted = true
+          res = StepResult.Halted
+        }
+      }
+    } finally {
+      if (consoleState.realTimePacing && delayMs > 0) {
+        print("\u001b[?25h") // Restore cursor
+        System.out.flush()
+      }
+    }
+
+    if (interrupted) {
+      consoleState.statusMessage = f"Execution paused by user at 0x${system.memory.psar.unsigned}%03X after $steps steps."
+      consoleState.log(f"Execution paused at 0x${system.memory.psar.unsigned}%03X.")
+    } else if (hitBreakpoint) {
+      consoleState.statusMessage = f"Breakpoint hit at 0x${system.memory.psar.unsigned}%03X after $steps steps."
+      consoleState.log(f"Breakpoint hit at 0x${system.memory.psar.unsigned}%03X.")
+    } else if (res == StepResult.Halted) {
+      consoleState.statusMessage = f"Composition completed in $steps cycles (${system.paper.lines.length} lines on galley proof)."
+      consoleState.log(f"Program HALTED after $steps cycles. ${system.paper.lines.length} lines printed.")
+    } else {
+      consoleState.statusMessage = f"Ran $steps steps."
+    }
+  }
+
+  private def tryCheckInputAvailable(): Boolean = {
+    try {
+      System.in.available() > 0
+    } catch {
+      case _: Exception => false
+    }
   }
 
   private def trySetRawMode(enable: Boolean): Boolean = {

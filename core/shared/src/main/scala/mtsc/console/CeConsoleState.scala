@@ -25,6 +25,16 @@ class CeConsoleState {
   var powerOn: Boolean = true
   var singleStepMode: Boolean = false
   var viewGalley: Boolean = false
+  var realTimePacing: Boolean = true
+  var pacingSpeed: Double = 1.0 // 1.0 = 14 cps (~71 ms/char), 2.0 = 28 cps, 5.0 = 70 cps, 0.0 = instant
+
+  def printDelayMs: Long =
+    if (!realTimePacing || pacingSpeed <= 0.0) 0L
+    else math.max(5L, (71.4 / pacingSpeed).toLong)
+
+  def tapeDelayMs: Long =
+    if (!realTimePacing || pacingSpeed <= 0.0) 0L
+    else math.max(3L, (50.0 / pacingSpeed).toLong)
 
   val eventLog: ArrayBuffer[String] = ArrayBuffer(
     "IBM MT/SC CCU 6320 CE Console initialized.",

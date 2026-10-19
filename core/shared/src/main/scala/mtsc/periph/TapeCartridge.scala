@@ -72,16 +72,26 @@ object TapeCartridge {
   def empty(label: String = "Blank Tape"): TapeCartridge =
     new TapeCartridge(label, ArrayBuffer.empty)
 
+  val HistoricalSampleText: String =
+    """The IBM Magnetic Tape Selectric Composer is a system for preparing camera-ready copy for publication.
+      |
+      |Input data recorded on magnetic tape cartridges is read by the tape reader. Each tape cartridge holds approximately 4,000 words.
+      |
+      |The Composer Control Unit houses coincident-current magnetic core storage and Solid Logic Dense circuitry. Characters are read at 20 characters per second.
+      |
+      |Font escapement values are looked up automatically and line deficits are divided across inter-word space bands. The single-element spherical typing head prints camera-ready proofs at 14 characters per second.""".stripMargin
+
   /**
    * Creates a tape cartridge from plain text.
-   * Prepends a FeedCode (as required by IBM tape loader) and appends EndOfBlock.
+   * Normalizes newlines, prepends a FeedCode, and appends EndOfBlock sentinel.
    */
   def fromText(text: String, label: String = "Text Tape"): TapeCartridge = {
     val buf = ArrayBuffer.empty[TapeFrame]
     // Leader feed code
     buf += TapeFrame.encodeWithOddParity(FeedCode)
 
-    for (ch <- text) {
+    val normalized = text.replace("\r\n", "\n").replace('\r', '\n')
+    for (ch <- normalized) {
       val code = if (ch == '\n') CarrierReturn else (ch.toInt & 0x7f)
       buf += TapeFrame.encodeWithOddParity(code)
     }

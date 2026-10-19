@@ -61,9 +61,9 @@ object CeConsoleView {
     val psarStr = f"PSAR: 0x${psar.unsigned}%03X (${psar.unsigned}%4d)"
     val awStr   = f"AW: 0x${aw.unsigned}%04X"
     val bwStr   = f"BW: 0x${bw.unsigned}%04X"
-    val cycStr  = f"CYCLES: $cycles%07d"
-
-    val headerLine = f" $modeStr%-20s $psarStr   $awStr   $bwStr   $cycStr"
+    val speedStr = if (!state.realTimePacing || state.pacingSpeed <= 0.0) "MAX"
+                   else f"${state.pacingSpeed}%.0fx (${(14 * state.pacingSpeed).toInt} cps)"
+    val headerLine = f" $modeStr%-18s $psarStr  $awStr  $bwStr  CYC:$cycles%06d  [$speedStr]"
     terminal.writeText(2, 1, headerLine, Some(AnsiColor.BrightWhite), bold = true)
   }
 
@@ -236,9 +236,11 @@ object CeConsoleView {
       terminal.writeText(boxX + 2, 23, "Press [v] to toggle back to Core Memory view.", Some(AnsiColor.BrightYellow))
     } else {
       val recentLines = lines.takeRight(9)
+      val startIdx = lines.length - recentLines.length
       for (i <- recentLines.indices) {
         val line = recentLines(i)
-        val text = f"${i + 1}%02d: $line"
+        val num = startIdx + i + 1
+        val text = f"$num%02d: $line"
         terminal.writeText(boxX + 2, 17 + i, text.take(boxW - 4), Some(AnsiColor.BrightWhite), bold = true)
       }
     }
@@ -269,7 +271,7 @@ object CeConsoleView {
     val boxH = 4
     terminal.drawBox(0, boxY, terminal.width, boxH, "STATUS & COMMANDS", Some(AnsiColor.Cyan))
 
-    val cmds = "[s] Step  [r] Run  [p] Pause  [b] Bp  [m] Mode  [v] Galley/Mem  [t] Tape  [e] Err  [l] Load  [q] Quit"
+    val cmds = "[s] Step  [r] Run  [a] Pacing  [v] Galley/Mem  [t] Tape  [e] Err  [l] Load  [q] Quit"
     terminal.writeText(2, boxY + 1, cmds, Some(AnsiColor.BrightCyan), bold = true)
 
     val statusText = s"Status: ${state.statusMessage}"

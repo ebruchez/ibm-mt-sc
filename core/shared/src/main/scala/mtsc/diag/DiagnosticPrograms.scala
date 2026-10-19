@@ -282,10 +282,10 @@ object DiagnosticPrograms {
             MOV     R16, R6
 
             ; Transfer Input Block (316..) to Output Block (198..)
-            ; R8 = Input ptr (316), R18 = Output ptr (198)
+            ; R8 = Input ptr (316), R6 = Output ptr (198)
             MOVI    R8, 60
             SBIT    R8, 8            ; R8 = 316
-            MOVI    R18, 198         ; R18 = 198
+            MOVI    R6, 198          ; R6 = 198
 
         TRANSFER_LOOP:
             MOVB    R4, [R8]++
@@ -293,15 +293,15 @@ object DiagnosticPrograms {
             JMP.EQ  TRANSFER_DONE
             CMPI    R4, 0            ; Skip 0 feed code
             JMP.EQ  TRANSFER_LOOP
-            MOVB    [R18]++, R4      ; Store in output block
+            MOVB    [R6]++, R4       ; Store in output block
             JMP     TRANSFER_LOOP
 
         TRANSFER_DONE:
             ; Append Carrier Return (13) and Halt (255)
             MOVI    R4, 13
-            MOVB    [R18]++, R4
+            MOVB    [R6]++, R4
             MOVI    R4, 255
-            MOVB    [R18]++, R4
+            MOVB    [R6]++, R4
 
             ; Initiate background printing from Output Block (198) via R0
             MOVI    R0, 198
@@ -314,7 +314,24 @@ object DiagnosticPrograms {
       """
   }
 
+  /**
+   * 6. Continuous Document Composition:
+   * Continuous multi-line document typesetting from tape:
+   * - Reads tape cartridge continuously across words, sentences, and paragraphs
+   * - Wraps lines based on proportional escapement threshold
+   * - Divides justification deficit across space bands
+   * - Types camera-ready justified lines on the Selectric Composer
+   * - Loops continuously until End-of-Block sentinel
+   */
+  case object ContinuousCompositionDemo extends ProgramInfo {
+    val id = "continuous_compose"
+    val name = "Continuous Document Composition"
+    val description = "Continuously reads multi-paragraph text from tape, wraps at line measure, justifies, and types camera-ready galley proof"
+    val source: String = ContinuousComposerRoutine.Source
+  }
+
   val AllPrograms: List[ProgramInfo] = List(
+    ContinuousCompositionDemo,
     EndToEndCompositionDemo,
     EscapementAndJustifyDemo,
     TapeBootstrapLoader,
