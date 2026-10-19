@@ -30,7 +30,17 @@ object CeConsoleView {
     renderDisplayLamps(terminal, cpu, consoleState)
     renderRegisters(terminal, cpu)
     renderDisassembly(terminal, cpu, consoleState)
-    renderMemoryDump(terminal, cpu, consoleState)
+
+    if (consoleState.viewGalley) {
+      val paper = cpu.ioBus match {
+        case sys: mtsc.periph.SystemIoBus => sys.translator.paper
+        case _ => new mtsc.periph.ComposerPaper()
+      }
+      renderGalleyProof(terminal, paper, consoleState)
+    } else {
+      renderMemoryDump(terminal, cpu, consoleState)
+    }
+
     renderLog(terminal, consoleState)
     renderFooter(terminal, consoleState)
   }
@@ -70,13 +80,22 @@ object CeConsoleView {
     val inhOn  = cpu.state.inhibit
     val mpxOn  = cpu.state.multiplex
     val rdyOn  = !cpu.state.inhibit && !cpu.state.halted
-    val errOn  = false
+    val errOn  = cpu.ioBus match {
+      case sys: mtsc.periph.SystemIoBus => sys.rightTape.parityError || sys.leftTape.parityError
+      case _ => false
+    }
     val runOn  = !cpu.state.halted
-    val tapeOn = cpu.state.lastInsn.exists {
+    val tapeOn = (cpu.ioBus match {
+      case sys: mtsc.periph.SystemIoBus => sys.rightTape.cycleRemaining > 0 || sys.leftTape.cycleRemaining > 0
+      case _ => false
+    }) || cpu.state.lastInsn.exists {
       case mtsc.isa.Instruction.Input(dev, _) => dev == Device.RightTape || dev == Device.LeftTape
       case _ => false
     }
-    val prntOn = cpu.state.lastInsn.exists {
+    val prntOn = (cpu.ioBus match {
+      case sys: mtsc.periph.SystemIoBus => sys.translator.busy || sys.translator.cycleRemaining > 0
+      case _ => false
+    }) || cpu.state.lastInsn.exists {
       case mtsc.isa.Instruction.Output(dev, _, _, _) => dev == Device.Translator
       case _ => false
     } || cpu.state.multiplex
@@ -197,6 +216,34 @@ object CeConsoleView {
     }
   }
 
+  private def renderGalleyProof(
+    terminal: AnsiTerminal,
+    paper: mtsc.periph.ComposerPaper,
+    state: CeConsoleState
+  ): Unit = {
+    val boxX = 51
+    val boxW = terminal.width - boxX
+    val boxH = 11
+
+    val title = "SELECTRIC COMPOSER ─ CAMERA-READY GALLEY PROOF"
+    terminal.drawBox(boxX, 16, boxW, boxH, title, Some(AnsiColor.BrightGreen))
+
+    val lines = paper.lines
+    if (lines.isEmpty) {
+      terminal.writeText(boxX + 2, 18, "[Galley blank - no text printed yet]", Some(AnsiColor.Gray))
+      terminal.writeText(boxX + 2, 20, "Output from TRANSLATOR (OUT / OUTM) will", Some(AnsiColor.Gray))
+      terminal.writeText(boxX + 2, 21, "appear here as camera-ready justified copy.", Some(AnsiColor.Gray))
+      terminal.writeText(boxX + 2, 23, "Press [v] to toggle back to Core Memory view.", Some(AnsiColor.BrightYellow))
+    } else {
+      val recentLines = lines.takeRight(9)
+      for (i <- recentLines.indices) {
+        val line = recentLines(i)
+        val text = f"${i + 1}%02d: $line"
+        terminal.writeText(boxX + 2, 17 + i, text.take(boxW - 4), Some(AnsiColor.BrightWhite), bold = true)
+      }
+    }
+  }
+
   private def getMemoryRegionName(addr: Int): String = {
     if (addr < 64) "Working Registers"
     else if (addr < 198) "Escapement Table"
@@ -222,7 +269,7 @@ object CeConsoleView {
     val boxH = 4
     terminal.drawBox(0, boxY, terminal.width, boxH, "STATUS & COMMANDS", Some(AnsiColor.Cyan))
 
-    val cmds = "[s] Step  [r] Run  [p] Pause  [b] Breakpoint  [m] CE Mode  [page/addr] Mem  [l] Load  [q] Quit"
+    val cmds = "[s] Step  [r] Run  [p] Pause  [b] Bp  [m] Mode  [v] Galley/Mem  [t] Tape  [e] Err  [l] Load  [q] Quit"
     terminal.writeText(2, boxY + 1, cmds, Some(AnsiColor.BrightCyan), bold = true)
 
     val statusText = s"Status: ${state.statusMessage}"

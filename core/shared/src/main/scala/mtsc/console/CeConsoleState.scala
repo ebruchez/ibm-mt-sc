@@ -24,6 +24,7 @@ class CeConsoleState {
   var statusMessage: String = "Ready. Press [s] to step, [r] to run, [l] to load program."
   var powerOn: Boolean = true
   var singleStepMode: Boolean = false
+  var viewGalley: Boolean = false
 
   val eventLog: ArrayBuffer[String] = ArrayBuffer(
     "IBM MT/SC CCU 6320 CE Console initialized.",

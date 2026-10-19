@@ -286,6 +286,10 @@ class Ccu(
       ioBus.write(device, byte, multiplex) match {
         case IoResult.Ready(_) =>
           state.inhibit = false
+          if (indirect) {
+            val nextPtr = (memory.readReg(sourceReg).unsigned + 1) & 0x7ff
+            memory.writeReg(sourceReg, Word(nextPtr))
+          }
           StepResult.Normal
 
         case IoResult.Busy =>

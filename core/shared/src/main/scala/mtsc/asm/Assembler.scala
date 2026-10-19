@@ -294,25 +294,32 @@ object Assembler {
           qReg <- parseReg(qClean).toRight(AsmError(lineNo, s"Invalid Q register: $qStr"))
         } yield Instruction.ByteIndirect(op, pReg, pInd, qReg, qInd, bump)
 
-      // Input: IN device, targetReg
+      // Input: IN device, targetReg  or  IN targetReg, device
       case "IN" =>
         if (args.length != 2) return err("IN requires 2 arguments: device, targetReg")
-        for {
-          dev <- parseDevice(args(0)).toRight(AsmError(lineNo, s"Invalid input device: ${args(0)}"))
-          reg <- parseReg(args(1)).toRight(AsmError(lineNo, s"Invalid register: ${args(1)}"))
-        } yield Instruction.Input(dev, reg)
+        val parsed = parseDevice(args(0)).flatMap(dev => parseReg(args(1)).map(reg => (dev, reg)))
+          .orElse(parseDevice(args(1)).flatMap(dev => parseReg(args(0)).map(reg => (dev, reg))))
+        parsed match {
+          case Some((dev, reg)) => Right(Instruction.Input(dev, reg))
+          case None => err(s"IN requires a device and a register, got: ${args.mkString(", ")}")
+        }
 
-      // Output: OUT device, reg / OUT device, [reg] / OUTM device, [reg]
+      // Output: OUT device, reg / OUT reg, device / OUTM device, [reg] / OUTM [reg], device
       case "OUT" | "OUTM" =>
         if (args.length != 2) return err(s"$mnemonic requires 2 arguments: device, source")
         val mpx = mnemonic == "OUTM"
-        val srcStr = args(1)
-        val ind = srcStr.startsWith("[") && srcStr.contains("]")
-        val regStr = srcStr.replace("[", "").replace("]", "").trim
-        for {
-          dev <- parseDevice(args(0)).toRight(AsmError(lineNo, s"Invalid output device: ${args(0)}"))
-          reg <- parseReg(regStr).toRight(AsmError(lineNo, s"Invalid register: $srcStr"))
-        } yield Instruction.Output(dev, reg, ind, mpx)
+        def parseOut(dStr: String, sStr: String): Option[Instruction.Output] = {
+          for {
+            dev <- parseDevice(dStr)
+            ind = sStr.startsWith("[") && sStr.contains("]")
+            regStr = sStr.replace("[", "").replace("]", "").trim
+            reg <- parseReg(regStr)
+          } yield Instruction.Output(dev, reg, ind, mpx)
+        }
+        parseOut(args(0), args(1)).orElse(parseOut(args(1), args(0))) match {
+          case Some(insn) => Right(insn)
+          case None => err(s"$mnemonic requires a device and a register/indirect source, got: ${args.mkString(", ")}")
+        }
 
       case other =>
         err(s"Unrecognized mnemonic '$other'")

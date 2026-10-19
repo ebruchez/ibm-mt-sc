@@ -83,4 +83,10 @@ class DiagnosticProgramsSuite extends munit.FunSuite {
     assertEquals(mem.readReg(RegId(16)).unsigned, 1, "Remainder should be 1")
     assertEquals(mem.readReg(RegId(28)).unsigned, 1, "Success flag should be 1")
   }
+
+  test("EndToEndCompositionDemo program info assembles cleanly") {
+    val img = DiagnosticPrograms.EndToEndCompositionDemo.assemble()
+    assert(img.bytes.exists(_ != 0))
+    assertEquals(img.bytes.length, 2048)
+  }
 }
