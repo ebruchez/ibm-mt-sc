@@ -252,6 +252,11 @@ object Assembler {
         }
         for {
           reg <- parseReg(args(0)).toRight(AsmError(lineNo, s"Invalid register: ${args(0)}"))
+          _ <- Either.cond(
+            (reg.index & 1) == 0,
+            (),
+            AsmError(lineNo, s"Immediate arithmetic ($mnemonic) only supports even registers (R0, R2, ..., R30), got $reg")
+          )
           imm <- parseNumberOrSymbol(args(1), symbols).left.map(AsmError(lineNo, _))
         } yield Instruction.ImmediateArith(op, reg, imm & 0xff)
 
