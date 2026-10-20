@@ -7,14 +7,18 @@ import mtsc.asm.Disassembler
 import mtsc.memory.CoreMemory
 
 /**
- * Renderer for the IBM MT/SC Customer Engineer Console.
+ * Renderer for the IBM MT/SC Customer Engineer Console (Picture 3).
  *
- * Renders the full hardware control panel into an AnsiTerminal buffer:
- * - 11 CE Display Lamps
+ * When `consoleState.faceplateInstalled` is true, delegates to `OperatorConsoleView`
+ * to render the Operator Control Panel (Picture 1) and Tape Reader Console (Picture 2).
+ *
+ * When `consoleState.faceplateInstalled` is false, renders the exposed CE chassis (Picture 3):
+ * - Top buttons: [Step] [4] [3] ─Display─ [2] [1] [Clear] & INITIAL LOADER (40..47)
+ * - 11 Multiplexed CE Display Lamps with nibble dividers (Display 1..4 & Clock ID..IA B A)
+ * - Bottom 5-position Slide Switches: [Bit|Word|P.S.|Jump|Auto] & [Proc|Edit|Addr|Data|Prog]
  * - 32 Working Registers in Hex & Decimal
- * - Special Words (PSAR, AW, BW, Cycle count)
  * - Centered live disassembly with current step indicator
- * - Core Memory Hex + ASCII dump with region labels
+ * - Core Memory Hex + ASCII dump or Selectric Composer Galley Proof
  * - Console event log and interactive command shortcuts
  */
 object CeConsoleView {
@@ -24,11 +28,16 @@ object CeConsoleView {
     cpu: Ccu,
     consoleState: CeConsoleState
   ): Unit = {
+    if (consoleState.faceplateInstalled) {
+      OperatorConsoleView.render(terminal, cpu, consoleState)
+      return
+    }
+
     terminal.clear()
 
     renderHeader(terminal, cpu, consoleState)
     renderDisplayLamps(terminal, cpu, consoleState)
-    renderRegisters(terminal, cpu)
+    renderRegisters(terminal, cpu, consoleState)
     renderDisassembly(terminal, cpu, consoleState)
 
     if (consoleState.viewGalley) {
@@ -38,10 +47,10 @@ object CeConsoleView {
       }
       renderGalleyProof(terminal, paper, consoleState)
     } else {
-      renderMemoryDump(terminal, cpu, consoleState)
+      renderMemoryDumpBox(terminal, cpu, consoleState)
     }
 
-    renderLog(terminal, consoleState)
+    renderLogBox(terminal, consoleState)
     renderFooter(terminal, consoleState)
   }
 
@@ -50,7 +59,8 @@ object CeConsoleView {
     cpu: Ccu,
     state: CeConsoleState
   ): Unit = {
-    val title = "IBM 72 COMPOSER CONTROL UNIT (CCU) MODEL 6320 ─ CE CONSOLE"
+    val title =
+      s"IBM 72 COMPOSER CONTROL UNIT (CCU) MODEL 6320 ─ CE CONSOLE [${state.stepGranularity.label}/${state.editSelector.label}]"
     terminal.drawBox(0, 0, terminal.width, 3, title, Some(AnsiColor.Cyan))
 
     val psar = cpu.memory.psar
@@ -72,64 +82,57 @@ object CeConsoleView {
     cpu: Ccu,
     state: CeConsoleState
   ): Unit = {
-    terminal.drawBox(0, 3, terminal.width, 3, "CE DISPLAY LAMPS", Some(AnsiColor.Cyan))
+    val boxTitle = s"CE DISPLAY LAMPS ─ [${state.displayMode.rowLabel}: ${state.displayMode.description}]"
+    terminal.drawBox(0, 3, terminal.width, 3, boxTitle, Some(AnsiColor.Cyan))
 
-    // Lamp states
-    val loOn   = cpu.state.low
-    val eqOn   = cpu.state.equal
-    val inhOn  = cpu.state.inhibit
-    val mpxOn  = cpu.state.multiplex
-    val rdyOn  = !cpu.state.inhibit && !cpu.state.halted
-    val errOn  = cpu.ioBus match {
-      case sys: mtsc.periph.SystemIoBus => sys.rightTape.parityError || sys.leftTape.parityError
-      case _ => false
-    }
-    val runOn  = !cpu.state.halted
-    val tapeOn = (cpu.ioBus match {
-      case sys: mtsc.periph.SystemIoBus => sys.rightTape.cycleRemaining > 0 || sys.leftTape.cycleRemaining > 0
-      case _ => false
-    }) || cpu.state.lastInsn.exists {
-      case mtsc.isa.Instruction.Input(dev, _) => dev == Device.RightTape || dev == Device.LeftTape
-      case _ => false
-    }
-    val prntOn = (cpu.ioBus match {
-      case sys: mtsc.periph.SystemIoBus => sys.translator.busy || sys.translator.cycleRemaining > 0
-      case _ => false
-    }) || cpu.state.lastInsn.exists {
-      case mtsc.isa.Instruction.Output(dev, _, _, _) => dev == Device.Translator
-      case _ => false
-    } || cpu.state.multiplex
-    val stepOn = state.mode == CeConsoleMode.SingleStep
-    val pwrOn  = state.powerOn
-
-    val lamps = List(
-      ("LO",   loOn,   AnsiColor.BrightYellow),
-      ("EQ",   eqOn,   AnsiColor.BrightYellow),
-      ("INH",  inhOn,  AnsiColor.BrightRed),
-      ("MPX",  mpxOn,  AnsiColor.BrightCyan),
-      ("RDY",  rdyOn,  AnsiColor.BrightGreen),
-      ("ERR",  errOn,  AnsiColor.BrightRed),
-      ("RUN",  runOn,  AnsiColor.BrightGreen),
-      ("TAPE", tapeOn, AnsiColor.BrightYellow),
-      ("PRNT", prntOn, AnsiColor.BrightCyan),
-      ("STEP", stepOn, AnsiColor.BrightMagenta),
-      ("PWR",  pwrOn,  AnsiColor.BrightGreen)
-    )
-
-    var x = 3
-    for ((label, on, activeColor) <- lamps) {
-      val (fg, bold, inverse) = if (on) {
-        (Some(activeColor), true, true)
+    // Render the 11 multiplexed CE lamps from Picture 3 (with nibble dividers between 3|4 and 7|8)
+    val ceLamps = state.computeLamps(cpu)
+    var x = 2
+    for (idx <- ceLamps.indices) {
+      val lamp = ceLamps(idx)
+      val rawLbl = if (lamp.activeLabel.nonEmpty) lamp.activeLabel else lamp.spec.ceTopLip
+      val (fg, bold, inv) = if (lamp.isOn) {
+        val c = if (lamp.spec.isRedLens) AnsiColor.BrightRed else AnsiColor.BrightYellow
+        (Some(c), true, true)
       } else {
-        (Some(AnsiColor.Gray), false, false)
+        val c = if (lamp.spec.isRedLens) AnsiColor.Red else AnsiColor.Gray
+        (Some(c), false, false)
       }
-      terminal.writeText(x, 4, f"[$label%4s]", fg, bold = bold, inverse = inverse)
-      x += 9
+      terminal.writeText(x, 4, f"[$rawLbl%4s]", fg, bold = bold, inverse = inv)
+      x += 6
+      if (idx == 2 || idx == 6) {
+        terminal.writeText(x, 4, "│", Some(AnsiColor.Cyan), bold = true)
+        x += 1
+      }
+    }
+
+    // Core status badges on the right of the lamp bar (LO, EQ, INH, MPX, RUN, PWR)
+    val loOn  = cpu.state.low
+    val inhOn = cpu.state.inhibit
+    val runOn = !cpu.state.halted
+    val pwrOn = state.powerOn
+    val summaryBadges = List(
+      ("LO",  loOn,  AnsiColor.BrightYellow),
+      ("INH", inhOn, AnsiColor.BrightRed),
+      ("RUN", runOn, AnsiColor.BrightGreen),
+      ("PWR", pwrOn, AnsiColor.BrightGreen)
+    )
+    var bx = 72
+    for ((label, on, activeColor) <- summaryBadges) {
+      val (fg, bold, inv) = if (on) (Some(activeColor), true, true) else (Some(AnsiColor.Gray), false, false)
+      terminal.writeText(bx, 4, f"[$label%4s]", fg, bold = bold, inverse = inv)
+      bx += 7
     }
   }
 
-  private def renderRegisters(terminal: AnsiTerminal, cpu: Ccu): Unit = {
-    terminal.drawBox(0, 6, terminal.width, 10, "32 WORKING REGISTERS (BYTES 0..63)", Some(AnsiColor.Cyan))
+  private def renderRegisters(
+    terminal: AnsiTerminal,
+    cpu: Ccu,
+    state: CeConsoleState
+  ): Unit = {
+    val sliderInfo =
+      s"32 WORKING REGISTERS (BYTES 0..63) ─ Sliders: [${state.stepGranularity.label}] [${state.editSelector.label}] │ Display:[1-4/0]"
+    terminal.drawBox(0, 6, terminal.width, 10, sliderInfo, Some(AnsiColor.Cyan))
 
     // 4 columns x 8 rows
     val colWidth = 25
@@ -185,7 +188,7 @@ object CeConsoleView {
     }
   }
 
-  private def renderMemoryDump(
+  def renderMemoryDumpBox(
     terminal: AnsiTerminal,
     cpu: Ccu,
     state: CeConsoleState
@@ -255,7 +258,7 @@ object CeConsoleView {
     else "Special Registers (BW/AW/PSAR)"
   }
 
-  private def renderLog(terminal: AnsiTerminal, state: CeConsoleState): Unit = {
+  def renderLogBox(terminal: AnsiTerminal, state: CeConsoleState): Unit = {
     val boxH = 7
     val boxY = 27
     terminal.drawBox(0, boxY, terminal.width, boxH, "CONSOLE LOG & PERIPHERAL EVENTS", Some(AnsiColor.Cyan))
@@ -271,8 +274,8 @@ object CeConsoleView {
     val boxH = 4
     terminal.drawBox(0, boxY, terminal.width, boxH, "STATUS & COMMANDS", Some(AnsiColor.Cyan))
 
-    val cmds = "[s] Step  [r] Run  [a] Pacing  [v] Galley/Mem  [t] Tape  [e] Err  [l] Load  [q] Quit"
-    terminal.writeText(2, boxY + 1, cmds, Some(AnsiColor.BrightCyan), bold = true)
+    val cmds = "[f] Faceplate(Op)  [1-4/0] Display  [s] Step  [r] Run  [g/m] Sliders  [i] InitLdr  [v] Galley/Mem  [q] Quit"
+    terminal.writeText(2, boxY + 1, cmds.take(terminal.width - 4), Some(AnsiColor.BrightCyan), bold = true)
 
     val statusText = s"Status: ${state.statusMessage}"
     terminal.writeText(2, boxY + 2, statusText.take(terminal.width - 4), Some(AnsiColor.BrightYellow))
