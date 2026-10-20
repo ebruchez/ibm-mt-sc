@@ -3,9 +3,9 @@ package mtsc.cli
 import mtsc.types.*
 import mtsc.cpu.StepResult
 import mtsc.memory.CoreMemory
-import mtsc.periph.{MtscSystem, SystemIoBus, TapeCartridge, TapeReader}
+import mtsc.periph.{ConsoleKey, MtscSystem, SystemIoBus, TapeCartridge, TapeConsoleButton, TapeReader}
 import mtsc.diag.{ContinuousComposerRoutine, DiagnosticPrograms, EscapementRoutine}
-import mtsc.console.{AnsiTerminal, CeConsoleState, CeConsoleView, CeConsoleMode}
+import mtsc.console.{AnsiTerminal, CeConsoleMode, CeConsoleState, CeConsoleView, CeDisplayMode, InitialLoaderTable}
 
 /**
  * Main Interactive Customer Engineer Console Debugger for the IBM MT/SC CCU.
@@ -17,6 +17,7 @@ import mtsc.console.{AnsiTerminal, CeConsoleState, CeConsoleView, CeConsoleMode}
 object Main {
 
   private var currentProgramIndex: Int = 0
+  private var currentTapeButtonIndex: Int = 0
 
   def main(args: Array[String]): Unit = {
     println("Initializing IBM MT/SC CCU 6320 Emulator...")
@@ -35,6 +36,8 @@ object Main {
         consoleState.pacingSpeed = 2.0
       } else if (arg == "--5x") {
         consoleState.pacingSpeed = 5.0
+      } else if (arg == "--operator" || arg == "--panel") {
+        consoleState.faceplateInstalled = true
       } else if (!arg.startsWith("-")) {
         initialFile = Some(arg)
       }
@@ -122,7 +125,15 @@ object Main {
         System.out.flush()
 
         val input = readCommand(rawModeEnabled)
-        running = handleCommand(input.trim, system, consoleState, terminal, rawModeEnabled)
+        running = handleCommand(
+          input.trim,
+          system,
+          consoleState,
+          terminal,
+          rawModeEnabled,
+          mountFile,
+          () => runPaced(system, consoleState, terminal, rawModeEnabled)
+        )
       }
     } finally {
       if (rawModeEnabled) {
@@ -132,18 +143,43 @@ object Main {
     }
   }
 
-  private def handleCommand(
+  def handleCommand(
     cmd: String,
     system: MtscSystem,
     consoleState: CeConsoleState,
     terminal: AnsiTerminal,
-    rawMode: Boolean
+    rawMode: Boolean,
+    mountFileFn: (String, MtscSystem, CeConsoleState) => Boolean = (_, _, _) => false,
+    runFn: () => Unit = () => ()
   ): Boolean = {
     if (cmd.equalsIgnoreCase("q") || cmd.equalsIgnoreCase("quit") || cmd.equalsIgnoreCase("exit")) {
       return false
     }
 
-    cmd.toLowerCase match {
+    val lower = cmd.toLowerCase
+
+    // If Operator Faceplate is installed and digits 0..9 or START/R are pressed during Setup
+    if (consoleState.faceplateInstalled && lower.length == 1 && lower.charAt(0).isDigit) {
+      val digit = lower.charAt(0) - '0'
+      ConsoleKey.fromDigit(digit).foreach { key =>
+        val msg = system.operatorPanel.pressKey(key)
+        consoleState.statusMessage = msg
+        consoleState.log(s"Operator Keypad: $msg")
+      }
+      return true
+    }
+
+    if (consoleState.faceplateInstalled && (lower == "" || lower == "c" || lower == "start") && system.operatorPanel.activeSetupParam.isDefined) {
+      val msg = system.operatorPanel.pressKey(ConsoleKey.Start)
+      consoleState.statusMessage = msg
+      consoleState.log(s"Operator START: $msg")
+      return true
+    }
+
+    lower match {
+      case "f" | "faceplate" =>
+        consoleState.toggleFaceplate()
+
       case "s" | "" =>
         // Single step
         val prevAddr = system.memory.psar
@@ -164,10 +200,19 @@ object Main {
         }
 
       case "r" | "run" =>
-        runPaced(system, consoleState, terminal, rawMode)
+        runFn()
 
       case "a" | "anim" | "pacing" =>
-        consoleState.realTimePacing = !consoleState.realTimePacing
+        if (!consoleState.realTimePacing) {
+          consoleState.realTimePacing = true
+          consoleState.pacingSpeed = 1.0
+        } else if (consoleState.pacingSpeed == 1.0) {
+          consoleState.pacingSpeed = 2.0
+        } else if (consoleState.pacingSpeed == 2.0) {
+          consoleState.pacingSpeed = 5.0
+        } else {
+          consoleState.realTimePacing = false
+        }
         val stateStr = if (consoleState.realTimePacing) {
           f"ENABLED at ${consoleState.pacingSpeed}%.0fx (${(14 * consoleState.pacingSpeed).toInt} cps)"
         } else {
@@ -177,16 +222,19 @@ object Main {
         consoleState.log(s"Pacing $stateStr")
 
       case "1" =>
-        consoleState.realTimePacing = true
-        consoleState.pacingSpeed = 1.0
-        consoleState.statusMessage = "Speed set to 1x (14 cps authentic typing speed)."
-        consoleState.log("Speed set to 1x (14 cps)")
+        consoleState.selectDisplayMode(CeDisplayMode.Display1)
 
       case "2" =>
-        consoleState.realTimePacing = true
-        consoleState.pacingSpeed = 2.0
-        consoleState.statusMessage = "Speed set to 2x (28 cps double speed)."
-        consoleState.log("Speed set to 2x (28 cps)")
+        consoleState.selectDisplayMode(CeDisplayMode.Display2)
+
+      case "3" =>
+        consoleState.selectDisplayMode(CeDisplayMode.Display3)
+
+      case "4" =>
+        consoleState.selectDisplayMode(CeDisplayMode.Display4)
+
+      case "0" =>
+        consoleState.selectDisplayMode(CeDisplayMode.ClockDefault)
 
       case "5" =>
         consoleState.realTimePacing = true
@@ -194,10 +242,52 @@ object Main {
         consoleState.statusMessage = "Speed set to 5x (70 cps fast forward)."
         consoleState.log("Speed set to 5x (70 cps)")
 
-      case "0" | "max" =>
+      case "max" =>
         consoleState.realTimePacing = false
         consoleState.statusMessage = "Pacing disabled (instant execution)."
         consoleState.log("Pacing disabled (instant)")
+
+      case "g" | "granularity" =>
+        consoleState.cycleStepGranularity()
+
+      case "m" | "mode" =>
+        consoleState.cycleEditSelector()
+
+      case "i" | "init" | "loader" =>
+        InitialLoaderTable.loadIntoMemory(system.memory, paperTape = false, leftStation = false)
+        consoleState.log("Keyed 8-byte INITIAL LOADER into Core Memory (bytes 40..47, PSAR=42).")
+        consoleState.statusMessage = "INITIAL LOADER keyed into memory addresses 40..47 (PSAR = 0x02A)."
+
+      case "p" | "setup" =>
+        val nextParam = system.operatorPanel.advanceSetupPrompt(includeSecondary = true)
+        nextParam match {
+          case Some(param) =>
+            consoleState.statusMessage = s"Setup [${param.label}]: ${param.description}. Key digits then Enter/c (START)."
+            consoleState.log(s"Operator Setup prompt: ${param.label}")
+          case None =>
+            consoleState.statusMessage = "Operator Setup sequence complete. Press [r] to run composition."
+            consoleState.log("Operator Setup sequence complete.")
+        }
+
+      case "k" | "linestop" =>
+        val msg = system.operatorPanel.pressKey(ConsoleKey.KeyR)
+        consoleState.statusMessage = msg
+        consoleState.log(msg)
+
+      case "u" | "transport" =>
+        val buttons = Array(
+          TapeConsoleButton.Reread,
+          TapeConsoleButton.Skip,
+          TapeConsoleButton.Search,
+          TapeConsoleButton.UnloadRight,
+          TapeConsoleButton.CoverUnlock,
+          TapeConsoleButton.LoadRight
+        )
+        val btn = buttons(currentTapeButtonIndex % buttons.length)
+        currentTapeButtonIndex += 1
+        val msg = system.pressTapeButton(btn)
+        consoleState.statusMessage = msg
+        consoleState.log(s"Tape Console [${btn.topLabel} ${btn.bottomLabel}]: $msg")
 
       case "v" =>
         consoleState.viewGalley = !consoleState.viewGalley
@@ -216,7 +306,7 @@ object Main {
 
       case s if s.startsWith("t ") || s.startsWith("tape ") =>
         val path = s.substring(s.indexOf(' ') + 1).trim
-        mountFile(path, system, consoleState)
+        mountFileFn(path, system, consoleState)
 
       case "e" =>
         if (system.rightTape.injectParityError()) {
@@ -226,16 +316,10 @@ object Main {
           consoleState.statusMessage = "Cannot inject parity error: no tape mounted or end reached."
         }
 
-      case "m" | "mode" =>
-        consoleState.cycleMode()
-
       case "x" | "reset" =>
         system.reset()
         consoleState.log("CCU & I/O Bus Reset to power-on state (PSAR = 0x222).")
         consoleState.statusMessage = "CPU Reset."
-
-      case "p" | "pause" =>
-        consoleState.statusMessage = "Execution paused."
 
       case "l" | "load" =>
         val all = DiagnosticPrograms.AllPrograms
@@ -268,7 +352,7 @@ object Main {
         }
 
       case _ =>
-        consoleState.statusMessage = s"Unknown command '$cmd'. Press [s] Step, [r] Run, [a] Pacing, [v] Galley, [t] Tape, [e] Err, [l] Load, [q] Quit."
+        consoleState.statusMessage = s"Unknown command '$cmd'. Press [f] Faceplate, [1-4/0] Display, [s] Step, [r] Run, [p] Setup, [u] Tape, [q] Quit."
     }
     true
   }

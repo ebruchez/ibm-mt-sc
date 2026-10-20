@@ -242,4 +242,44 @@ class CeConsoleSuite extends munit.FunSuite {
     assert(rendered.contains("UNLOCK"))
     assert(rendered.contains("UNLOAD"))
   }
+
+  test("Main.handleCommand wires interactive CE and Operator console shortcuts") {
+    import mtsc.cli.Main
+    import mtsc.periph.{MtscSystem, SetupParam}
+
+    val sys = new MtscSystem()
+    val state = new CeConsoleState()
+    val term = new AnsiTerminal(width = 104, height = 38)
+
+    // In CE mode: [1]..[4]/[0] select Display modes, [g]/[m] cycle sliders, [i] loads Initial Loader
+    Main.handleCommand("3", sys, state, term, rawMode = true)
+    assertEquals(state.displayMode, CeDisplayMode.Display3)
+
+    Main.handleCommand("0", sys, state, term, rawMode = true)
+    assertEquals(state.displayMode, CeDisplayMode.ClockDefault)
+
+    Main.handleCommand("g", sys, state, term, rawMode = true)
+    assertEquals(state.stepGranularity, CeStepGranularity.Bit)
+
+    Main.handleCommand("m", sys, state, term, rawMode = true)
+    assertEquals(state.editSelector, CeEditSelector.Edit)
+
+    Main.handleCommand("i", sys, state, term, rawMode = true)
+    assertEquals(sys.memory.psar, Address(42))
+
+    // [f] installs the Operator Faceplate (Picture 1)
+    Main.handleCommand("f", sys, state, term, rawMode = true)
+    assert(state.faceplateInstalled)
+
+    // [p] starts Operator Setup prompt (CLEAR), '2' keys YES, 'c' (START) commits and advances to MERGE
+    Main.handleCommand("p", sys, state, term, rawMode = true)
+    assertEquals(sys.operatorPanel.activeSetupParam, Some(SetupParam.Clear))
+
+    Main.handleCommand("2", sys, state, term, rawMode = true)
+    assertEquals(sys.operatorPanel.entryBuffer, "2")
+
+    Main.handleCommand("c", sys, state, term, rawMode = true)
+    assert(sys.operatorPanel.clearDecision)
+    assertEquals(sys.operatorPanel.activeSetupParam, Some(SetupParam.Merge))
+  }
 }
