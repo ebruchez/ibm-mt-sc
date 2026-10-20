@@ -22,12 +22,20 @@ class TapeReader(
   var cycleRemaining: Int = 0
   var readCount: Long = 0
 
+  // Tape Transport Console states (Picture 2 & Training Guide p. 15)
+  var isLoadedOnHub: Boolean = false // True when LOAD has threaded the tape from the cartridge
+  var coverUnlocked: Boolean = true  // Interlocked: can only unlock when tape is unloaded into cartridge
+  var searching: Boolean = false     // True while a Reference Code search is active
+
   def mount(cartridge: TapeCartridge): Unit = {
     mountedCartridge = Some(cartridge)
     headPosition = 0
     dataLatches = 0
     parityError = false
     cycleRemaining = 0
+    isLoadedOnHub = true
+    coverUnlocked = false // Cover pin locks when tape is loaded
+    searching = false
   }
 
   def unmount(): Option[TapeCartridge] = {
@@ -36,10 +44,109 @@ class TapeReader(
     headPosition = 0
     parityError = false
     cycleRemaining = 0
+    isLoadedOnHub = false
+    coverUnlocked = true
+    searching = false
     cart
   }
 
-  def isTapeLoaded: Boolean = mountedCartridge.isDefined
+  /**
+   * Simulates pressing LOAD LEFT or LOAD RIGHT on the Tape Transport Console (Picture 2).
+   * Threads the mounted cartridge to the first recording position and locks the station cover.
+   */
+  def pressLoad(): Boolean = {
+    if (mountedCartridge.isDefined) {
+      isLoadedOnHub = true
+      coverUnlocked = false
+      headPosition = 0
+      parityError = false
+      searching = false
+      true
+    } else {
+      false
+    }
+  }
+
+  /**
+   * Simulates pressing UNLOAD LEFT or UNLOAD RIGHT on the Tape Transport Console (Picture 2).
+   * Rewinds the tape back into the cartridge so the station cover can be unlocked.
+   */
+  def pressUnload(): Boolean = {
+    if (mountedCartridge.isDefined) {
+      headPosition = 0
+      isLoadedOnHub = false
+      parityError = false
+      searching = false
+      true
+    } else {
+      false
+    }
+  }
+
+  /**
+   * Simulates pressing COVER UNLOCK on the Tape Transport Console (Picture 2).
+   * Per Training Guide p. 15, the cover pin can only retract when the tape is unloaded into the cartridge.
+   */
+  def pressCoverUnlock(): Boolean = {
+    if (!isLoadedOnHub) {
+      coverUnlocked = true
+      true
+    } else {
+      false
+    }
+  }
+
+  /**
+   * Simulates pressing REREAD on the Tape Transport Console (Picture 2).
+   * Backsteps the tape to the start of the current line (or track 0) and clears parityError.
+   */
+  def pressReread(): Int = {
+    parityError = false
+    mountedCartridge match {
+      case None => 0
+      case Some(cart) =>
+        // Backstep to the previous Carrier Return or track 0
+        var pos = math.max(0, headPosition - 1)
+        while (pos > 0 && cart.getFrame(pos - 1).exists(f => f.data7 != TapeCartridge.CarrierReturn && f.rawByte != TapeCartridge.EndOfBlock)) {
+          pos -= 1
+        }
+        headPosition = pos
+        headPosition
+    }
+  }
+
+  /**
+   * Simulates pressing SKIP on the Tape Transport Console (Picture 2).
+   * Advances the tape past the current line (next Carrier Return) or block sentinel.
+   */
+  def pressSkip(): Int = {
+    parityError = false
+    mountedCartridge match {
+      case None => 0
+      case Some(cart) =>
+        while (headPosition < cart.length) {
+          val frame = cart.getFrame(headPosition).get
+          headPosition += 1
+          if (frame.data7 == TapeCartridge.CarrierReturn || frame.rawByte == TapeCartridge.EndOfBlock) {
+            return headPosition
+          }
+        }
+        headPosition
+    }
+  }
+
+  /**
+   * Simulates pressing SEARCH on the Tape Transport Console (Picture 2).
+   * Advances the tape to the next Reference Code / block boundary.
+   */
+  def pressSearch(): Int = {
+    searching = true
+    val pos = pressSkip()
+    searching = false
+    pos
+  }
+
+  def isTapeLoaded: Boolean = mountedCartridge.isDefined && isLoadedOnHub
 
   def isAtEnd: Boolean =
     mountedCartridge.forall(_.isAtEnd(headPosition))
@@ -83,7 +190,7 @@ class TapeReader(
    *    - Returns IoResult.Ready(character).
    */
   def read(): IoResult[Int] = {
-    if (cycleRemaining > 0) {
+    if (cycleRemaining > 0 || !isLoadedOnHub) {
       return IoResult.Busy
     }
 
@@ -127,5 +234,6 @@ class TapeReader(
     dataLatches = 0
     parityError = false
     cycleRemaining = 0
+    searching = false
   }
 }

@@ -10,7 +10,8 @@ import mtsc.cpu.{IoBus, IoResult}
 class SystemIoBus(
   val rightTape: TapeReader = new TapeReader(Device.RightTape),
   val leftTape: TapeReader = new TapeReader(Device.LeftTape),
-  val translator: ComposerTranslator = new ComposerTranslator()
+  val translator: ComposerTranslator = new ComposerTranslator(),
+  val operatorPanel: OperatorPanelState = new OperatorPanelState()
 ) extends IoBus {
 
   var consoleLights: Int = 0
@@ -18,7 +19,7 @@ class SystemIoBus(
   override def read(device: Device): IoResult[Int] = device match {
     case Device.RightTape => rightTape.read()
     case Device.LeftTape  => leftTape.read()
-    case Device.Keyboard  => IoResult.Busy // Operator keyboard not keyed
+    case Device.Keyboard  => operatorPanel.readKeyboardCode()
     case _                => IoResult.Ready(0)
   }
 
@@ -50,6 +51,7 @@ class SystemIoBus(
     rightTape.reset()
     leftTape.reset()
     translator.reset()
+    operatorPanel.reset()
     consoleLights = 0
   }
 }

@@ -42,9 +42,23 @@ class Ccu(
 
     // I-0 Time: Read instruction from PSAR and advance PSAR by +2
     val fetchAddr = memory.psar
+    state.mal = fetchAddr
     val rawWord = memory.readWord(fetchAddr)
     memory.aWord = rawWord // A-Word holds the instruction during execution
     memory.psar = fetchAddr + 2
+
+    // I-1 Time: Load Operational Code Latches (OP 1..6 = bits 15..10, OP 7 = bit 0)
+    val raw = rawWord.unsigned
+    val op1 = (raw >> 15) & 1
+    val op2 = (raw >> 14) & 1
+    val op3 = (raw >> 13) & 1
+    val op4 = (raw >> 12) & 1
+    val op5 = (raw >> 11) & 1
+    val op6 = (raw >> 10) & 1
+    val op7 = raw & 1
+    state.opCodeLatches = op1 | (op2 << 1) | (op3 << 2) | (op4 << 3) | (op5 << 4) | (op6 << 5) | (op7 << 6)
+    state.pBuffer = raw & 0xf
+    state.qBuffer = (raw >> 4) & 0xf
 
     // Decode instruction
     val insn = Decoder.decode(rawWord) match {
@@ -271,10 +285,15 @@ class Ccu(
     case Instruction.Output(device, sourceReg, indirect, multiplex) =>
       val byte = if (indirect) {
         val ptr = Address(memory.readReg(sourceReg).unsigned)
+        state.mal = ptr
         memory.readByte(ptr)
       } else {
+        state.mal = sourceReg.byteAddress
         memory.readReg(sourceReg).lowByte
       }
+
+      state.outputReg = byte & 0xff
+      state.pBuffer = byte & 0xf
 
       // Halt code: 0xFF terminates multiplex mode
       if (byte == 0xff) {
@@ -306,6 +325,8 @@ class Ccu(
     val r0 = RegId(0)
     val ptr = Address(memory.readReg(r0).unsigned)
     val byte = memory.readByte(ptr)
+    state.mal = ptr
+    state.outputReg = byte & 0xff
 
     // Increment R0 pointer by 1
     val nextPtr = (memory.readReg(r0).unsigned + 1) & 0x7ff

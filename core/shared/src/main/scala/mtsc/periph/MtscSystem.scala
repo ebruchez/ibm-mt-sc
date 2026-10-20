@@ -21,6 +21,52 @@ class MtscSystem(
   def leftTape: TapeReader = ioBus.leftTape
   def translator: ComposerTranslator = ioBus.translator
   def paper: ComposerPaper = translator.paper
+  def operatorPanel: OperatorPanelState = ioBus.operatorPanel
+
+  /**
+   * Handles pressing one of the 8 pushbuttons on the Magnetic Tape Reader Console (Picture 2).
+   */
+  def pressTapeButton(button: TapeConsoleButton): String = button match {
+    case TapeConsoleButton.LoadRight =>
+      if (rightTape.pressLoad()) s"Right Tape loaded to BOT track 0 (cover locked)."
+      else "Right Station has no tape cartridge mounted."
+
+    case TapeConsoleButton.UnloadRight =>
+      if (rightTape.pressUnload()) "Right Tape rewound into cartridge (ready to unlock cover)."
+      else "Right Station has no tape to unload."
+
+    case TapeConsoleButton.LoadLeft =>
+      if (leftTape.pressLoad()) s"Left Tape loaded to BOT track 0 (cover locked)."
+      else "Left Station has no tape cartridge mounted."
+
+    case TapeConsoleButton.UnloadLeft =>
+      if (leftTape.pressUnload()) "Left Tape rewound into cartridge (ready to unlock cover)."
+      else "Left Station has no tape to unload."
+
+    case TapeConsoleButton.CoverUnlock =>
+      val rOk = rightTape.pressCoverUnlock()
+      val lOk = leftTape.pressCoverUnlock()
+      if (rOk && lOk) "Tape Station Cover unlocked."
+      else "Cover interlock active: unload tape into cartridge before unlocking cover."
+
+    case TapeConsoleButton.Reread =>
+      val active = if (leftTape.isTapeLoaded && !rightTape.isTapeLoaded) leftTape else rightTape
+      val name = if (active eq leftTape) "Left" else "Right"
+      val pos = active.pressReread()
+      s"$name Tape REREAD: backstepped to track $pos (parity error cleared)."
+
+    case TapeConsoleButton.Skip =>
+      val active = if (leftTape.isTapeLoaded && !rightTape.isTapeLoaded) leftTape else rightTape
+      val name = if (active eq leftTape) "Left" else "Right"
+      val pos = active.pressSkip()
+      s"$name Tape SKIP: advanced to track $pos."
+
+    case TapeConsoleButton.Search =>
+      val active = if (leftTape.isTapeLoaded && !rightTape.isTapeLoaded) leftTape else rightTape
+      val name = if (active eq leftTape) "Left" else "Right"
+      val pos = active.pressSearch()
+      s"$name Tape SEARCH: advanced to reference track $pos."
+  }
 
   def loadTape(station: Device, cartridge: TapeCartridge): Unit = {
     station match {
