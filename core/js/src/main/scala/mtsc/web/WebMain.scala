@@ -52,6 +52,7 @@ object WebMain {
     EscapementRoutine.initializeTable(system.memory)
 
     if (prog == DiagnosticPrograms.ContinuousCompositionDemo) {
+      system.operatorPanel.measure = 140
       if (!system.rightTape.isTapeLoaded) {
         system.loadTape(
           Device.RightTape,
@@ -59,6 +60,7 @@ object WebMain {
         )
       }
     } else if (prog == DiagnosticPrograms.EndToEndCompositionDemo || prog == DiagnosticPrograms.TapeBootstrapLoader) {
+      system.operatorPanel.measure = 100
       val sample = "The electronic logic used in the CCU is in the SLD family."
       system.loadTape(Device.RightTape, TapeCartridge.fromText(sample, "MTSC Test Tape"))
     }
@@ -309,6 +311,10 @@ object WebMain {
     })
     onClick("btn-clear-galley", () => {
       system.paper.clear()
+      val vp = doc.getElementById("galley-scroll-viewport")
+      if (vp != null && !js.isUndefined(vp)) {
+        vp.scrollTop = 0
+      }
       consoleState.statusMessage = "Fresh camera-ready galley sheet loaded into Selectric Composer."
     })
     onClick("btn-sound-toggle", () => {
@@ -734,25 +740,86 @@ object WebMain {
     val container = doc.getElementById("galley-lines")
     if (container == null || js.isUndefined(container)) return
 
-    val lines = system.paper.lines
+    val rulerEl = doc.getElementById("galley-ruler")
+    val gLines = system.paper.galleyLines
+    val targetMeasure = system.operatorPanel.measure
+
+    // 1. Render Typographic Pica Ruler with Right Measure Line
+    if (rulerEl != null && !js.isUndefined(rulerEl)) {
+      val rsb = new StringBuilder()
+      // Pica ticks every 3 picas (36 units) up to 21 picas (252 units)
+      val picas = List(0, 3, 6, 9, 12, 15, 18, 21)
+      for (p <- picas) {
+        val u = p * 12
+        rsb.append(s"""<div class="ruler-tick" style="left: calc(var(--unit, 2.4px) * $u);"><span>${p}p</span></div>""")
+      }
+      // Target Measure Marker & Right Margin Guide
+      rsb.append(s"""<div class="ruler-measure-marker" style="left: calc(var(--unit, 2.4px) * $targetMeasure);" title="Target Measure: $targetMeasure units">""")
+      rsb.append(s"""<span class="measure-marker-label">▼ ${targetMeasure}u</span>""")
+      rsb.append("</div>")
+      rulerEl.innerHTML = rsb.toString()
+    }
+
+    // 2. Render Camera-Ready Positioned Lines
     val sb = new StringBuilder()
-    if (lines.isEmpty) {
+    if (gLines.isEmpty) {
       sb.append("""<div class="galley-placeholder">Camera-ready galley sheet loaded in the IBM Selectric Composer.<br>Click <strong>Run Composition</strong> or press <strong>START</strong> on the console to watch justified copy type out at 14 characters per second.</div>""")
     } else {
-      for (i <- lines.indices) {
-        val rawLine = lines(i)
-        val escaped = escapeHtml(rawLine)
-        val isLast = i == lines.length - 1
-        val cursorHtml = if (isLast && runTimerId.isDefined) """<span class="typeball-cursor" title="Selectric Typing Element">●</span>""" else ""
-        sb.append(f"""<div class="galley-line"><span class="galley-linenum">${i + 1}%02d</span><span class="galley-text">$escaped$cursorHtml</span></div>""")
+      // Continuous vertical guideline down the entire scroll content
+      sb.append(s"""<div id="galley-measure-guide" class="galley-measure-guide" style="left: calc(var(--unit, 2.4px) * $targetMeasure + 36px);" title="Target Measure Margin: $targetMeasure units"></div>""")
+
+      val isRunning = runTimerId.isDefined
+      for (i <- gLines.indices) {
+        val gLine = gLines(i)
+        val isLast = i == gLines.length - 1
+        val num = f"${i + 1}%02d"
+        val justAttr = if (gLine.isJustified) "justified" else "ragged"
+
+        sb.append(s"""<div class="galley-line" data-align="$justAttr">""")
+        sb.append(s"""<span class="galley-linenum">$num</span>""")
+        sb.append(s"""<div class="galley-text-frame" style="--line-measure: $targetMeasure;">""")
+
+        // Invisible selectable text layer for clean copying & screen-readers
+        val plainEsc = escapeHtml(gLine.text)
+        sb.append(s"""<span class="galley-copy-layer" aria-hidden="false">$plainEsc</span>""")
+
+        // Exact physical escapement glyph positioning
+        for (g <- gLine.glyphs) {
+          if (g.ch == ' ') {
+            val title = s"Space Band: ${g.widthUnits} units (x: ${g.xUnits}..${g.xUnits + g.widthUnits})"
+            sb.append(s"""<span class="galley-space" style="left: calc(var(--unit, 2.4px) * ${g.xUnits}); width: calc(var(--unit, 2.4px) * ${g.widthUnits});" title="$title"></span>""")
+          } else {
+            val esc = escapeHtml(g.ch.toString)
+            val title = s"${g.ch} (${g.widthUnits} units, x: ${g.xUnits})"
+            sb.append(s"""<span class="galley-glyph" style="left: calc(var(--unit, 2.4px) * ${g.xUnits}); width: calc(var(--unit, 2.4px) * ${g.widthUnits});" title="$title">$esc</span>""")
+          }
+        }
+
+        // Live Selectric typing element cursor (red bullet)
+        if (isLast && isRunning) {
+          val curX = system.paper.currentXUnits
+          sb.append(s"""<span class="typeball-cursor" style="left: calc(var(--unit, 2.4px) * $curX);" title="Selectric Typing Element (Escapement: $curX units)">●</span>""")
+        }
+
+        sb.append("</div></div>")
       }
     }
     container.innerHTML = sb.toString()
 
+    // 3. Auto-scroll to follow typing element when running
+    if (runTimerId.isDefined) {
+      val vp = doc.getElementById("galley-scroll-viewport")
+      if (vp != null && !js.isUndefined(vp)) {
+        vp.scrollTop = vp.scrollHeight
+      }
+    }
+
     val metaEl = doc.getElementById("galley-meta")
     if (metaEl != null && !js.isUndefined(metaEl)) {
+      val pica = targetMeasure / 12
+      val remU = targetMeasure % 12
       metaEl.textContent =
-        s"Lines: ${lines.length} • Printed Chars: ${system.translator.printCount} • Measure: ${system.operatorPanel.measure} units"
+        s"Lines: ${gLines.length} • Printed Chars: ${system.translator.printCount} • Measure: $targetMeasure units (${pica}p ${remU}u)"
     }
   }
 
