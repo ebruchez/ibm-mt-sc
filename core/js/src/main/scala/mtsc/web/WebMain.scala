@@ -26,6 +26,8 @@ object WebMain {
   private var runTimerId: Option[Int] = None
   private var soundEnabled: Boolean = true
   private var audioCtx: Option[js.Dynamic] = None
+  private var memoryOverlayLayout: String = "2x1k"
+  private var showAsciiInOverlay: Boolean = false
 
   def main(args: Array[String]): Unit = {
     if (js.typeOf(js.Dynamic.global.document) == "undefined") return
@@ -53,6 +55,8 @@ object WebMain {
 
     if (prog == DiagnosticPrograms.ContinuousCompositionDemo) {
       system.operatorPanel.measure = 140
+      system.memory.writeReg(RegId(30), Word(140))
+      system.memory.writeReg(RegId(28), Word(110))
       if (!system.rightTape.isTapeLoaded) {
         system.loadTape(
           Device.RightTape,
@@ -61,6 +65,8 @@ object WebMain {
       }
     } else if (prog == DiagnosticPrograms.EndToEndCompositionDemo || prog == DiagnosticPrograms.TapeBootstrapLoader) {
       system.operatorPanel.measure = 100
+      system.memory.writeReg(RegId(30), Word(100))
+      system.memory.writeReg(RegId(28), Word(70))
       val sample = "The electronic logic used in the CCU is in the SLD family."
       system.loadTape(Device.RightTape, TapeCartridge.fromText(sample, "MTSC Test Tape"))
     }
@@ -370,15 +376,80 @@ object WebMain {
       }
     })
 
-    // Memory Page Navigation in CE Drawer
-    onClick("mem-prev", () => {
-      val cur = consoleState.memoryInspectionAddress.unsigned
-      consoleState.memoryInspectionAddress = Address(math.max(0, cur - 128))
+    // Core Storage "Jump to PSAR" button
+    onClick("btn-mem-psar", () => {
+      val memEl = doc.getElementById("ce-memory-dump")
+      if (memEl != null && !js.isUndefined(memEl)) {
+        val psar = system.memory.psar.unsigned
+        val row = psar / 16
+        val targetScroll = math.max(0.0, (row - 3) * 18.5)
+        memEl.scrollTop = targetScroll
+      }
     })
-    onClick("mem-next", () => {
-      val cur = consoleState.memoryInspectionAddress.unsigned
-      consoleState.memoryInspectionAddress = Address(math.min(1920, cur + 128))
+
+    // Core Storage Full Map Overlay Dialog
+    val overlayDialog = doc.getElementById("mem-overlay-dialog")
+    onClick("btn-mem-expand", () => {
+      if (overlayDialog != null && !js.isUndefined(overlayDialog)) {
+        val psar = system.memory.psar.unsigned
+        val mal  = system.cpu.state.mal.unsigned
+        renderMemoryOverlay(doc, psar, mal)
+        overlayDialog.showModal()
+      }
     })
+    onClick("btn-close-mem-overlay", () => {
+      if (overlayDialog != null && !js.isUndefined(overlayDialog)) {
+        overlayDialog.close()
+      }
+    })
+    onClick("btn-mem-layout-2x1k", () => {
+      memoryOverlayLayout = "2x1k"
+      val b1 = doc.getElementById("btn-mem-layout-2x1k")
+      val b2 = doc.getElementById("btn-mem-layout-64x32")
+      if (b1 != null && !js.isUndefined(b1)) b1.className = "btn-chip active"
+      if (b2 != null && !js.isUndefined(b2)) b2.className = "btn-chip"
+      val psar = system.memory.psar.unsigned
+      val mal  = system.cpu.state.mal.unsigned
+      renderMemoryOverlay(doc, psar, mal)
+    })
+    onClick("btn-mem-layout-64x32", () => {
+      memoryOverlayLayout = "64x32"
+      val b1 = doc.getElementById("btn-mem-layout-2x1k")
+      val b2 = doc.getElementById("btn-mem-layout-64x32")
+      if (b1 != null && !js.isUndefined(b1)) b1.className = "btn-chip"
+      if (b2 != null && !js.isUndefined(b2)) b2.className = "btn-chip active"
+      val psar = system.memory.psar.unsigned
+      val mal  = system.cpu.state.mal.unsigned
+      renderMemoryOverlay(doc, psar, mal)
+    })
+    onClick("btn-mem-toggle-ascii", () => {
+      showAsciiInOverlay = !showAsciiInOverlay
+      val btn = doc.getElementById("btn-mem-toggle-ascii")
+      if (btn != null && !js.isUndefined(btn)) {
+        btn.textContent = if (showAsciiInOverlay) "ASCII: On" else "ASCII: Off"
+        btn.className = if (showAsciiInOverlay) "btn-chip active" else "btn-chip"
+      }
+      val psar = system.memory.psar.unsigned
+      val mal  = system.cpu.state.mal.unsigned
+      renderMemoryOverlay(doc, psar, mal)
+    })
+
+    // Fallback for backdrop click dismissing dialog
+    if (overlayDialog != null && !js.isUndefined(overlayDialog)) {
+      overlayDialog.addEventListener("click", (ev: js.Dynamic) => {
+        if (ev.target == overlayDialog) {
+          val rect = overlayDialog.getBoundingClientRect()
+          val cy = ev.clientY.asInstanceOf[Double]
+          val cx = ev.clientX.asInstanceOf[Double]
+          val isContent =
+            rect.top.asInstanceOf[Double] <= cy && cy <= rect.bottom.asInstanceOf[Double] &&
+            rect.left.asInstanceOf[Double] <= cx && cx <= rect.right.asInstanceOf[Double]
+          if (!isContent) {
+            overlayDialog.close()
+          }
+        }
+      })
+    }
 
     // Keyboard shortcuts
     js.Dynamic.global.window.addEventListener("keydown", (ev: js.Dynamic) => {
@@ -392,6 +463,12 @@ object WebMain {
             consoleState.toggleFaceplate()
             playClickSound(220)
             renderAll(doc)
+          case "Escape" =>
+            val overlay = doc.getElementById("mem-overlay-dialog")
+            if (overlay != null && !js.isUndefined(overlay)) {
+              val isOpen = if (!js.isUndefined(overlay.open)) overlay.open.asInstanceOf[Boolean] else false
+              if (isOpen) overlay.close()
+            }
           case "s" | "S" =>
             stopContinuousRun()
             stepOnce(doc)
@@ -742,7 +819,18 @@ object WebMain {
 
     val rulerEl = doc.getElementById("galley-ruler")
     val gLines = system.paper.galleyLines
-    val targetMeasure = system.operatorPanel.measure
+    val prog = DiagnosticPrograms.AllPrograms(currentProgramIdx)
+    val isCompositionProgram =
+      prog == DiagnosticPrograms.ContinuousCompositionDemo ||
+      prog == DiagnosticPrograms.EndToEndCompositionDemo ||
+      prog == DiagnosticPrograms.EscapementAndJustifyDemo
+
+    val r30 = system.cpu.memory.readReg(RegId(30)).unsigned
+    val targetMeasure =
+      if (isCompositionProgram && r30 >= 30 && r30 <= 940) r30
+      else if (system.operatorPanel.measure >= 30 && system.operatorPanel.measure <= 940) system.operatorPanel.measure
+      else 140
+    system.operatorPanel.measure = targetMeasure
 
     // 1. Render Typographic Pica Ruler with Right Measure Line
     if (rulerEl != null && !js.isUndefined(rulerEl)) {
@@ -849,7 +937,8 @@ object WebMain {
       for (i <- 0 until 32) {
         val w = system.memory.readReg(RegId(i)).unsigned
         val activeCls = if (w != 0) "reg-cell non-zero" else "reg-cell"
-        sb.append(f"""<div class="$activeCls"><span class="reg-name">R$i%02d</span><span class="reg-hex">0x$w%04X</span><span class="reg-dec">$w%5d</span></div>""")
+        val tip = f"Register R$i%02d: 0x$w%04X ($w) | Hi: 0x${w >> 8}%02X, Lo: 0x${w & 0xff}%02X"
+        sb.append(f"""<div class="$activeCls" title="$tip"><span class="reg-name">R$i%02d</span><span class="reg-hex">0x$w%04X</span><span class="reg-dec">$w</span></div>""")
       }
       regsEl.innerHTML = sb.toString()
     }
@@ -871,28 +960,117 @@ object WebMain {
       disEl.innerHTML = sb.toString()
     }
 
-    // Core Memory Hex Dump (8 rows x 16 bytes = 128 bytes)
+    // Core Memory Hex Dump: entire 2,048 bytes (128 rows x 16 bytes = 0x000..0x7FF)
     val memEl = doc.getElementById("ce-memory-dump")
     if (memEl != null && !js.isUndefined(memEl)) {
-      val base = consoleState.memoryInspectionAddress.unsigned & 0x7f0
-      val sb = new StringBuilder()
-      for (r <- 0 until 8) {
-        val rowAddr = (base + r * 16) & 0x7ff
-        val hexSb = new StringBuilder()
-        val ascSb = new StringBuilder()
+      val prevScroll = if (!js.isUndefined(memEl.scrollTop)) memEl.scrollTop.asInstanceOf[Double] else 0.0
+      val sb = new StringBuilder(16384)
+      for (r <- 0 until 128) {
+        val rowAddr = r * 16
+        val hexSb = new StringBuilder(128)
+        val ascSb = new StringBuilder(32)
         for (b <- 0 until 16) {
-          val a = (rowAddr + b) & 0x7ff
+          val a = rowAddr + b
           val v = system.memory.readByte(Address(a))
           val isPsar = a == psar || a == psar + 1
           val byteCls = if (isPsar) "mem-byte psar-byte" else if (v != 0) "mem-byte nz" else "mem-byte"
-          hexSb.append(f"""<span class="$byteCls">$v%02X</span>""")
+          hexSb.append(f"""<span class="$byteCls" title="0x$a%03X ($a): 0x$v%02X ($v)">$v%02X</span>""")
           val ch = if (v >= 32 && v <= 126) escapeHtml(v.toChar.toString) else "·"
           ascSb.append(ch)
         }
-        sb.append(f"""<div class="mem-row"><span class="mem-addr">0x$rowAddr%03X</span><span class="mem-hex">$hexSb</span><span class="mem-ascii">$ascSb</span></div>""")
+        sb.append(f"""<div class="mem-row" id="mem-row-$r"><span class="mem-addr">0x$rowAddr%03X</span><span class="mem-hex">$hexSb</span><span class="mem-ascii">$ascSb</span></div>""")
       }
       memEl.innerHTML = sb.toString()
+      memEl.scrollTop = prevScroll
     }
+
+    // Update Full Map Memory Overlay if open
+    val overlayDialog = doc.getElementById("mem-overlay-dialog")
+    if (overlayDialog != null && !js.isUndefined(overlayDialog)) {
+      val isOpen = if (!js.isUndefined(overlayDialog.open)) overlayDialog.open.asInstanceOf[Boolean] else false
+      if (isOpen) {
+        renderMemoryOverlay(doc, psar, mal)
+      }
+    }
+  }
+
+  private def renderMemoryOverlay(doc: js.Dynamic, psar: Int, mal: Int): Unit = {
+    def setText(id: String, text: String): Unit = {
+      val el = doc.getElementById(id)
+      if (el != null && !js.isUndefined(el)) el.textContent = text
+    }
+
+    val overlayBody = doc.getElementById("mem-overlay-body")
+    if (overlayBody == null || js.isUndefined(overlayBody)) return
+
+    var nzCount = 0
+
+    def renderBlock(title: String, rangeLabel: String, startAddr: Int, numRows: Int): String = {
+      val bsb = new StringBuilder(16384)
+      bsb.append("""<div class="mo-block">""")
+      bsb.append(s"""<div class="mo-block-title"><span>$title</span><span class="mo-range">$rangeLabel</span></div>""")
+
+      // Column header with +00..+1F
+      bsb.append("""<div class="mo-header-row"><span class="mo-addr">ADDR</span>""")
+      for (col <- 0 until 32) {
+        if (col == 16) bsb.append("""<span class="mo-mid-sep"></span>""")
+        bsb.append(f"""<span class="mo-header-col">$col%02X</span>""")
+      }
+      bsb.append("""<span class="mo-ascii">ASCII</span></div>""")
+
+      for (r <- 0 until numRows) {
+        val rowAddr = startAddr + r * 32
+        val hexSb = new StringBuilder(256)
+        val ascSb = new StringBuilder(64)
+        for (b <- 0 until 32) {
+          if (b == 16) hexSb.append("""<span class="mo-mid-sep"></span>""")
+          val a = rowAddr + b
+          val v = system.memory.readByte(Address(a))
+          if (v != 0) nzCount += 1
+
+          val isPsar = a == psar || a == psar + 1
+          val isMal = a == mal && !isPsar
+          val isReg = a < 64
+          val isLoader = a >= 40 && a <= 47
+
+          var cls = "mo-byte"
+          if (isPsar) cls += " psar-byte"
+          else if (isMal) cls += " mal-byte"
+          else if (isLoader) cls += " loader-byte"
+          else if (isReg) cls += " reg-byte"
+          if (v != 0) cls += " nz"
+
+          val regInfo = if (a < 64) s" | R${a / 2}%02d (byte ${a % 2})" else ""
+          val loaderInfo = if (isLoader) " | Initial Loader" else ""
+          val pcInfo = if (isPsar) " | PC (PSAR)" else if (isMal) " | MAL" else ""
+          val chPrint = if (v >= 32 && v <= 126) s"'${v.toChar}'" else "·"
+          val tip = f"0x$a%03X ($a%4d): 0x$v%02X ($v%3d) $chPrint$regInfo$loaderInfo$pcInfo"
+
+          hexSb.append(f"""<span class="$cls" title="$tip">$v%02X</span>""")
+          val ch = if (v >= 32 && v <= 126) escapeHtml(v.toChar.toString) else "·"
+          ascSb.append(ch)
+        }
+        bsb.append(f"""<div class="mo-row"><span class="mo-addr">0x$rowAddr%03X</span>$hexSb<span class="mo-ascii">$ascSb</span></div>""")
+      }
+      bsb.append("</div>")
+      bsb.toString()
+    }
+
+    val bodyHtml = if (memoryOverlayLayout == "64x32") {
+      renderBlock("Core Storage (2,048 Bytes)", "0x000–0x7FF", 0, 64)
+    } else {
+      val b0 = renderBlock("Bank 0 (1,024 Bytes)", "0x000–0x3FF", 0, 32)
+      val b1 = renderBlock("Bank 1 (1,024 Bytes)", "0x400–0x7FF", 1024, 32)
+      b0 + b1
+    }
+
+    setText("overlay-psar", f"0x$psar%03X ($psar)")
+    setText("overlay-mal",  f"0x$mal%03X ($mal)")
+    setText("overlay-nz-count", s"$nzCount")
+
+    val asciiCls = if (showAsciiInOverlay) " show-ascii" else ""
+    overlayBody.className = s"mem-overlay-body layout-$memoryOverlayLayout$asciiCls"
+    overlayBody.innerHTML = bodyHtml
   }
 
   private def escapeHtml(s: String): String =

@@ -424,7 +424,7 @@
         <div class="card-header">
           <div>
             <h2>IBM “Selectric” Composer — Camera-Ready Galley Proof</h2>
-            <p id="galley-meta" class="galley-meta">Lines: 0 • Printed Chars: 0 • Measure: 252 units</p>
+            <p id="galley-meta" class="galley-meta">Lines: 0 • Printed Chars: 0 • Measure: 140 units (11p 8u)</p>
           </div>
           <button id="btn-clear-galley" class="btn-chip">Fresh Galley Sheet</button>
         </div>
@@ -448,7 +448,7 @@
     <!-- Bottom Collapsible Customer Engineer (CE) Hardware Internals Drawer -->
     <details class="ce-drawer" open>
       <summary class="ce-drawer-summary">
-        <span>Customer Engineer (CE) CCU 6320 Hardware Internals — 32 Working Registers, Live Disassembly &amp; 2,048-Byte Ferrite Core Storage</span>
+        <span>Customer Engineer (CE) CCU 6320 Hardware Internals — 32 Working Registers, Live Disassembly &amp; 2,048-Byte Core Memory</span>
         <div class="ce-quick-regs">
           <span>PSAR: <strong id="ce-reg-psar">0x222</strong></span>
           <span>MAL: <strong id="ce-reg-mal">0x222</strong></span>
@@ -475,16 +475,45 @@
         <!-- Core Storage Hex + ASCII Inspector -->
         <div class="ce-panel">
           <div class="mem-panel-header">
-            <h3>Ferrite Core Storage (2,048 Bytes)</h3>
+            <h3>Core Memory (2,048 Bytes • 0x000–0x7FF)</h3>
             <div class="mem-nav">
-              <button id="mem-prev" class="btn-chip">&larr; Prev 128B</button>
-              <button id="mem-next" class="btn-chip">Next 128B &rarr;</button>
+              <button id="btn-mem-psar" class="btn-chip" title="Scroll view to current program counter (PSAR)">Jump to PSAR</button>
+              <button id="btn-mem-expand" class="btn-chip" title="Expand to full 2,048-byte matrix overlay">⛶ Expand Map</button>
             </div>
           </div>
           <div id="ce-memory-dump" class="memory-dump"></div>
         </div>
       </div>
     </details>
+
+    <!-- Full 2,048-Byte Core Storage Matrix Modal Dialog -->
+    <dialog id="mem-overlay-dialog" class="mem-overlay-dialog" closedby="any" aria-labelledby="mem-overlay-title">
+      <div class="mem-overlay-content">
+        <header class="mem-overlay-header">
+          <div class="mem-overlay-title-group">
+            <h2 id="mem-overlay-title">IBM CCU 6320 — Ferrite Core Storage (Full 2,048-Byte Map)</h2>
+            <div class="mem-overlay-badges">
+              <span class="overlay-badge">PSAR: <strong id="overlay-psar">0x222</strong></span>
+              <span class="overlay-badge">MAL: <strong id="overlay-mal">0x222</strong></span>
+              <span class="overlay-badge">Non-Zero: <strong id="overlay-nz-count">0</strong> B</span>
+              <span class="overlay-badge legend-reg">R00–R31 (0x000–0x03F)</span>
+              <span class="overlay-badge legend-loader">Loader (40–47)</span>
+              <span class="overlay-badge legend-psar">● Current PC</span>
+            </div>
+          </div>
+          <div class="mem-overlay-actions">
+            <div class="mem-layout-toggles">
+              <button id="btn-mem-layout-2x1k" class="btn-chip active" title="Show two 1,024-byte blocks (32x32 each) side-by-side">2 × 1 KB (32×32)</button>
+              <button id="btn-mem-layout-64x32" class="btn-chip" title="Show one continuous 2,048-byte block (64x32)">1 × 2 KB (64×32)</button>
+              <button id="btn-mem-toggle-ascii" class="btn-chip" title="Toggle ASCII character column">ASCII: Off</button>
+            </div>
+            <button id="btn-close-mem-overlay" class="btn-chip btn-close" title="Close overlay (or press Escape)">&times; Close [Esc]</button>
+          </div>
+        </header>
+
+        <div id="mem-overlay-body" class="mem-overlay-body layout-2x1k"></div>
+      </div>
+    </dialog>
 
   </div>
 

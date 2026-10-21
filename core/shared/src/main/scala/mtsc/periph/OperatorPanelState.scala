@@ -185,7 +185,7 @@ class OperatorPanelState {
   var mergeDecision: Boolean = false
   var mode: CompositionMode = CompositionMode.Justify
   var lineCount: Int = 60
-  var measure: Int = 252       // 252 units (~3.5 inches)
+  var measure: Int = 140       // 140 units (~1.94 inches / 11.67 picas, standard Selectric Composer column measure)
   var lineIndent: Int = 0
   var paraIndent: Int = 18     // 18 units (1.5 ems)
 
@@ -421,7 +421,7 @@ class OperatorPanelState {
     mergeDecision = false
     mode = CompositionMode.Justify
     lineCount = 60
-    measure = 252
+    measure = 140
     lineIndent = 0
     paraIndent = 18
     leaderSpace = 6

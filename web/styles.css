@@ -1269,19 +1269,27 @@ button, select {
 
 .registers-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 4px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 3px;
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: 0.67rem;
 }
 
 .reg-cell {
   background: #181b20;
-  padding: 3px 5px;
+  padding: 2px 4px;
   border-radius: 3px;
   display: flex;
+  align-items: center;
   justify-content: space-between;
   color: #64748b;
+  line-height: 1.35;
+  white-space: nowrap;
+  transition: background-color 0.1s ease;
+}
+
+.reg-cell:hover {
+  background: #232730;
 }
 
 .reg-cell.non-zero {
@@ -1289,18 +1297,83 @@ button, select {
   background: #1e293b;
 }
 
+.reg-cell.non-zero:hover {
+  background: #273347;
+}
+
 .reg-name {
   color: #38bdf8;
   font-weight: 700;
+  width: 21px;
+  flex-shrink: 0;
+  text-align: left;
 }
 
-.disassembly-list,
-.memory-dump {
+.reg-hex {
+  color: #64748b;
+  width: 42px;
+  flex-shrink: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.2px;
+}
+
+.reg-cell.non-zero .reg-hex {
+  color: #cbd5e1;
+}
+
+.reg-dec {
+  color: #64748b;
+  width: 32px;
+  flex-shrink: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.2px;
+}
+
+.reg-cell.non-zero .reg-dec {
+  color: #fde047;
+}
+
+.disassembly-list {
   font-family: var(--font-mono);
   font-size: 0.72rem;
   display: flex;
   flex-direction: column;
   gap: 3px;
+}
+
+.memory-dump {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  height: 230px;
+  max-height: 230px;
+  overflow-y: auto;
+  overflow-x: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: #334155 #111317;
+}
+
+.memory-dump::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.memory-dump::-webkit-scrollbar-track {
+  background: #111317;
+}
+
+.memory-dump::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 3px;
+}
+
+.memory-dump::-webkit-scrollbar-thumb:hover {
+  background: #475569;
 }
 
 .disasm-row {
@@ -1329,19 +1402,32 @@ button, select {
   display: flex;
   gap: 8px;
   white-space: pre;
+  padding: 1px 3px;
+  border-radius: 2px;
+  line-height: 1.35;
+}
+
+.mem-row:hover {
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .mem-addr {
   color: #38bdf8;
+  flex-shrink: 0;
+  user-select: none;
 }
 
 .mem-hex {
   display: flex;
-  gap: 3px;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .mem-byte {
   color: #64748b;
+  display: inline-block;
+  width: 17px;
+  text-align: center;
 }
 
 .mem-byte.nz {
@@ -1355,6 +1441,307 @@ button, select {
   border-radius: 2px;
 }
 
+.mem-byte:hover {
+  outline: 1px solid #38bdf8;
+  border-radius: 2px;
+  cursor: default;
+}
+
 .mem-ascii {
   color: #a7f3d0;
+  flex-shrink: 0;
+  letter-spacing: 0.4px;
+}
+
+/* ==========================================================================
+   FULL 2,048-BYTE CORE STORAGE MATRIX OVERLAY (<dialog>)
+   ========================================================================== */
+.mem-overlay-dialog {
+  border: 1px solid #3d4554;
+  border-radius: 10px;
+  background: #0f1217;
+  color: #f1f5f9;
+  padding: 0;
+  width: calc(100vw - 32px);
+  max-width: calc(100vw - 32px);
+  height: calc(100vh - 32px);
+  max-height: calc(100vh - 32px);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.85);
+  overflow: hidden;
+  margin: auto;
+  overscroll-behavior: contain;
+}
+
+.mem-overlay-dialog:modal {
+  overscroll-behavior: contain;
+}
+
+.mem-overlay-dialog::backdrop {
+  background-color: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(5px);
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+.mem-overlay-content {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.mem-overlay-header {
+  background: #181c22;
+  border-bottom: 1px solid #2d3340;
+  padding: 10px 18px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.mem-overlay-title-group h2 {
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: #f8fafc;
+}
+
+.mem-overlay-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 3px;
+}
+
+.overlay-badge {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  background: #252b36;
+  border: 1px solid #3b4252;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #94a3b8;
+}
+
+.overlay-badge strong {
+  color: #fde047;
+}
+
+.overlay-badge.legend-reg {
+  border-color: #0284c7;
+  color: #38bdf8;
+  background: rgba(2, 132, 199, 0.15);
+}
+
+.overlay-badge.legend-loader {
+  border-color: #8b5cf6;
+  color: #c084fc;
+  background: rgba(139, 92, 246, 0.15);
+}
+
+.overlay-badge.legend-psar {
+  border-color: #f59e0b;
+  color: #111827;
+  background: #f59e0b;
+  font-weight: 700;
+}
+
+.mem-overlay-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mem-layout-toggles {
+  display: flex;
+  gap: 4px;
+}
+
+.btn-close {
+  background: #dc2626 !important;
+  color: #ffffff !important;
+  border-color: #ef4444 !important;
+}
+
+.btn-close:hover {
+  background: #b91c1c !important;
+}
+
+.mem-overlay-body {
+  padding: 12px 14px 24px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  align-content: flex-start;
+  gap: 16px;
+  background: #0d1014;
+  scrollbar-width: thin;
+  scrollbar-color: #3b4252 #0d1014;
+}
+
+.mem-overlay-body::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+.mem-overlay-body::-webkit-scrollbar-track {
+  background: #0d1014;
+}
+
+.mem-overlay-body::-webkit-scrollbar-thumb {
+  background: #3b4252;
+  border-radius: 3px;
+}
+
+/* Individual Memory Block Matrix */
+.mo-block {
+  background: #14171d;
+  border: 1px solid #282e3b;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 0.67rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+  max-width: 100%;
+}
+
+.mo-block-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #38bdf8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid #282e3b;
+  padding-bottom: 3px;
+}
+
+.mo-block-title span.mo-range {
+  color: #94a3b8;
+  font-weight: normal;
+}
+
+/* Column Header with 0..1F offsets */
+.mo-header-row,
+.mo-row {
+  display: flex;
+  align-items: center;
+  gap: 1.5px;
+  line-height: 1.32;
+}
+
+.mo-header-row {
+  color: #64748b;
+  font-weight: 600;
+  margin-bottom: 2px;
+  border-bottom: 1px dashed #242933;
+  padding-bottom: 2px;
+}
+
+.mo-addr {
+  width: 38px;
+  color: #38bdf8;
+  flex-shrink: 0;
+  user-select: none;
+  font-size: 0.65rem;
+}
+
+.mo-header-row .mo-addr {
+  color: #64748b;
+}
+
+/* Hex cells */
+.mo-byte {
+  display: inline-block;
+  width: 14.5px;
+  text-align: center;
+  color: #475569;
+  border-radius: 2px;
+  cursor: default;
+  font-size: 0.66rem;
+  letter-spacing: -0.2px;
+  transition: background 0.1s ease;
+}
+
+.mo-header-col {
+  width: 14.5px;
+  text-align: center;
+  color: #64748b;
+  font-size: 0.6rem;
+}
+
+/* Spacer dividing 16-byte half-lines */
+.mo-mid-sep {
+  width: 4px;
+  flex-shrink: 0;
+  border-left: 1px solid #282e3b;
+  height: 11px;
+  margin: 0 1px;
+}
+
+.mo-byte.nz {
+  color: #f8fafc;
+  background: #1e242f;
+}
+
+.mo-byte.reg-byte {
+  color: #7dd3fc;
+  box-shadow: inset 0 -2px 0 #0284c7;
+}
+
+.mo-byte.loader-byte {
+  color: #d8b4fe;
+  box-shadow: inset 0 -2px 0 #8b5cf6;
+}
+
+.mo-byte.psar-byte {
+  background: #f59e0b !important;
+  color: #111827 !important;
+  font-weight: 700;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.7);
+}
+
+.mo-byte.mal-byte {
+  outline: 1px dashed #38bdf8;
+}
+
+.mo-byte:hover {
+  outline: 1.5px solid #38bdf8 !important;
+  z-index: 2;
+  background: rgba(56, 189, 248, 0.25) !important;
+  color: #ffffff !important;
+}
+
+/* ASCII strip in matrix overlay */
+.mo-ascii {
+  display: none;
+  margin-left: 6px;
+  padding-left: 6px;
+  border-left: 1px solid #242933;
+  color: #a7f3d0;
+  letter-spacing: 0.3px;
+  white-space: pre;
+  flex-shrink: 0;
+  font-size: 0.64rem;
+}
+
+/* Show ASCII when explicitly toggled or in 64x32 mode if wide enough */
+.mem-overlay-body.show-ascii .mo-ascii,
+.layout-64x32 .mo-ascii {
+  display: inline-block;
 }
