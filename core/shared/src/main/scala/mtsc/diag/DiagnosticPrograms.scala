@@ -293,6 +293,23 @@ object DiagnosticPrograms {
             JMP.EQ  TRANSFER_DONE
             CMPI    R4, 0            ; Skip 0 feed code
             JMP.EQ  TRANSFER_LOOP
+            CMPI    R4, 32           ; Space?
+            JMP.NE  TRANSFER_CHAR
+
+            MOV     R2, R14
+            ADD     R2, R16
+            CMPI    R2, 0
+            JMP.EQ  TRANSFER_CHAR
+
+            MOVI    R2, 132
+            ADD     R2, R14
+            CMPI    R16, 0
+            JMP.EQ  WRITE_SPACE
+            ADDI    R2, 1
+            SUBI    R16, 1
+        WRITE_SPACE:
+            MOV     R4, R2
+        TRANSFER_CHAR:
             MOVB    [R6]++, R4       ; Store in output block
             JMP     TRANSFER_LOOP
 

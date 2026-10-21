@@ -23,3 +23,10 @@ lazy val core = crossProject(JSPlatform, JVMPlatform, NativePlatform)
       "org.scalameta" %%% "munit" % "1.3.6" % Test
     )
   )
+  .jsSettings(
+    scalaJSUseMainModuleInitializer := true,
+    Compile / mainClass := Some("mtsc.web.WebMain")
+  )
+  .jvmSettings(
+    Compile / mainClass := Some("mtsc.cli.Main")
+  )

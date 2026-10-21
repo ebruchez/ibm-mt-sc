@@ -64,8 +64,12 @@ class ComposerTranslator(
       case 0x0D | 0x0A => // Carrier Return / Line Feed
         paper.carrierReturn()
 
-      case 0x20 => // Inter-word Space
+      case 0x20 => // Standard Inter-word Space (4 units)
         paper.printChar(' ', escapementUnits = 4)
+
+      case b if (b & 0x80) != 0 && (b & 0x7f) >= 1 && (b & 0x7f) <= 32 => // Justified Inter-word Space (1..32 units)
+        val units = b & 0x7f
+        paper.printChar(' ', escapementUnits = units)
 
       case b if b >= 32 && b <= 126 => // Printable ASCII
         val ch = b.toChar

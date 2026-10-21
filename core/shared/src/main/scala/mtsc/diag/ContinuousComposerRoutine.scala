@@ -109,6 +109,25 @@ object ContinuousComposerRoutine {
           MOVB    R4, [R8]++
           CMPI    R4, 255
           JMP.EQ  TRANSFER_DONE
+          CMPI    R4, 32           ; Space?
+          JMP.NE  TRANSFER_CHAR
+
+          ; Check if this line is justified (R14 > 0 or R16 > 0)
+          MOV     R2, R14
+          ADD     R2, R16
+          CMPI    R2, 0
+          JMP.EQ  TRANSFER_CHAR    ; Unjustified: keep standard space 32
+
+          ; Justified line: calculate space code (128 + 4 + R14 + (1 if R16 > 0))
+          MOVI    R2, 132          ; 128 + 4 = 132
+          ADD     R2, R14
+          CMPI    R16, 0
+          JMP.EQ  WRITE_SPACE
+          ADDI    R2, 1            ; Add 1 remainder unit
+          SUBI    R16, 1           ; Remainder count--
+      WRITE_SPACE:
+          MOV     R4, R2
+      TRANSFER_CHAR:
           MOVB    [R6]++, R4
           JMP     TRANSFER_LOOP
 

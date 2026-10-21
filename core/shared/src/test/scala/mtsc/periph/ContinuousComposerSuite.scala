@@ -35,5 +35,16 @@ class ContinuousComposerSuite extends munit.FunSuite {
     assertEquals(printedLines.head, "The IBM Magnetic Tape")
     assertEquals(printedLines(1), "Selectric Composer is a")
     assert(printedLines.last.contains("automatically"), s"Last line should contain 'automatically', got '${printedLines.last}'")
+
+    // Verify true Selectric Composer right-justification across space bands
+    val galleyLines = system.paper.galleyLines
+    assert(galleyLines.head.isJustified, "First line should be marked justified")
+    assertEquals(galleyLines.head.totalUnits, 140, "First line total width should equal target measure 140 units")
+    assert(galleyLines(1).isJustified, "Second line should be marked justified")
+    assertEquals(galleyLines(1).totalUnits, 140, "Second line total width should equal target measure 140 units")
+
+    // Check exact space band allocation for first line: 25 deficit across 3 spaces = [13, 12, 12] units
+    val firstLineSpaces = galleyLines.head.glyphs.filter(_.ch == ' ').map(_.widthUnits)
+    assertEquals(firstLineSpaces, List(13, 12, 12), "Spaces should be expanded to [13, 12, 12] units summing to 37 units")
   }
 }
