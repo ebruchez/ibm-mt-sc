@@ -161,7 +161,7 @@ class CeConsoleState {
   val eventLog: ArrayBuffer[String] = ArrayBuffer(
     "IBM MT/SC CCU 6320 CE Console initialized.",
     "Clock oscillator: 240 kHz (nominal).",
-    "Core storage: 2,048 ferrite bytes online."
+    "Core storage: 2,048 core memory bytes online."
   )
 
   def log(msg: String): Unit = {
