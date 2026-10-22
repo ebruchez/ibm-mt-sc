@@ -64,12 +64,11 @@ class TapeCartridge(val label: String, private val frames: ArrayBuffer[TapeFrame
   /**
    * Injects an intentional parity error at a given index.
    */
-  def corruptParityAt(index: Int): Unit = {
+  def corruptParityAt(index: Int): Unit =
     if (index >= 0 && index < frames.length) {
       val cur = frames(index)
       frames(index) = TapeFrame(cur.rawByte ^ 0x80)
     }
-  }
 }
 
 object TapeCartridge {
@@ -105,7 +104,7 @@ object TapeCartridge {
 
     val normalized = text.replace("\r\n", "\n").replace('\r', '\n')
     for (ch <- normalized) {
-      val code = if (ch == '\n') CarrierReturn else (ch.toInt & 0x7f)
+      val code = if (ch == '\n') CarrierReturn else ch.toInt & 0x7f
       buf += TapeFrame.encodeWithOddParity(code)
     }
 

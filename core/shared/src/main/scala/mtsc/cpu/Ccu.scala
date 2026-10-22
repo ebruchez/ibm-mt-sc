@@ -33,12 +33,12 @@ class Ccu(
    * Executes a single instruction step.
    */
   def step(): StepResult = {
-    if (state.halted) return StepResult.Halted
+    if (state.halted)
+      return StepResult.Halted
 
     // Check for Multiplex interrupt prior to normal instruction fetch
-    if (state.multiplex && ioBus.isTranslatorReady) {
+    if (state.multiplex && ioBus.isTranslatorReady)
       handleMultiplexInterrupt()
-    }
 
     // I-0 Time: Read instruction from PSAR and advance PSAR by +2
     val fetchAddr = memory.psar
@@ -102,11 +102,10 @@ class Ccu(
       }
     }
 
-    if (cycles >= maxCycles && result == StepResult.Normal) {
+    if (cycles >= maxCycles && result == StepResult.Normal)
       StepResult.Error(s"Execution exceeded max cycles ($maxCycles)")
-    } else {
+    else
       result
-    }
   }
 
   private def executeInstruction(insn: Instruction, fetchAddr: Address): StepResult = insn match {
