@@ -209,6 +209,14 @@ class CeConsoleSuite extends munit.FunSuite {
     assertEquals(sys.memory.psar, Address(42))
     assertEquals(sys.memory.readByte(Address(42)), 0x02)
     assertEquals(sys.memory.readByte(Address(43)), 0x18)
+
+    // Verify word at byte 46 (0x02E) is 0x002A and disassembles to JMP 0x02A (looping to 42)
+    val word46 = sys.memory.readWord(Address(46))
+    assertEquals(word46, Word(0x002a))
+    val decoded46 = mtsc.isa.Decoder.decode(word46)
+    assertEquals(decoded46, Right(mtsc.isa.Instruction.Branch(mtsc.types.Condition.Unconditional, link = false, Address(42))))
+    val dis46 = mtsc.asm.Disassembler.disassemble(word46, Address(46))
+    assertEquals(dis46, "JMP      0x02A")
   }
 
   test("OperatorConsoleView renders Picture 1 Operator Panel and Picture 2 Tape Console") {

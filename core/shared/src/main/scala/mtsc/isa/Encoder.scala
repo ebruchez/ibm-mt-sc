@@ -19,16 +19,16 @@ object Encoder {
 
   def encode(instruction: Instruction): Word = instruction match {
     case Instruction.Branch(cond, link, target) =>
-      val condBits = cond match {
-        case Condition.Unconditional => 0 // 000
-        case Condition.Lo            => 4 // 100 (Negative)
-        case Condition.Equal         => 5 // 101 (Zero)
-        case Condition.Hi            => 6 // 110 (Non-negative)
-        case Condition.NotEqual      => 7 // 111 (Non-zero)
+      val (op34, op7) = cond match {
+        case Condition.Unconditional => (0, 0)
+        case Condition.Equal         => (2, 1)
+        case Condition.NotEqual      => (2, 0)
+        case Condition.Lo            => (3, 0)
+        case Condition.Hi            => (3, 1)
       }
       val linkBit = if (link) 1 else 0
-      val addrBits = (target.unsigned >> 1) & 0x3ff
-      val raw = (0 << 14) | (condBits << 11) | (linkBit << 10) | addrBits
+      val addrBits = target.unsigned & 0x7fe
+      val raw = (0 << 14) | (op34 << 12) | (linkBit << 11) | addrBits | op7
       Word(raw)
 
     case Instruction.IncrementalBranch(forward, onBitSet, bit, reg, steps) =>

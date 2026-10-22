@@ -35,19 +35,19 @@ object Decoder {
           val reg = RegId((raw >> 2) & 0x1f)
           Right(Instruction.Input(device, reg))
         } else {
-          // Branch
-          val condBits = (raw >> 11) & 0x7
-          val cond = condBits match {
-            case 0 | 1 => Condition.Unconditional
-            case 4     => Condition.Lo
-            case 5     => Condition.Equal
-            case 6     => Condition.Hi
-            case 7     => Condition.NotEqual
-            case _     => Condition.Unconditional
+          // Branch (Figure 8: Bits 15..14=00, Bits 13..12=Op3..4, Bit 11=Op5 Link, Bits 10..1=Address, Bit 0=Op7)
+          val link = ((raw >> 11) & 1) == 1
+          val op34 = (raw >> 12) & 0x3
+          val op7  = raw & 1
+          val cond = (op34, op7) match {
+            case (0, _) => Condition.Unconditional
+            case (2, 1) => Condition.Equal
+            case (2, 0) => Condition.NotEqual
+            case (3, 0) => Condition.Lo
+            case (3, 1) => Condition.Hi
+            case _      => Condition.Unconditional
           }
-          val link = ((raw >> 10) & 1) == 1
-          val targetWord = raw & 0x3ff
-          val target = Address(targetWord << 1)
+          val target = Address(raw & 0x7fe)
           Right(Instruction.Branch(cond, link, target))
         }
 
