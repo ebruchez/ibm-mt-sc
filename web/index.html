@@ -108,9 +108,6 @@
                 <tr><td>46</td><td>0010</td><td>1010</td></tr>
                 <tr><td>47</td><td>0000</td><td>0000</td></tr>
               </tbody>
-              <tfoot>
-                <tr><td class="bit-ctr-lbl">Bit Ctr</td><td>B</td><td>A</td></tr>
-              </tfoot>
             </table>
           </div>
         </div>
@@ -157,15 +154,20 @@
             <div id="ce-row-lip" class="ce-underlay ce-lip-row">
               <div class="ce-col">Reset</div>
               <div class="ce-col">Test 4</div>
-              <div class="ce-col">Test 3</div>
+              <div class="ce-col nibble-sep">Test 3</div>
               <div class="ce-col">Test 2</div>
               <div class="ce-col">Test 1</div>
               <div class="ce-col">ID</div>
-              <div class="ce-col">IC</div>
+              <div class="ce-col nibble-sep">IC</div>
               <div class="ce-col">IB</div>
               <div class="ce-col">IA</div>
-              <div class="ce-col">B</div>
-              <div class="ce-col">A</div>
+              <div class="ce-col ce-col-bit-ctr">
+                <span class="ce-bit-ctr-title">Bit Ctr</span>
+                <div class="ce-bit-ctr-subs">
+                  <span class="ce-sub-col">B</span>
+                  <span class="ce-sub-col">A</span>
+                </div>
+              </div>
               <div class="ce-row-tag">Clock</div>
             </div>
 
@@ -180,8 +182,8 @@
               <button id="lamp-7"  class="console-lamp white-lens" title="Lamp 7: MODE / MAX IW (CE: IC / QB 1 / OP 5 / O 5 / Y 5)"></button>
               <button id="lamp-8"  class="console-lamp white-lens" title="Lamp 8: LINE COUNT / MAX QUAD (CE: IB / PB 4 / OP 4 / O 4 / Y 4)"></button>
               <button id="lamp-9"  class="console-lamp white-lens" title="Lamp 9: MEASURE / MIN HYPHEN (CE: IA / PB 3 / OP 3 / O 3 / Y 3)"></button>
-              <button id="lamp-10" class="console-lamp white-lens" title="Lamp 10: LINE INDENT / DEAD KEY (CE: B / PB 2 / OP 2 / O 2 / Y 2)"></button>
-              <button id="lamp-11" class="console-lamp white-lens" title="Lamp 11: PARA INDENT (CE: A / PB 1 / OP 1 / O 1 / Y 1)"></button>
+              <button id="lamp-10" class="console-lamp white-lens" title="Lamp 10: LINE INDENT / DEAD KEY (CE: Bit Ctr B / PB 2 / OP 2 / O 2 / Y 2)"></button>
+              <button id="lamp-11" class="console-lamp white-lens" title="Lamp 11: PARA INDENT (CE: Bit Ctr A / PB 1 / OP 1 / O 1 / Y 1)"></button>
             </div>
 
             <!-- OPERATOR FACEPLATE BOTTOM LEGENDS (Visible when Faceplate is ON — Picture 1) -->

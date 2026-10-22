@@ -348,13 +348,6 @@ button, select {
   border-right: none;
 }
 
-.loader-table tfoot td {
-  border-top: 1px solid #33322e;
-  padding-top: 2px;
-  font-weight: 800;
-  text-align: center;
-}
-
 /* Core Console Row: Power Switch + 11 Lamps + 12 Keys */
 .console-core-row {
   display: grid;
@@ -492,6 +485,47 @@ button, select {
 .ce-lip-row {
   font-size: 0.68rem;
   border-bottom: 1px solid rgba(0, 0, 0, 0.2);
+  align-items: end;
+  padding-bottom: 3px;
+}
+
+.ce-lip-row .ce-col,
+.ce-lip-row .ce-row-tag {
+  align-self: end;
+}
+
+.ce-col-bit-ctr {
+  grid-column: 10 / 12;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1px;
+}
+
+.ce-bit-ctr-title {
+  font-size: 0.58rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #3b3a36;
+  line-height: 1.1;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.35);
+  padding: 0 4px;
+}
+
+.ce-bit-ctr-subs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: 100%;
+  text-align: center;
+}
+
+.ce-sub-col {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #262522;
 }
 
 .ce-matrix-grid {
