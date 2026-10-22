@@ -12,84 +12,85 @@ object Decoder {
     val top2 = (raw >> 14) & 0x3
 
     top2 match {
-      case 0 => // 00: Branch, Input, or Output
-        val op5 = (raw >> 11) & 0x1f
-        if (op5 == 2) {
-          // 00010: Output
+      case 0 => // 00: Branch, Bit Control (PROG. CTRL.), Input, or Output
+        val op34 = (raw >> 12) & 0x3
+        val op5  = (raw >> 11) & 0x1f
+        val op7  = raw & 1
+
+        if (op5 == 2 && op7 == 0) {
+          // 00010 ... 0: Output (Figure 10: M=bit 10, Dev=bits 9..7, Ind=bit 6 (Op6), Reg=bits 5..1 (Y6..Y2), Op7=0)
           val m = ((raw >> 10) & 1) == 1
-          val devBits = (raw >> 8) & 0x3
+          val devBits = (raw >> 7) & 0x7
           val device = if (devBits == 0) Device.Translator else Device.Lights
-          val ind = ((raw >> 7) & 1) == 1
-          val reg = RegId((raw >> 2) & 0x1f)
+          val ind = ((raw >> 6) & 1) == 1
+          val reg = RegId((raw >> 1) & 0x1f)
           Right(Instruction.Output(device, reg, ind, m))
-        } else if (op5 == 3) {
-          // 00011: Input
-          val devBits = (raw >> 8) & 0x7
+        } else if (op5 == 3 && op7 == 0) {
+          // 00011 ... 0: Input (Figure 10 & CE Flange: Dev=bits 10..7, Op6=0, Reg=bits 5..1 (Y6..Y2), Op7=0)
+          // Flange bits: bit 8 = m (1=LeftTape, 0=RightTape), bit 7 = p (1=PaperTape, 0=MagTape); 0111 = Keyboard
+          val devBits = (raw >> 7) & 0xf
           val device = devBits match {
-            case 0 => Device.RightTape
-            case 1 => Device.LeftTape
-            case 2 => Device.PaperTape
-            case 3 => Device.Keyboard
-            case _ => Device.RightTape
+            case 0          => Device.RightTape
+            case 2          => Device.LeftTape
+            case 1 | 3      => Device.PaperTape
+            case 7          => Device.Keyboard
+            case d if (d & 1) != 0 => Device.PaperTape
+            case d if (d & 2) != 0 => Device.LeftTape
+            case _          => Device.RightTape
           }
-          val reg = RegId((raw >> 2) & 0x1f)
+          val reg = RegId((raw >> 1) & 0x1f)
           Right(Instruction.Input(device, reg))
+        } else if (op34 == 3 && op7 == 1) {
+          // 0011 ... 1: Bit Control / PROG. CTRL. (Figure 3 & Figure 10: Op1..4=0011, Op7=1)
+          val bit11 = (raw >> 11) & 1
+          val bit6  = (raw >> 6) & 1
+          val op = (bit11, bit6) match {
+            case (0, 0) => BitOp.Reset
+            case (0, 1) => BitOp.Preserve
+            case (1, 0) => BitOp.Set
+            case (1, 1) => BitOp.Test
+            case _      => BitOp.Test
+          }
+          val bit = (raw >> 7) & 0xf
+          val reg = RegId((raw >> 1) & 0x1f)
+          Right(Instruction.BitControl(op, bit, reg))
         } else {
           // Branch (Figure 8: Bits 15..14=00, Bits 13..12=Op3..4, Bit 11=Op5 Link, Bits 10..1=Address, Bit 0=Op7)
           val link = ((raw >> 11) & 1) == 1
-          val op34 = (raw >> 12) & 0x3
-          val op7  = raw & 1
           val cond = (op34, op7) match {
             case (0, _) => Condition.Unconditional
+            case (1, 1) => Condition.Hi
+            case (2, 0) => Condition.Lo
             case (2, 1) => Condition.Equal
-            case (2, 0) => Condition.NotEqual
-            case (3, 0) => Condition.Lo
-            case (3, 1) => Condition.Hi
+            case (3, 0) => Condition.NotEqual
             case _      => Condition.Unconditional
           }
           val target = Address(raw & 0x7fe)
           Right(Instruction.Branch(cond, link, target))
         }
 
-      case 1 => // 01: Register Arith, Byte Indirect, or Bit Control
-        val bit13 = (raw >> 13) & 1
-        if (bit13 == 1) {
-          // 011: Bit Control
-          val opBits = (raw >> 11) & 0x3
+      case 1 => // 01: Register Direct Arithmetic or Byte Indirect (Figure 3 & Figure 10: ARITH. OPER.)
+        val pReg = RegId((raw >> 7) & 0x1f)
+        val qInd = ((raw >> 6) & 1) == 1
+        val qReg = RegId((raw >> 1) & 0x1f)
+        val pInd = (raw & 1) == 1
+
+        if (!pInd && !qInd) {
+          // Register Direct Arithmetic (both Op6 and Op7 are 0)
+          val opBits = (raw >> 12) & 0x3
           val op = opBits match {
-            case 0 => BitOp.Reset
-            case 1 => BitOp.Set
-            case 2 => BitOp.Preserve
-            case 3 => BitOp.Test
+            case 0 => ArithOp.Subtract
+            case 1 => ArithOp.Compare
+            case 2 => ArithOp.Add
+            case 3 => ArithOp.Transfer
           }
-          val bit = (raw >> 7) & 0xf
-          val reg = RegId((raw >> 2) & 0x1f)
-          Right(Instruction.BitControl(op, bit, reg))
+          Right(Instruction.RegisterArith(op, pReg, qReg))
         } else {
-          val bit12 = (raw >> 12) & 1
-          if (bit12 == 0) {
-            // 0100: Register Direct Arithmetic
-            val opBits = (raw >> 10) & 0x3
-            val op = opBits match {
-              case 0 => ArithOp.Subtract
-              case 1 => ArithOp.Compare
-              case 2 => ArithOp.Add
-              case 3 => ArithOp.Transfer
-            }
-            val pReg = RegId((raw >> 5) & 0x1f)
-            val qReg = RegId(raw & 0x1f)
-            Right(Instruction.RegisterArith(op, pReg, qReg))
-          } else {
-            // 0101: Byte Indirect
-            val opBit = (raw >> 11) & 1
-            val op = if (opBit == 0) ArithOp.Compare else ArithOp.Transfer
-            val bump = ((raw >> 10) & 1) == 1
-            val pInd = ((raw >> 9) & 1) == 1
-            val pReg = RegId((raw >> 5) & 0xf)
-            val qInd = ((raw >> 4) & 1) == 1
-            val qReg = RegId(raw & 0xf)
-            Right(Instruction.ByteIndirect(op, pReg, pInd, qReg, qInd, bump))
-          }
+          // Byte Indirect (either Op6/qInd or Op7/pInd is 1)
+          val opBit = (raw >> 13) & 1
+          val op = if (opBit == 0) ArithOp.Compare else ArithOp.Transfer
+          val bump = ((raw >> 12) & 1) == 1
+          Right(Instruction.ByteIndirect(op, pReg, pInd, qReg, qInd, bump))
         }
 
       case 2 => // 10: Incremental Branch

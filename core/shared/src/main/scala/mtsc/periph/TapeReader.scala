@@ -205,8 +205,8 @@ class TapeReader(
         } else {
           val frame = cartridge.getFrame(headPosition).get
 
-          // Sentinel 0xFF is handled as EndOfBlock without parity fault
-          if (frame.rawByte == TapeCartridge.EndOfBlock) {
+          // Sentinel 0xFF (on 7-bit text tape) is handled as EndOfBlock without parity fault
+          if (!frame.is8Bit && frame.rawByte == TapeCartridge.EndOfBlock) {
             headPosition += 1
             readCount += 1
             dataLatches = TapeCartridge.EndOfBlock
@@ -219,7 +219,7 @@ class TapeReader(
           } else {
             // Odd Parity Satisfied: Increment tape and latch data
             parityError = false
-            dataLatches = frame.data7
+            dataLatches = frame.dataByte
             headPosition += 1
             readCount += 1
             cycleRemaining = cycleDelay

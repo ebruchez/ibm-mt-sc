@@ -7,10 +7,13 @@ import scala.collection.mutable.ArrayBuffer
  *
  * Each tape frame contains 7 data bits plus 1 odd parity check bit.
  */
-final case class TapeFrame(rawByte: Int) {
+final case class TapeFrame(rawByte: Int, is8Bit: Boolean = false) {
   def data7: Int = rawByte & 0x7f
-  def parityBit: Boolean = (rawByte & 0x80) != 0
-  def hasOddParity: Boolean = (Integer.bitCount(rawByte & 0xff) % 2) != 0
+  def dataByte: Int = if (is8Bit) rawByte & 0xff else data7
+  def parityBit: Boolean = if (is8Bit) (rawByte & 0x100) != 0 else (rawByte & 0x80) != 0
+  def hasOddParity: Boolean =
+    if (is8Bit) (Integer.bitCount(rawByte & 0x1ff) % 2) != 0
+    else (Integer.bitCount(rawByte & 0xff) % 2) != 0
 }
 
 object TapeFrame {
@@ -22,6 +25,16 @@ object TapeFrame {
     val ones = Integer.bitCount(b7)
     val raw = if (ones % 2 == 0) b7 | 0x80 else b7
     TapeFrame(raw)
+  }
+
+  /**
+   * Encodes an 8-bit program byte with a 9th-track odd parity bit in bit 8 (0x100).
+   */
+  def encodeByte8WithOddParity(byte8: Int): TapeFrame = {
+    val b8 = byte8 & 0xff
+    val ones = Integer.bitCount(b8)
+    val raw = if (ones % 2 == 0) b8 | 0x100 else b8
+    TapeFrame(raw, is8Bit = true)
   }
 
   /**
@@ -108,6 +121,17 @@ object TapeCartridge {
     val buf = ArrayBuffer.empty[TapeFrame]
     for (b <- bytes) {
       buf += TapeFrame(b & 0xff)
+    }
+    new TapeCartridge(label, buf)
+  }
+
+  /**
+   * Creates a binary program tape where each 8-bit byte has a 9th-track odd parity bit.
+   */
+  def fromProgramBytes(bytes: Seq[Int], label: String = "Program Tape"): TapeCartridge = {
+    val buf = ArrayBuffer.empty[TapeFrame]
+    for (b <- bytes) {
+      buf += TapeFrame.encodeByte8WithOddParity(b & 0xff)
     }
     new TapeCartridge(label, buf)
   }

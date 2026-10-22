@@ -207,8 +207,27 @@ class CeConsoleSuite extends munit.FunSuite {
     // Initial Loader Table loads bytes 40..47 and sets PSAR to 42
     InitialLoaderTable.loadIntoMemory(sys.memory, paperTape = false, leftStation = false)
     assertEquals(sys.memory.psar, Address(42))
+    assertEquals(sys.memory.readWord(Address(40)), Word(0x0000))
     assertEquals(sys.memory.readByte(Address(42)), 0x02)
     assertEquals(sys.memory.readByte(Address(43)), 0x18)
+
+    // Verify word at byte 42 (0x02A) is 0x1802 and disassembles to IN RTAPE, R1
+    val word42 = sys.memory.readWord(Address(42))
+    assertEquals(word42, Word(0x1802))
+    assertEquals(
+      mtsc.isa.Decoder.decode(word42),
+      Right(mtsc.isa.Instruction.Input(mtsc.types.Device.RightTape, RegId(1)))
+    )
+    assertEquals(mtsc.asm.Disassembler.disassemble(word42, Address(42)), "IN      TAPE_R, R1")
+
+    // Verify word at byte 44 (0x02C) is 0x7A03 and disassembles to MOVB [R20]+, R1
+    val word44 = sys.memory.readWord(Address(44))
+    assertEquals(word44, Word(0x7a03))
+    assertEquals(
+      mtsc.isa.Decoder.decode(word44),
+      Right(mtsc.isa.Instruction.ByteIndirect(mtsc.types.ArithOp.Transfer, RegId(20), pIndirect = true, RegId(1), qIndirect = false, bump = true))
+    )
+    assertEquals(mtsc.asm.Disassembler.disassemble(word44, Address(44)), "MOVB     [R20]++, R1")
 
     // Verify word at byte 46 (0x02E) is 0x002A and disassembles to JMP 0x02A (looping to 42)
     val word46 = sys.memory.readWord(Address(46))
@@ -217,6 +236,31 @@ class CeConsoleSuite extends munit.FunSuite {
     assertEquals(decoded46, Right(mtsc.isa.Instruction.Branch(mtsc.types.Condition.Unconditional, link = false, Address(42))))
     val dis46 = mtsc.asm.Disassembler.disassemble(word46, Address(46))
     assertEquals(dis46, "JMP      0x02A")
+
+    // Verify the Initial Loader actually boots a program from tape:
+    // Place a small program at byte 4 (MOVI R4, 0x42; JMP 0x006) on tape, redirect R20 at byte 40 to 46,
+    // and overwrite bytes 46..47 with JMP 0x004 (0x0004).
+    val moviR4 = mtsc.isa.Encoder.encode(mtsc.isa.Instruction.ImmediateArith(mtsc.types.ArithOp.Transfer, RegId(4), 0x42))
+    val jmpSelf = mtsc.isa.Encoder.encode(mtsc.isa.Instruction.Branch(mtsc.types.Condition.Unconditional, link = false, Address(6)))
+    val bootTape = Array.fill[Int](43)(0)
+    bootTape(4) = moviR4.lowByte
+    bootTape(5) = moviR4.highByte
+    bootTape(6) = jmpSelf.lowByte
+    bootTape(7) = jmpSelf.highByte
+    bootTape(40) = 46   // Redirect R20 to byte 46 (JMP instruction of Initial Loader)
+    bootTape(41) = 0x04 // Overwrite byte 46 with 0x04 (JMP 0x004 low byte)
+    bootTape(42) = 0x00 // Overwrite byte 47 with 0x00 (JMP 0x004 high byte)
+
+    sys.rightTape.mount(mtsc.periph.TapeCartridge.fromProgramBytes(bootTape.toIndexedSeq, "BOOT"))
+
+    // Execute 43 iterations * 3 instructions + 1 instruction at 0x004 (MOVI R4, 0x42)
+    var steps = 0
+    while (steps < 43 * 3 + 1) {
+      sys.cpu.step()
+      steps += 1
+    }
+    assertEquals(sys.memory.readReg(RegId(4)), Word(0x0042))
+    assertEquals(sys.memory.psar, Address(6))
   }
 
   test("OperatorConsoleView renders Picture 1 Operator Panel and Picture 2 Tape Console") {

@@ -226,14 +226,23 @@ class Ccu(
       StepResult.Normal
 
     case Instruction.ByteIndirect(op, pReg, pInd, qReg, qInd, bump) =>
-      // Resolve source value
+      // I4..I6: Resolve source value (and bump Q pointer in I4 if Q is indirect and bump is set)
       val qAddr = Address(memory.readReg(qReg).unsigned)
+      if (bump && qInd) {
+        val qNew = (qAddr.unsigned + 1) & 0x7ff
+        memory.writeReg(qReg, Word(qNew))
+      }
       val qByte = if (qInd) memory.readByte(qAddr) else memory.readReg(qReg).lowByte
       memory.bWord = Word(qByte)
 
-      // Resolve destination
+      // I7..I9: Resolve destination address (and bump P pointer in I8 before I10 writeback)
       val pAddr = Address(memory.readReg(pReg).unsigned)
+      if (bump && pInd) {
+        val pNew = (pAddr.unsigned + 1) & 0x7ff
+        memory.writeReg(pReg, Word(pNew))
+      }
 
+      // I10: Execute transfer or compare
       op match {
         case ArithOp.Transfer =>
           if (pInd) {
@@ -252,18 +261,6 @@ class Ccu(
           val diff = pByte - qByte
           state.equal = diff == 0
           state.low = diff < 0
-      }
-
-      // Bump indexing: auto-increment indirect pointer(s) by +1
-      if (bump) {
-        if (pInd) {
-          val pNew = (memory.readReg(pReg).unsigned + 1) & 0x7ff
-          memory.writeReg(pReg, Word(pNew))
-        }
-        if (qInd) {
-          val qNew = (memory.readReg(qReg).unsigned + 1) & 0x7ff
-          memory.writeReg(qReg, Word(qNew))
-        }
       }
       StepResult.Normal
 
