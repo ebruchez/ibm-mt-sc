@@ -7,12 +7,12 @@ import mtsc.asm.Disassembler
 import mtsc.memory.CoreMemory
 
 /**
- * Renderer for the IBM MT/SC Customer Engineer Console (Picture 3).
+ * Renderer for the IBM MT/SC Customer Engineer Console.
  *
  * When `consoleState.faceplateInstalled` is true, delegates to `OperatorConsoleView`
- * to render the Operator Control Panel (Picture 1) and Tape Reader Console (Picture 2).
+ * to render the Operator Control Panel and Tape Reader Console.
  *
- * When `consoleState.faceplateInstalled` is false, renders the exposed CE chassis (Picture 3):
+ * When `consoleState.faceplateInstalled` is false, renders the exposed CE chassis:
  * - Top buttons: [Step] [4] [3] ─Display─ [2] [1] [Clear] & INITIAL LOADER (40..47)
  * - 11 Multiplexed CE Display Lamps with nibble dividers (Display 1..4 & Clock ID..IA B A)
  * - Bottom 5-position Slide Switches: [Bit|Word|P.S.|Jump|Auto] & [Proc|Edit|Addr|Data|Prog]
@@ -85,7 +85,7 @@ object CeConsoleView {
     val boxTitle = s"CE DISPLAY LAMPS ─ [${state.displayMode.rowLabel}: ${state.displayMode.description}]"
     terminal.drawBox(0, 3, terminal.width, 3, boxTitle, Some(AnsiColor.Cyan))
 
-    // Render the 11 multiplexed CE lamps from Picture 3 (with nibble dividers between 3|4 and 7|8)
+    // Render the 11 multiplexed CE lamps (with nibble dividers between 3|4 and 7|8)
     val ceLamps = state.computeLamps(cpu)
     var x = 2
     for (idx <- ceLamps.indices) {

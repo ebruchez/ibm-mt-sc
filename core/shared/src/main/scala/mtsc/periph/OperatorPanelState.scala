@@ -3,7 +3,7 @@ package mtsc.periph
 import mtsc.cpu.IoResult
 
 /**
- * 3-position red Power Rocker Switch on the left of the MT/SC console (Pictures 1 & 3).
+ * 3-position red Power Rocker Switch on the left of the MT/SC console (Operator Panel & CE Console).
  */
 enum PowerSwitchPosition(val label: String) {
   case Reset extends PowerSwitchPosition("RESET") // Momentary up (Master Reset)
@@ -28,7 +28,7 @@ object CompositionMode {
 }
 
 /**
- * Setup parameters prompted by the 11 indicator lamps in Operator Mode (Picture 1).
+ * Setup parameters prompted by the 11 indicator lamps in Operator Mode.
  *
  * Lamps 5..11 have two rows of legends:
  * - Primary (White text above the lamps, active when Lamp 4 SETUP is OFF)
@@ -71,7 +71,7 @@ object SetupParam {
 }
 
 /**
- * The 12-key keyboard at the bottom of the MT/SC console (Pictures 1 & 3).
+ * The 12-key keyboard at the bottom of the MT/SC console (Operator Panel & CE Console).
  *
  * Per IBM Manual 241-5429-0 (Page 57 & ILD 0308 on Page 107), depressing a key
  * generates a 4-bit code (KB CDE A, B, C, D) plus KB CDE RDY.
@@ -113,7 +113,7 @@ object ConsoleKey {
 }
 
 /**
- * The 8 pushbuttons on the Magnetic Tape Reader Console (Picture 2).
+ * The 8 pushbuttons on the Magnetic Tape Reader Console.
  */
 enum TapeConsoleButton(val row: Int, val col: Int, val topLabel: String, val bottomLabel: String) {
   // Top row (left to right)
@@ -130,10 +130,10 @@ enum TapeConsoleButton(val row: Int, val col: Int, val topLabel: String, val bot
 }
 
 /**
- * Static metadata for each of the 11 indicator lamps on the console (Pictures 1 & 3).
+ * Static metadata for each of the 11 indicator lamps on the console (Operator Panel & CE Console).
  *
- * Includes both the Operator Faceplate legends (Picture 1) and the exposed
- * Customer Engineer (CE) silk-screened legends (Picture 3 / ILD 0312).
+ * Includes both the Operator Faceplate legends and the exposed
+ * Customer Engineer (CE) silk-screened legends (ILD Page 0312).
  */
 final case class ConsoleLampSpec(
   number: Int,            // 1..11 (left to right)
@@ -150,10 +150,10 @@ final case class ConsoleLampSpec(
 object ConsoleLampSpec {
   /**
    * Complete specification of all 11 console indicator lamps (left to right),
-   * verified against Pictures 1 & 3 and IBM Manual 241-5429-0 ILD Page 0312.
+   * verified against IBM Manual 241-5429-0 ILD Page 0312.
    *
    * Note on Lamp 2 ("Test 4") and Lamp 9 ("IA"):
-   * In Picture 3, circular mounting holes sit under Lamp 2 and Lamp 9 across the
+   * Circular mounting holes sit under Lamp 2 and Lamp 9 on the exposed CE chassis across the
    * Display 3 and Display 2 rows, so "Inh"/"EOT" (Lamp 2) and "OP 3"/"O 3" (Lamp 9)
    * are silk-screened just to the left edge of those holes.
    */
@@ -173,7 +173,7 @@ object ConsoleLampSpec {
 }
 
 /**
- * Runtime state of the Operator Control Panel (Picture 1) and Console Keyboard.
+ * Runtime state of the Operator Control Panel and Console Keyboard.
  */
 class OperatorPanelState {
 

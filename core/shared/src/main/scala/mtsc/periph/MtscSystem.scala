@@ -24,7 +24,7 @@ class MtscSystem(
   def operatorPanel: OperatorPanelState = ioBus.operatorPanel
 
   /**
-   * Handles pressing one of the 8 pushbuttons on the Magnetic Tape Reader Console (Picture 2).
+   * Handles pressing one of the 8 pushbuttons on the Magnetic Tape Reader Console.
    */
   def pressTapeButton(button: TapeConsoleButton): String = button match {
     case TapeConsoleButton.LoadRight =>

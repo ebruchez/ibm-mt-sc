@@ -16,7 +16,7 @@ final class CcuState {
   var multiplex: Boolean = false // Background Multiplex printing mode active
   var halted: Boolean = false    // CPU stopped
 
-  // Hardware Latches exposed on the Customer Engineer Display Matrix (Picture 3 / ILD 0312)
+  // Hardware Latches exposed on the Customer Engineer Display Matrix (ILD Page 0312)
   var mal: Address = Address(0)  // 11-bit Memory Address Latches (Y 11..1, Display 1)
   var outputReg: Int = 0         // 8-bit Output Register (O 8..1, Display 2)
   var opCodeLatches: Int = 0     // 7-bit Operational Code Latches (OP 7..1, Display 3)

@@ -263,7 +263,7 @@ class CeConsoleSuite extends munit.FunSuite {
     assertEquals(sys.memory.psar, Address(6))
   }
 
-  test("OperatorConsoleView renders Picture 1 Operator Panel and Picture 2 Tape Console") {
+  test("OperatorConsoleView renders Operator Panel and Tape Console") {
     import mtsc.periph.MtscSystem
 
     val sys = new MtscSystem()
@@ -275,7 +275,7 @@ class CeConsoleSuite extends munit.FunSuite {
     CeConsoleView.render(term, sys.cpu, state)
     val rendered = term.renderToString()
 
-    // Picture 1: Operator Control Panel elements
+    // Operator Control Panel elements
     assert(rendered.contains("OPERATOR CONTROL PANEL (FACEPLATE ON)"))
     assert(rendered.contains("POWER"))
     assert(rendered.contains("CLEAR"))
@@ -287,8 +287,8 @@ class CeConsoleSuite extends munit.FunSuite {
     assert(rendered.contains("MAX IW"))
     assert(rendered.contains("[START]"))
 
-    // Picture 2: Magnetic Tape Console 8 pushbuttons
-    assert(rendered.contains("MAGNETIC TAPE CONSOLE (PICTURE 2)"))
+    // Magnetic Tape Console 8 pushbuttons
+    assert(rendered.contains("MAGNETIC TAPE CONSOLE"))
     assert(rendered.contains("REREAD"))
     assert(rendered.contains("SEARCH"))
     assert(rendered.contains("UNLOCK"))
@@ -319,7 +319,7 @@ class CeConsoleSuite extends munit.FunSuite {
     Main.handleCommand("i", sys, state, term, rawMode = true)
     assertEquals(sys.memory.psar, Address(42))
 
-    // [f] installs the Operator Faceplate (Picture 1)
+    // [f] installs the Operator Faceplate
     Main.handleCommand("f", sys, state, term, rawMode = true)
     assert(state.faceplateInstalled)
 

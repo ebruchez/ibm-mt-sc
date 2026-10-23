@@ -13,8 +13,8 @@ import mtsc.console.*
  * Scala.js Browser Frontend Controller for the IBM MT/SC (Model 6310/6320) Emulator.
  *
  * Drives:
- * 1. The Dual-Layer Console Unit (Picture 1 Operator Faceplate overlay <-> Picture 3 Exposed CE Chassis)
- * 2. The 8-Button Magnetic Tape Transport Console (Picture 2)
+ * 1. The Dual-Layer Console Unit (Operator Faceplate overlay <-> Exposed CE Chassis)
+ * 2. The 8-Button Magnetic Tape Transport Console
  * 3. The True-Proportional Selectric Composer Galley Proof Sheet (14 cps real-time pacing)
  * 4. The Customer Engineer Diagnostic Drawer (32 Working Registers, Disassembly, Core Memory, Event Log)
  */
@@ -35,7 +35,7 @@ object WebMain {
     val root = doc.getElementById("mtsc-app")
     if (root == null || js.isUndefined(root)) return
 
-    // Start in Operator Faceplate mode (Picture 1) by default so the user can unlatch it to reveal Picture 3
+    // Start in Operator Faceplate mode by default so the user can unlatch it to reveal the CE chassis
     consoleState.faceplateInstalled = true
     consoleState.viewGalley = true
 
@@ -98,7 +98,7 @@ object WebMain {
       }
     }
 
-    // Faceplate toggle (Picture 1 <-> Picture 3)
+    // Faceplate toggle (Operator Faceplate <-> CE Chassis)
     onClick("btn-toggle-faceplate", () => {
       consoleState.toggleFaceplate()
       playClickSound(220)
@@ -129,7 +129,7 @@ object WebMain {
       playClickSound(180)
     })
 
-    // CE Top Pushbuttons (Picture 3: Step, Display 4, 3, 2, 1, Clear, ClockDefault)
+    // CE Top Pushbuttons (Step, Display 4, 3, 2, 1, Clear, ClockDefault)
     onClick("ce-btn-step", () => {
       stopContinuousRun()
       stepOnce(doc)
@@ -263,7 +263,7 @@ object WebMain {
       })
     }
 
-    // Picture 2: 8 Magnetic Tape Transport Console Pushbuttons
+    // 8 Magnetic Tape Transport Console Pushbuttons
     val tapeButtons: Seq[(String, TapeConsoleButton)] = Seq(
       ("tape-btn-reread",       TapeConsoleButton.Reread),
       ("tape-btn-skip",         TapeConsoleButton.Skip),
@@ -694,17 +694,17 @@ object WebMain {
       }
     }
 
-    // 1. Faceplate state (Picture 1 vs Picture 3)
+    // 1. Faceplate state (Operator Faceplate vs CE Chassis)
     setClassFlag("console-unit", "faceplate-removed", !consoleState.faceplateInstalled)
     setText(
       "btn-toggle-faceplate",
-      if (consoleState.faceplateInstalled) "Unlatch Operator Faceplate (Reveal Picture 3 CE Console)"
-      else "Install Operator Faceplate (Show Picture 1 Operator Console)"
+      if (consoleState.faceplateInstalled) "Unlatch Operator Faceplate (Reveal CE Console)"
+      else "Install Operator Faceplate (Show Operator Console)"
     )
     setText(
       "console-mode-badge",
-      if (consoleState.faceplateInstalled) "OPERATOR MODE (FACEPLATE INSTALLED — PICTURE 1)"
-      else s"CUSTOMER ENGINEER MODE (EXPOSED CHASSIS — PICTURE 3 • ${consoleState.displayMode.rowLabel.toUpperCase})"
+      if (consoleState.faceplateInstalled) "OPERATOR MODE (FACEPLATE INSTALLED)"
+      else s"CUSTOMER ENGINEER MODE (EXPOSED CHASSIS • ${consoleState.displayMode.rowLabel.toUpperCase})"
     )
 
     // 2. Power Rocker Switch
@@ -725,7 +725,7 @@ object WebMain {
       )
     }
 
-    // Highlight active CE Display row in Picture 3
+    // Highlight active CE Display row
     setClassFlag("ce-btn-dply-4", "active", consoleState.displayMode == CeDisplayMode.Display4)
     setClassFlag("ce-btn-dply-3", "active", consoleState.displayMode == CeDisplayMode.Display3)
     setClassFlag("ce-btn-dply-2", "active", consoleState.displayMode == CeDisplayMode.Display2)
@@ -772,7 +772,7 @@ object WebMain {
     }
     setText("op-active-prompt", promptInfo)
 
-    // 6. Picture 2: 8-Button Magnetic Tape Transport Console
+    // 6. 8-Button Magnetic Tape Transport Console
     val rTape = system.rightTape
     val lTape = system.leftTape
     val coverUnlocked = rTape.coverUnlocked && lTape.coverUnlocked

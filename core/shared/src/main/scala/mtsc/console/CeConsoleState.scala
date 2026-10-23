@@ -18,7 +18,7 @@ enum CeConsoleMode(val displayName: String) {
 }
 
 /**
- * Top-row Display Selector buttons on the exposed CE Chassis (Picture 3 & ILD Page 0312):
+ * Top-row Display Selector buttons on the exposed CE Chassis (ILD Page 0312):
  * [4] — [3] — Display — [2] — [1], plus ClockDefault when no Display button is depressed.
  */
 enum CeDisplayMode(val buttonNumber: Option[Int], val rowLabel: String, val description: String) {
@@ -30,7 +30,7 @@ enum CeDisplayMode(val buttonNumber: Option[Int], val rowLabel: String, val desc
 }
 
 /**
- * Left 5-position slide switch at the bottom of the CE Chassis (Picture 3):
+ * Left 5-position slide switch at the bottom of the CE Chassis:
  * Controls clock stepping granularity when [Step] is pressed.
  */
 enum CeStepGranularity(val label: String) {
@@ -42,7 +42,7 @@ enum CeStepGranularity(val label: String) {
 }
 
 /**
- * Right 5-position slide switch at the bottom of the CE Chassis (Picture 3 & ILD 0312):
+ * Right 5-position slide switch at the bottom of the CE Chassis (ILD Page 0312):
  * "EDIT MEMORY SELECTOR" controlling normal processing vs manual address/data editing.
  */
 enum CeEditSelector(val label: String) {
@@ -55,7 +55,7 @@ enum CeEditSelector(val label: String) {
 
 /**
  * Represents one row of the silk-screened "INITIAL LOADER" table on the upper right
- * of the CE Chassis (Picture 3), for memory byte addresses 40 through 47.
+ * of the CE Chassis, for memory byte addresses 40 through 47.
  */
 final case class InitialLoaderRow(
   byteAddress: Int,
@@ -79,7 +79,7 @@ final case class InitialLoaderRow(
 
 object InitialLoaderTable {
   /**
-   * Exact 8-byte (4-instruction) bootstrap loader silk-screened on the CE Console (Picture 3):
+   * Exact 8-byte (4-instruction) bootstrap loader silk-screened on the CE Console:
    *
    *   40: 0000 0000
    *   41: 0000 0000
@@ -130,10 +130,10 @@ final case class LampState(
  */
 class CeConsoleState {
 
-  // Faceplate state: false = Exposed CE Chassis (Picture 3), true = Operator Faceplate ON (Picture 1)
+  // Faceplate state: false = Exposed CE Chassis, true = Operator Faceplate ON
   var faceplateInstalled: Boolean = false
 
-  // CE Console top buttons & bottom slide switches (Picture 3)
+  // CE Console top buttons & bottom slide switches
   var displayMode: CeDisplayMode = CeDisplayMode.Display1
   var stepGranularity: CeStepGranularity = CeStepGranularity.Auto
   var editSelector: CeEditSelector = CeEditSelector.Proc
@@ -173,7 +173,7 @@ class CeConsoleState {
 
   def toggleFaceplate(): Boolean = {
     faceplateInstalled = !faceplateInstalled
-    val viewName = if (faceplateInstalled) "Operator Faceplate ON (Picture 1)" else "CE Chassis Exposed (Picture 3)"
+    val viewName = if (faceplateInstalled) "Operator Faceplate ON" else "CE Chassis Exposed"
     log(s"Console cover changed: $viewName")
     statusMessage = s"Switched to $viewName."
     faceplateInstalled
@@ -242,10 +242,10 @@ class CeConsoleState {
   /**
    * Computes the hardware lamp state for all 11 lamps according to ILD Page 0312 (Manual p. 111).
    *
-   * - When `faceplateInstalled == true` (Operator Mode, Picture 1):
+   * - When `faceplateInstalled == true` (Operator Mode):
    *   Lamps show Operator prompts (`RESET/HYPHEN`, `EOT/TYPE`, `SETUP`, `CLEAR..PARA INDENT`,
    *   or `LEADER SPACE..DEAD KEY` when `SETUP` is lit).
-   * - When `faceplateInstalled == false` (CE Mode, Picture 3):
+   * - When `faceplateInstalled == false` (CE Mode):
    *   Lamps are multiplexed by `displayMode` (`Display 1..4` or `ClockDefault`).
    */
   def computeLamps(cpu: Ccu): Vector[LampState] = {

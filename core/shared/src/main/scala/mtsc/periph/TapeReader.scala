@@ -22,7 +22,7 @@ class TapeReader(
   var cycleRemaining: Int = 0
   var readCount: Long = 0
 
-  // Tape Transport Console states (Picture 2 & Training Guide p. 15)
+  // Tape Transport Console states (Training Guide p. 15)
   var isLoadedOnHub: Boolean = false // True when LOAD has threaded the tape from the cartridge
   var coverUnlocked: Boolean = true  // Interlocked: can only unlock when tape is unloaded into cartridge
   var searching: Boolean = false     // True while a Reference Code search is active
@@ -51,7 +51,7 @@ class TapeReader(
   }
 
   /**
-   * Simulates pressing LOAD LEFT or LOAD RIGHT on the Tape Transport Console (Picture 2).
+   * Simulates pressing LOAD LEFT or LOAD RIGHT on the Tape Transport Console.
    * Threads the mounted cartridge to the first recording position and locks the station cover.
    */
   def pressLoad(): Boolean = {
@@ -68,7 +68,7 @@ class TapeReader(
   }
 
   /**
-   * Simulates pressing UNLOAD LEFT or UNLOAD RIGHT on the Tape Transport Console (Picture 2).
+   * Simulates pressing UNLOAD LEFT or UNLOAD RIGHT on the Tape Transport Console.
    * Rewinds the tape back into the cartridge so the station cover can be unlocked.
    */
   def pressUnload(): Boolean = {
@@ -84,7 +84,7 @@ class TapeReader(
   }
 
   /**
-   * Simulates pressing COVER UNLOCK on the Tape Transport Console (Picture 2).
+   * Simulates pressing COVER UNLOCK on the Tape Transport Console.
    * Per Training Guide p. 15, the cover pin can only retract when the tape is unloaded into the cartridge.
    */
   def pressCoverUnlock(): Boolean = {
@@ -97,7 +97,7 @@ class TapeReader(
   }
 
   /**
-   * Simulates pressing REREAD on the Tape Transport Console (Picture 2).
+   * Simulates pressing REREAD on the Tape Transport Console.
    * Backsteps the tape to the start of the current line (or track 0) and clears parityError.
    */
   def pressReread(): Int = {
@@ -116,7 +116,7 @@ class TapeReader(
   }
 
   /**
-   * Simulates pressing SKIP on the Tape Transport Console (Picture 2).
+   * Simulates pressing SKIP on the Tape Transport Console.
    * Advances the tape past the current line (next Carrier Return) or block sentinel.
    */
   def pressSkip(): Int = {
@@ -136,7 +136,7 @@ class TapeReader(
   }
 
   /**
-   * Simulates pressing SEARCH on the Tape Transport Console (Picture 2).
+   * Simulates pressing SEARCH on the Tape Transport Console.
    * Advances the tape to the next Reference Code / block boundary.
    */
   def pressSearch(): Int = {

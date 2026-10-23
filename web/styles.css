@@ -190,7 +190,7 @@ button, select {
 }
 
 /* ==========================================================================
-   DUAL-LAYER CONSOLE UNIT (PICTURE 1 OPERATOR FACEPLATE <-> PICTURE 3 CE CHASSIS)
+   DUAL-LAYER CONSOLE UNIT (OPERATOR FACEPLATE <-> CE CHASSIS)
    ========================================================================== */
 .console-unit {
   position: relative;
@@ -208,7 +208,7 @@ button, select {
   }
 }
 
-/* When Faceplate is Removed (Picture 3 Exposed Brushed Aluminum CE Chassis) */
+/* When Faceplate is Removed (Exposed Brushed Aluminum CE Chassis) */
 .console-unit.faceplate-removed {
   background: linear-gradient(180deg, #c5c4bd 0%, #b2b1aa 55%, #a7a69f 100%);
   border-color: #8c8b85;
@@ -301,7 +301,7 @@ button, select {
   translate: 0 2px;
 }
 
-/* Silk-Screened INITIAL LOADER Table on Upper Right of Picture 3 */
+/* Silk-Screened INITIAL LOADER Table on Upper Right of CE Chassis */
 .ce-initial-loader {
   background: rgba(255, 255, 255, 0.22);
   border: 1.5px solid #33322e;
@@ -419,7 +419,7 @@ button, select {
   gap: 6px;
 }
 
-/* Operator Overlay Legends (Visible when Faceplate is Installed — Picture 1) */
+/* Operator Overlay Legends (Visible when Faceplate is Installed) */
 .operator-overlay {
   display: grid;
   grid-template-columns: repeat(11, 1fr);
@@ -460,7 +460,7 @@ button, select {
   color: #f87171;
 }
 
-/* CE Underlay Legends (Visible when Faceplate is Removed — Picture 3) */
+/* CE Underlay Legends (Visible when Faceplate is Removed) */
 .ce-underlay {
   display: none;
 }
@@ -545,12 +545,12 @@ button, select {
   border-radius: 4px;
 }
 
-/* Vertical nibble divider lines between columns 3|4 and 7|8 in Picture 3 */
+/* Vertical nibble divider lines between columns 3|4 and 7|8 */
 .ce-col.nibble-sep {
   border-right: 2px solid #2b2a27;
 }
 
-/* Circular chassis access holes under Lamp 2 ("Test 4") and Lamp 9 ("IA") in Picture 3 */
+/* Circular chassis access holes under Lamp 2 ("Test 4") and Lamp 9 ("IA") */
 .ce-col.hole-shifted {
   display: flex;
   align-items: center;
@@ -688,7 +688,7 @@ button, select {
   min-height: 16px;
 }
 
-/* CE Bottom 5-Position Slide Switches (Visible when Faceplate is Removed — Picture 3) */
+/* CE Bottom 5-Position Slide Switches (Visible when Faceplate is Removed) */
 .ce-bottom-sliders {
   display: none;
   justify-content: space-around;
@@ -808,7 +808,7 @@ button, select {
 }
 
 /* ==========================================================================
-   MIDDLE WORKBENCH: PICTURE 2 TAPE CONSOLE + SELECTRIC COMPOSER GALLEY SHEET
+   MIDDLE WORKBENCH: TAPE CONSOLE + SELECTRIC COMPOSER GALLEY SHEET
    ========================================================================== */
 .workbench-grid {
   display: grid;
@@ -862,7 +862,7 @@ button, select {
   color: #fde047;
 }
 
-/* Picture 2: 2x4 Square Cream Pushbuttons */
+/* Magnetic Tape Console: 2x4 Square Cream Pushbuttons */
 .tape-buttons-chassis {
   background: #474b52;
   padding: 20px 18px;

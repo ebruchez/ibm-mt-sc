@@ -4,8 +4,8 @@ import mtsc.cpu.Ccu
 import mtsc.periph.*
 
 /**
- * Renderer for the IBM MT/SC Operator Control Panel (Picture 1) and
- * Magnetic Tape Reader Control Panel (Picture 2).
+ * Renderer for the IBM MT/SC Operator Control Panel and
+ * Magnetic Tape Reader Control Panel.
  *
  * Activated when the dark gray Operator Faceplate is installed over the CE chassis
  * (`consoleState.faceplateInstalled == true`).
@@ -40,7 +40,7 @@ object OperatorConsoleView {
   }
 
   /**
-   * Renders Picture 1: The dark gray Operator Control Panel with:
+   * Renders the dark gray Operator Control Panel with:
    * - Red 3-position Power Rocker Switch (RESET / ON / OFF)
    * - 11 Indicator Lamps with White Primary top legends and Red Secondary bottom legends
    * - 12-Key Console Keyboard (START, 0..9, R) with sub-labels (TAPE, NO, YES, J, L, C, R, D, LINE STOP)
@@ -158,7 +158,7 @@ object OperatorConsoleView {
   }
 
   /**
-   * Renders Picture 2: The 8-button Magnetic Tape Reader Control Panel
+   * Renders the 8-button Magnetic Tape Reader Control Panel
    * (REREAD, SKIP, SEARCH, COVER UNLOCK / UNLOAD LEFT, LOAD LEFT, UNLOAD RIGHT, LOAD RIGHT)
    * along with live Left & Right tape station status.
    */
@@ -169,7 +169,7 @@ object OperatorConsoleView {
   ): Unit = {
     val boxW = 50
     val boxH = 11
-    terminal.drawBox(0, 16, boxW, boxH, "MAGNETIC TAPE CONSOLE (PICTURE 2)", Some(AnsiColor.White))
+    terminal.drawBox(0, 16, boxW, boxH, "MAGNETIC TAPE CONSOLE", Some(AnsiColor.White))
 
     val rightOpt = sysBusOpt.map(_.rightTape)
     val leftOpt  = sysBusOpt.map(_.leftTape)
