@@ -48,7 +48,7 @@ object Main {
 
     // If an initial file was specified, mount it
     initialFile.foreach { path =>
-      mountFile(path, system, consoleState)
+      mountFile(path, Device.RightTape, system, consoleState)
     }
 
     // Interactive event loop
@@ -92,13 +92,19 @@ object Main {
     consoleState.statusMessage = s"Loaded ${prog.name}.$speedNote Press [r] to run, [a] to toggle pacing."
   }
 
-  def mountFile(path: String, system: MtscSystem, consoleState: CeConsoleState): Boolean = {
+  def mountFile(
+    path: String,
+    station: Device,
+    system: MtscSystem,
+    consoleState: CeConsoleState
+  ): Boolean = {
     try {
       val content = scala.io.Source.fromFile(path).mkString
       val filename = new java.io.File(path).getName
-      system.loadTape(Device.RightTape, TapeCartridge.fromText(content, filename))
-      consoleState.log(f"Mounted '$filename' (${content.length} chars) on Right Tape Reader.")
-      consoleState.statusMessage = f"Tape mounted: '$filename' (${content.length} chars). Press [r] to compose."
+      system.loadTape(station, TapeCartridge.fromText(content, filename))
+      val stName = if (station == Device.LeftTape) "Left" else "Right"
+      consoleState.log(f"Mounted '$filename' (${content.length} chars) on $stName Tape Reader.")
+      consoleState.statusMessage = f"Tape mounted on $stName: '$filename' (${content.length} chars). Press [r] to compose."
       true
     } catch {
       case e: Exception =>
@@ -149,7 +155,7 @@ object Main {
     consoleState: CeConsoleState,
     terminal: AnsiTerminal,
     rawMode: Boolean,
-    mountFileFn: (String, MtscSystem, CeConsoleState) => Boolean = (_, _, _) => false,
+    mountFileFn: (String, Device, MtscSystem, CeConsoleState) => Boolean = (_, _, _, _) => false,
     runFn: () => Unit = () => ()
   ): Boolean = {
     if (cmd.equalsIgnoreCase("q") || cmd.equalsIgnoreCase("quit") || cmd.equalsIgnoreCase("exit")) {
@@ -253,10 +259,12 @@ object Main {
       case "m" | "mode" =>
         consoleState.cycleEditSelector()
 
-      case "i" | "init" | "loader" =>
-        InitialLoaderTable.loadIntoMemory(system.memory, paperTape = false, leftStation = false)
-        consoleState.log("Keyed 8-byte INITIAL LOADER into Core Memory (bytes 40..47, PSAR=42).")
-        consoleState.statusMessage = "INITIAL LOADER keyed into memory addresses 40..47 (PSAR = 0x02A)."
+      case s if s == "i" || s == "init" || s == "loader" || s == "i right" || s == "i left" =>
+        val isLeft = s.endsWith("left") || (s == "i" && system.leftTape.isTapeLoaded && !system.rightTape.isTapeLoaded)
+        InitialLoaderTable.loadIntoMemory(system.memory, paperTape = false, leftStation = isLeft)
+        val stName = if (isLeft) "Left Station (m=1)" else "Right Station (m=0)"
+        consoleState.log(s"Keyed 8-byte INITIAL LOADER for $stName into Core Memory (bytes 40..47, PSAR=42).")
+        consoleState.statusMessage = s"INITIAL LOADER ($stName) keyed into memory (PSAR = 0x02A)."
 
       case "p" | "setup" =>
         val nextParam = system.operatorPanel.advanceSetupPrompt(includeSecondary = true)
@@ -279,6 +287,8 @@ object Main {
           TapeConsoleButton.Reread,
           TapeConsoleButton.Skip,
           TapeConsoleButton.Search,
+          TapeConsoleButton.UnloadLeft,
+          TapeConsoleButton.LoadLeft,
           TapeConsoleButton.UnloadRight,
           TapeConsoleButton.CoverUnlock,
           TapeConsoleButton.LoadRight
@@ -304,16 +314,48 @@ object Main {
         consoleState.log("Mounted historical 4-paragraph tape on Right Tape Reader.")
         consoleState.statusMessage = "Mounted historical 4-paragraph tape cartridge on Right Tape Reader."
 
+      case "t left" | "tape left" =>
+        system.loadTape(Device.LeftTape, TapeCartridge.fromText(TapeCartridge.HistoricalMergeSampleText, "Merge Correction Tape"))
+        consoleState.log("Mounted correction tape on Left Tape Reader.")
+        consoleState.statusMessage = "Mounted correction tape cartridge on Left Tape Reader."
+
+      case "t right" | "tape right" =>
+        system.loadTape(Device.RightTape, TapeCartridge.fromText(TapeCartridge.HistoricalSampleText, "Historical MT Tape"))
+        consoleState.log("Mounted historical 4-paragraph tape on Right Tape Reader.")
+        consoleState.statusMessage = "Mounted historical 4-paragraph tape cartridge on Right Tape Reader."
+
       case s if s.startsWith("t ") || s.startsWith("tape ") =>
-        val path = s.substring(s.indexOf(' ') + 1).trim
-        mountFileFn(path, system, consoleState)
+        val rest = s.substring(s.indexOf(' ') + 1).trim
+        val (station, path) =
+          if (rest.startsWith("left ")) (Device.LeftTape, rest.substring(5).trim)
+          else if (rest.startsWith("right ")) (Device.RightTape, rest.substring(6).trim)
+          else (Device.RightTape, rest)
+        mountFileFn(path, station, system, consoleState)
 
       case "e" =>
+        val targetTape = if (system.leftTape.isTapeLoaded && !system.rightTape.isTapeLoaded) system.leftTape else system.rightTape
+        val targetName = if (targetTape eq system.leftTape) "Left" else "Right"
+        if (targetTape.injectParityError()) {
+          consoleState.log(f"Injected parity error on track ${targetTape.headPosition} of $targetName Tape.")
+          consoleState.statusMessage = f"Parity error injected on $targetName track ${targetTape.headPosition}. [ERR] lamp will light on next read."
+        } else {
+          consoleState.statusMessage = s"Cannot inject parity error: no $targetName tape mounted or end reached."
+        }
+
+      case "e left" =>
+        if (system.leftTape.injectParityError()) {
+          consoleState.log(f"Injected parity error on track ${system.leftTape.headPosition} of Left Tape.")
+          consoleState.statusMessage = f"Parity error injected on track ${system.leftTape.headPosition} of Left Tape."
+        } else {
+          consoleState.statusMessage = "Cannot inject parity error: no Left Tape mounted or end reached."
+        }
+
+      case "e right" =>
         if (system.rightTape.injectParityError()) {
           consoleState.log(f"Injected parity error on track ${system.rightTape.headPosition} of Right Tape.")
-          consoleState.statusMessage = f"Parity error injected on track ${system.rightTape.headPosition}. [ERR] lamp will light on next read."
+          consoleState.statusMessage = f"Parity error injected on track ${system.rightTape.headPosition} of Right Tape."
         } else {
-          consoleState.statusMessage = "Cannot inject parity error: no tape mounted or end reached."
+          consoleState.statusMessage = "Cannot inject parity error: no Right Tape mounted or end reached."
         }
 
       case "x" | "reset" =>

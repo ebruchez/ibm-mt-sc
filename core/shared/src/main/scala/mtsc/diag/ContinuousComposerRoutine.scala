@@ -1,5 +1,8 @@
 package mtsc.diag
 
+import mtsc.types.*
+import mtsc.memory.CoreMemory
+
 /**
  * Continuous Multi-Line Document Composition Microprogram.
  *
@@ -9,6 +12,27 @@ package mtsc.diag
  * and loops until End-of-Block sentinel.
  */
 object ContinuousComposerRoutine {
+
+  /**
+   * Address of the `IN R4, TAPE_R` instruction within the microprogram (byte 558).
+   * Bit 8 (the `m` bit) selects Right Tape (0) vs Left Tape (1).
+   */
+  val TapeInputInstructionAddress: Address = Address(558)
+
+  /**
+   * Patches the input instruction at address 558 to read from either RightTape or LeftTape.
+   */
+  def setInputStation(memory: CoreMemory, station: Device): Unit = {
+    require(station == Device.RightTape || station == Device.LeftTape, "Station must be RightTape or LeftTape")
+    val cur = memory.readWord(TapeInputInstructionAddress)
+    val updated = if (station == Device.LeftTape) cur.withBit(8, true) else cur.withBit(8, false)
+    memory.writeWord(TapeInputInstructionAddress, updated)
+  }
+
+  def getInputStation(memory: CoreMemory): Device = {
+    val word = memory.readWord(TapeInputInstructionAddress)
+    if (word.bit(8)) Device.LeftTape else Device.RightTape
+  }
 
   val Source: String =
     s"""

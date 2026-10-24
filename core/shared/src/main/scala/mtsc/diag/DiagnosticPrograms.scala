@@ -34,6 +34,20 @@ object DiagnosticPrograms {
     val name = "Tape Bootstrap Loader"
     val description = "Authentic 3-step loop reading characters into memory from tape reader"
 
+    val TapeInputInstructionAddress: Address = Address(546)
+
+    def setInputStation(memory: CoreMemory, station: Device): Unit = {
+      require(station == Device.RightTape || station == Device.LeftTape, "Station must be RightTape or LeftTape")
+      val cur = memory.readWord(TapeInputInstructionAddress)
+      val updated = if (station == Device.LeftTape) cur.withBit(8, true) else cur.withBit(8, false)
+      memory.writeWord(TapeInputInstructionAddress, updated)
+    }
+
+    def getInputStation(memory: CoreMemory): Device = {
+      val word = memory.readWord(TapeInputInstructionAddress)
+      if (word.bit(8)) Device.LeftTape else Device.RightTape
+    }
+
     val source: String =
       """
         .org 546
@@ -222,6 +236,20 @@ object DiagnosticPrograms {
     val id = "composer_demo"
     val name = "Tape to Justified Composer Print"
     val description = "Reads tape input, looks up font widths, computes space expansion, and prints justified galley line"
+
+    val TapeInputInstructionAddress: Address = Address(550)
+
+    def setInputStation(memory: CoreMemory, station: Device): Unit = {
+      require(station == Device.RightTape || station == Device.LeftTape, "Station must be RightTape or LeftTape")
+      val cur = memory.readWord(TapeInputInstructionAddress)
+      val updated = if (station == Device.LeftTape) cur.withBit(8, true) else cur.withBit(8, false)
+      memory.writeWord(TapeInputInstructionAddress, updated)
+    }
+
+    def getInputStation(memory: CoreMemory): Device = {
+      val word = memory.readWord(TapeInputInstructionAddress)
+      if (word.bit(8)) Device.LeftTape else Device.RightTape
+    }
 
     val source: String =
       s"""

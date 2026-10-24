@@ -93,6 +93,13 @@ object TapeCartridge {
       |
       |Font escapement values are looked up automatically and line deficits are divided across inter-word space bands. The single-element spherical typing head prints camera-ready proofs at 14 characters per second.""".stripMargin
 
+  val HistoricalMergeSampleText: String =
+    """CORRECTION MERGE TAPE:
+      |
+      |The IBM MT/SC Dual Tape Reader (Model 6310) enables merging of revised copy from the Left Station into the original recorded tape on the Right Station.
+      |
+      |Correction blocks and updated paragraphs are read from the Left Tape during playback when Merge is enabled.""".stripMargin
+
   /**
    * Creates a tape cartridge from plain text.
    * Normalizes newlines, prepends a FeedCode, and appends EndOfBlock sentinel.

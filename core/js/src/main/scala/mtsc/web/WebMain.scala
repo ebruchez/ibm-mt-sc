@@ -28,6 +28,7 @@ object WebMain {
   private var audioCtx: Option[js.Dynamic] = None
   private var memoryOverlayLayout: String = "2x1k"
   private var showAsciiInOverlay: Boolean = false
+  private var selectedTapeTarget: Device = Device.RightTape
 
   def main(args: Array[String]): Unit = {
     if (js.typeOf(js.Dynamic.global.document) == "undefined") return
@@ -57,18 +58,26 @@ object WebMain {
       system.operatorPanel.measure = 140
       system.memory.writeReg(RegId(30), Word(140))
       system.memory.writeReg(RegId(28), Word(110))
-      if (!system.rightTape.isTapeLoaded) {
+      if (!system.rightTape.isTapeLoaded && !system.leftTape.isTapeLoaded) {
         system.loadTape(
           Device.RightTape,
           TapeCartridge.fromText(TapeCartridge.HistoricalSampleText, "Historical MT Tape")
         )
       }
+      val targetStation = if (system.leftTape.isTapeLoaded && !system.rightTape.isTapeLoaded) Device.LeftTape else selectedTapeTarget
+      system.setInputStation(targetStation)
     } else if (prog == DiagnosticPrograms.EndToEndCompositionDemo || prog == DiagnosticPrograms.TapeBootstrapLoader) {
       system.operatorPanel.measure = 100
       system.memory.writeReg(RegId(30), Word(100))
       system.memory.writeReg(RegId(28), Word(70))
       val sample = "The electronic logic used in the CCU is in the SLD family."
-      system.loadTape(Device.RightTape, TapeCartridge.fromText(sample, "MTSC Test Tape"))
+      val targetStation = if (system.leftTape.isTapeLoaded && !system.rightTape.isTapeLoaded) Device.LeftTape else selectedTapeTarget
+      system.loadTape(targetStation, TapeCartridge.fromText(sample, "MTSC Test Tape"))
+      if (prog == DiagnosticPrograms.TapeBootstrapLoader) {
+        DiagnosticPrograms.TapeBootstrapLoader.setInputStation(system.memory, targetStation)
+      } else {
+        DiagnosticPrograms.EndToEndCompositionDemo.setInputStation(system.memory, targetStation)
+      }
     }
 
     if (prog == DiagnosticPrograms.TapeBootstrapLoader) {
@@ -182,8 +191,17 @@ object WebMain {
       InitialLoaderTable.loadIntoMemory(system.memory, paperTape = false, leftStation = false)
       system.cpu.state.mal = Address(42)
       consoleState.memoryInspectionAddress = Address(32)
-      consoleState.log("Keyed 8-byte INITIAL LOADER into Core Memory (bytes 40..47, PSAR=42).")
-      consoleState.statusMessage = "INITIAL LOADER (40..47) loaded into Core Memory (PSAR = 42 / 0x02A)."
+      consoleState.log("Keyed 8-byte INITIAL LOADER for Right Station into Core Memory (bytes 40..47, PSAR=42).")
+      consoleState.statusMessage = "INITIAL LOADER (Right Station, m=0) loaded into Core Memory (PSAR = 42 / 0x02A)."
+      playClickSound(600)
+    })
+    onClick("ce-btn-init-loader-left", () => {
+      stopContinuousRun()
+      InitialLoaderTable.loadIntoMemory(system.memory, paperTape = false, leftStation = true)
+      system.cpu.state.mal = Address(42)
+      consoleState.memoryInspectionAddress = Address(32)
+      consoleState.log("Keyed 8-byte INITIAL LOADER for Left Station (m=1) into Core Memory (bytes 40..47, PSAR=42).")
+      consoleState.statusMessage = "INITIAL LOADER (Left Station, m=1) loaded into Core Memory (PSAR = 42 / 0x02A)."
       playClickSound(600)
     })
 
@@ -307,13 +325,62 @@ object WebMain {
       }
       playClickSound(460)
     })
-    onClick("btn-inject-parity", () => {
-      if (system.rightTape.injectParityError()) {
-        consoleState.log(f"Injected parity fault on Right Tape track ${system.rightTape.headPosition}.")
-        consoleState.statusMessage = f"Parity fault injected on track ${system.rightTape.headPosition}. Next read will stall with RESET/ERR lamp."
+    onClick("pill-station-right", () => {
+      selectedTapeTarget = Device.RightTape
+      system.setInputStation(Device.RightTape)
+      consoleState.statusMessage = "Target Tape Station set to Right Station (Primary Input)."
+      playClickSound(400)
+      renderAll(doc)
+    })
+    onClick("pill-station-left", () => {
+      selectedTapeTarget = Device.LeftTape
+      system.setInputStation(Device.LeftTape)
+      consoleState.statusMessage = "Target Tape Station set to Left Station (Merge / Revision Tape)."
+      playClickSound(400)
+      renderAll(doc)
+    })
+    onClick("btn-quick-sample-left", () => {
+      system.loadTape(Device.LeftTape, TapeCartridge.fromText(TapeCartridge.HistoricalMergeSampleText, "Merge Revision Tape"))
+      selectedTapeTarget = Device.LeftTape
+      system.setInputStation(Device.LeftTape)
+      consoleState.log("Mounted sample revision tape on Left Station.")
+      consoleState.statusMessage = "Sample revision tape mounted and loaded on Left Station."
+      playClickSound(550)
+      renderAll(doc)
+    })
+    onClick("btn-quick-sample-right", () => {
+      system.loadTape(Device.RightTape, TapeCartridge.fromText(TapeCartridge.HistoricalSampleText, "Historical MT Tape"))
+      selectedTapeTarget = Device.RightTape
+      system.setInputStation(Device.RightTape)
+      consoleState.log("Mounted historical 4-paragraph tape on Right Station.")
+      consoleState.statusMessage = "Historical manuscript tape mounted and loaded on Right Station."
+      playClickSound(550)
+      renderAll(doc)
+    })
+    onClick("btn-mount-sample-tape", () => {
+      val (sampleText, label, name) = if (selectedTapeTarget == Device.LeftTape) {
+        (TapeCartridge.HistoricalMergeSampleText, "Merge Revision Tape", "Left Station")
       } else {
-        consoleState.statusMessage = "Cannot inject parity error: mount and load Right Tape first."
+        (TapeCartridge.HistoricalSampleText, "Historical MT Tape", "Right Station")
       }
+      system.loadTape(selectedTapeTarget, TapeCartridge.fromText(sampleText, label))
+      system.setInputStation(selectedTapeTarget)
+      consoleState.log(s"Mounted $label on $name.")
+      consoleState.statusMessage = s"Mounted $label on $name. Ready for composition."
+      playClickSound(550)
+      renderAll(doc)
+    })
+    onClick("btn-inject-parity", () => {
+      val target = if (selectedTapeTarget == Device.LeftTape) system.leftTape else system.rightTape
+      val name = if (selectedTapeTarget == Device.LeftTape) "Left Tape" else "Right Tape"
+      if (target.injectParityError()) {
+        consoleState.log(f"Injected parity fault on $name track ${target.headPosition}.")
+        consoleState.statusMessage = f"Parity fault injected on $name track ${target.headPosition}. Next read will stall with RESET/ERR lamp."
+      } else {
+        consoleState.statusMessage = s"Cannot inject parity error: mount and load $name first."
+      }
+      playClickSound(300)
+      renderAll(doc)
     })
     onClick("btn-clear-galley", () => {
       system.paper.clear()
@@ -367,11 +434,16 @@ object WebMain {
         val text = ta.value.toString
         if (text.trim.nonEmpty) {
           stopContinuousRun()
-          system.loadTape(Device.RightTape, TapeCartridge.fromText(text, "Custom Copy Tape"))
+          val name = if (selectedTapeTarget == Device.LeftTape) "Left Station" else "Right Station"
+          val label = if (selectedTapeTarget == Device.LeftTape) "Custom Revision Tape" else "Custom Copy Tape"
+          system.loadTape(selectedTapeTarget, TapeCartridge.fromText(text, label))
           loadProgram(0) // Load Continuous Composition program
-          system.loadTape(Device.RightTape, TapeCartridge.fromText(text, "Custom Copy Tape"))
-          consoleState.log(s"Mounted Custom Copy Tape (${text.length} chars) on Right Station.")
-          consoleState.statusMessage = s"Mounted Custom Copy Tape (${text.length} chars). Press Run or 0/TAPE to compose!"
+          system.loadTape(selectedTapeTarget, TapeCartridge.fromText(text, label))
+          system.setInputStation(selectedTapeTarget)
+          consoleState.log(s"Mounted $label (${text.length} chars) on $name.")
+          consoleState.statusMessage = s"Mounted $label (${text.length} chars) on $name. Press Run or 0/TAPE to compose!"
+          playClickSound(550)
+          renderAll(doc)
         }
       }
     })
@@ -783,6 +855,8 @@ object WebMain {
     setClassFlag("tape-btn-load-right",   "lit-green", rTape.isTapeLoaded)
     setClassFlag("tape-btn-unload-right", "lit-amber", !rTape.isTapeLoaded && rTape.mountedCartridge.isDefined)
     setClassFlag("tape-btn-reread",       "lit-red",   rTape.parityError || lTape.parityError)
+    setClassFlag("pill-station-right",    "active",    selectedTapeTarget == Device.RightTape)
+    setClassFlag("pill-station-left",     "active",    selectedTapeTarget == Device.LeftTape)
 
     def stationSummary(r: TapeReader): String = r.mountedCartridge match {
       case None => "No Cartridge"

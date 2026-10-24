@@ -3,6 +3,7 @@ package mtsc.periph
 import mtsc.types.*
 import mtsc.memory.{CoreImage, CoreMemory}
 import mtsc.cpu.{Ccu, StepResult}
+import mtsc.diag.ContinuousComposerRoutine
 
 /**
  * Complete IBM MT/SC System Integration.
@@ -47,25 +48,56 @@ class MtscSystem(
       val rOk = rightTape.pressCoverUnlock()
       val lOk = leftTape.pressCoverUnlock()
       if (rOk && lOk) "Tape Station Cover unlocked."
+      else if (rOk) "Right Tape Station Cover unlocked (Left Station locked while tape loaded)."
+      else if (lOk) "Left Tape Station Cover unlocked (Right Station locked while tape loaded)."
       else "Cover interlock active: unload tape into cartridge before unlocking cover."
 
     case TapeConsoleButton.Reread =>
-      val active = if (leftTape.isTapeLoaded && !rightTape.isTapeLoaded) leftTape else rightTape
-      val name = if (active eq leftTape) "Left" else "Right"
-      val pos = active.pressReread()
-      s"$name Tape REREAD: backstepped to track $pos (parity error cleared)."
+      if (leftTape.parityError && !rightTape.parityError) {
+        val pos = leftTape.pressReread()
+        s"Left Tape REREAD: backstepped to track $pos (parity error cleared)."
+      } else if (rightTape.parityError && !leftTape.parityError) {
+        val pos = rightTape.pressReread()
+        s"Right Tape REREAD: backstepped to track $pos (parity error cleared)."
+      } else if (leftTape.parityError && rightTape.parityError) {
+        val pL = leftTape.pressReread()
+        val pR = rightTape.pressReread()
+        s"Dual Tape REREAD: Left track $pL, Right track $pR (parity errors cleared)."
+      } else {
+        val active = if (leftTape.isTapeLoaded && !rightTape.isTapeLoaded) leftTape else rightTape
+        val name = if (active eq leftTape) "Left" else "Right"
+        val pos = active.pressReread()
+        s"$name Tape REREAD: backstepped to track $pos."
+      }
 
     case TapeConsoleButton.Skip =>
-      val active = if (leftTape.isTapeLoaded && !rightTape.isTapeLoaded) leftTape else rightTape
-      val name = if (active eq leftTape) "Left" else "Right"
-      val pos = active.pressSkip()
-      s"$name Tape SKIP: advanced to track $pos."
+      if (leftTape.parityError && !rightTape.parityError) {
+        val pos = leftTape.pressSkip()
+        s"Left Tape SKIP: advanced to track $pos."
+      } else if (rightTape.parityError && !leftTape.parityError) {
+        val pos = rightTape.pressSkip()
+        s"Right Tape SKIP: advanced to track $pos."
+      } else {
+        val active = if (leftTape.isTapeLoaded && !rightTape.isTapeLoaded) leftTape else rightTape
+        val name = if (active eq leftTape) "Left" else "Right"
+        val pos = active.pressSkip()
+        s"$name Tape SKIP: advanced to track $pos."
+      }
 
     case TapeConsoleButton.Search =>
-      val active = if (leftTape.isTapeLoaded && !rightTape.isTapeLoaded) leftTape else rightTape
-      val name = if (active eq leftTape) "Left" else "Right"
-      val pos = active.pressSearch()
-      s"$name Tape SEARCH: advanced to reference track $pos."
+      if (rightTape.isTapeLoaded && leftTape.isTapeLoaded) {
+        val pR = rightTape.pressSearch()
+        val pL = leftTape.pressSearch()
+        s"Dual Tape SEARCH: Right advanced to track $pR, Left advanced to track $pL."
+      } else if (leftTape.isTapeLoaded) {
+        val pos = leftTape.pressSearch()
+        s"Left Tape SEARCH: advanced to reference track $pos."
+      } else if (rightTape.isTapeLoaded) {
+        val pos = rightTape.pressSearch()
+        s"Right Tape SEARCH: advanced to reference track $pos."
+      } else {
+        "Tape SEARCH inactive: no tape loaded."
+      }
   }
 
   def loadTape(station: Device, cartridge: TapeCartridge): Unit = {
@@ -74,6 +106,19 @@ class MtscSystem(
       case Device.LeftTape  => leftTape.mount(cartridge)
       case _ => throw new IllegalArgumentException("Can only load tape on RightTape or LeftTape")
     }
+  }
+
+  def unloadTape(station: Device): Option[TapeCartridge] = station match {
+    case Device.RightTape => rightTape.unmount()
+    case Device.LeftTape  => leftTape.unmount()
+    case _ => None
+  }
+
+  /**
+   * Sets input station in loaded composition or bootstrap program in Core Memory.
+   */
+  def setInputStation(station: Device): Unit = {
+    ContinuousComposerRoutine.setInputStation(memory, station)
   }
 
   def loadProgram(image: CoreImage): Unit = {

@@ -95,7 +95,10 @@
           <div class="ce-initial-loader">
             <div class="loader-header">
               <span>INITIAL LOADER</span>
-              <button id="ce-btn-init-loader" class="btn-key-loader" title="Auto-key bytes 40..47 into Core Memory">Key 40–47</button>
+              <div class="loader-actions">
+                <button id="ce-btn-init-loader" class="btn-key-loader" title="Auto-key bytes 40..47 for Right Station (m=0) into Core Memory">Key Right</button>
+                <button id="ce-btn-init-loader-left" class="btn-key-loader" title="Auto-key bytes 40..47 for Left Station (m=1) into Core Memory">Key Left</button>
+              </div>
             </div>
             <table class="loader-table">
               <tbody>
@@ -398,22 +401,35 @@
 
         <!-- Station Telemetry -->
         <div class="tape-stations-info">
-          <div class="station-box">
-            <span class="station-lbl">LEFT STATION (Merge / Alt)</span>
+          <div class="station-box" id="station-box-left">
+            <div class="station-box-top">
+              <span class="station-lbl">LEFT STATION (Merge / Alt)</span>
+              <button id="btn-quick-sample-left" class="station-mini-btn" title="Mount authentic sample revision tape on Left Station">Sample</button>
+            </div>
             <span id="tape-left-status" class="station-val">No Cartridge</span>
           </div>
-          <div class="station-box">
-            <span class="station-lbl">RIGHT STATION (Primary Input)</span>
+          <div class="station-box" id="station-box-right">
+            <div class="station-box-top">
+              <span class="station-lbl">RIGHT STATION (Primary Input)</span>
+              <button id="btn-quick-sample-right" class="station-mini-btn" title="Mount authentic sample manuscript tape on Right Station">Sample</button>
+            </div>
             <span id="tape-right-status" class="station-val">Historical MT Tape (LOADED)</span>
           </div>
         </div>
 
-        <!-- Custom Copy Tape Mounter -->
+        <!-- Custom Copy Tape Mounter (Dual Station) -->
         <div class="custom-tape-box">
           <div class="custom-tape-header">
-            <label for="custom-tape-text">Mount Custom Manuscript Text on Right Tape:</label>
+            <div class="custom-tape-title-row">
+              <label for="custom-tape-text">Mount Manuscript Text on Tape Reader:</label>
+              <div class="tape-station-pills" role="radiogroup" aria-label="Target Tape Station">
+                <button type="button" class="tape-pill-btn active" id="pill-station-right" title="Target Right Station (Primary Input)">Right Station</button>
+                <button type="button" class="tape-pill-btn" id="pill-station-left" title="Target Left Station (Merge / Revision Tape)">Left Station</button>
+              </div>
+            </div>
             <div class="custom-tape-btns">
-              <button id="btn-inject-parity" class="btn-chip" title="Corrupt current tape track to test parity error halt">Inject Parity Fault</button>
+              <button id="btn-mount-sample-tape" class="btn-chip" title="Mount authentic sample text on selected station">Mount Sample</button>
+              <button id="btn-inject-parity" class="btn-chip" title="Corrupt current tape track on target station to test parity error halt">Inject Parity Fault</button>
               <button id="btn-mount-custom-tape" class="btn-secondary">Mount &amp; Load Tape</button>
             </div>
           </div>
