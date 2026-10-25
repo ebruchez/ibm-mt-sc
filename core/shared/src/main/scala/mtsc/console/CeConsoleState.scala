@@ -3,7 +3,7 @@ package mtsc.console
 import mtsc.types.*
 import mtsc.cpu.Ccu
 import mtsc.memory.CoreMemory
-import mtsc.periph.{ConsoleLampSpec, OperatorPanelState, SystemIoBus}
+import mtsc.periph.{ConsoleKey, ConsoleLampSpec, OperatorPanelState, SystemIoBus}
 import scala.collection.mutable.ArrayBuffer
 
 /**
@@ -195,19 +195,200 @@ class CeConsoleState {
     stepGranularity
   }
 
-  def cycleEditSelector(): CeEditSelector = {
-    val all = CeEditSelector.values
-    val nextIdx = (all.indexOf(editSelector) + 1) % all.length
-    editSelector = all(nextIdx)
+  private def toNibbleBinary(nibble: Int): String = {
+    val n = nibble & 0xf
+    s"${(n >> 3) & 1}${(n >> 2) & 1}${(n >> 1) & 1}${n & 1}"
+  }
+
+  /**
+   * Sets the `EDIT MEMORY SELECTOR` 5-position slide switch per ILD 0312 & Page 0603:
+   * - `Addr` physically selects `Display 1` (`Y 11..Y 1`) and recirculates `PSAR -> MAL`.
+   * - `Data` physically selects `Display 2` (`O 8..O 1`) and recirculates `MEM LOC -> O REG`.
+   * - `Edit` recirculates `PSAR -> MAL (+0)` and `MEM LOC -> A WORD`.
+   * - `Proc` resumes normal instruction execution.
+   */
+  def selectEditSelector(newSelector: CeEditSelector, cpuOpt: Option[Ccu] = None): CeEditSelector = {
+    editSelector = newSelector
     mode = editSelector match {
       case CeEditSelector.Proc => CeConsoleMode.Process
       case CeEditSelector.Addr => CeConsoleMode.EditAddress
       case CeEditSelector.Data => CeConsoleMode.EditData
       case _                   => CeConsoleMode.SingleStep
     }
-    log(s"Right CE slide switch (Edit Selector) set to [${editSelector.label}]")
-    statusMessage = s"Edit Memory Selector switch: ${editSelector.label}"
+
+    editSelector match {
+      case CeEditSelector.Addr =>
+        displayMode = CeDisplayMode.Display1
+        cpuOpt.foreach { cpu =>
+          val addr = cpu.memory.psar
+          cpu.state.mal = addr
+          cpu.memory.aWord = cpu.memory.readWord(Address(addr.unsigned & 0x7fe))
+          cpu.state.outputReg = cpu.memory.readByte(addr)
+        }
+        log("Right CE slide switch set to [Addr] (Display 1: Y 11..Y 1)")
+        statusMessage = cpuOpt match {
+          case Some(cpu) =>
+            val a = cpu.memory.psar.unsigned
+            f"Edit Selector [Addr]: Display 1 (Y 11..Y 1). PSAR = $a (0x$a%03X). Press Clear to zero, or keys 0..9/R to set Y bits."
+          case None =>
+            "Edit Memory Selector switch: Addr (Display 1)"
+        }
+
+      case CeEditSelector.Data =>
+        displayMode = CeDisplayMode.Display2
+        cpuOpt.foreach { cpu =>
+          val addr = cpu.memory.psar
+          val b = cpu.memory.readByte(addr)
+          cpu.state.mal = addr
+          cpu.state.outputReg = b
+        }
+        log("Right CE slide switch set to [Data] (Display 2: O 8..O 1)")
+        statusMessage = cpuOpt match {
+          case Some(cpu) =>
+            val a = cpu.memory.psar.unsigned
+            val b = cpu.state.outputReg & 0xff
+            val binStr = s"${toNibbleBinary(b >> 4)} ${toNibbleBinary(b)}"
+            f"Edit Selector [Data]: Display 2 (O 8..O 1). Byte at $a (0x$a%03X) = $binStr (0x$b%02X). Press Clear to zero, or keys 3..9/R to set O bits."
+          case None =>
+            "Edit Memory Selector switch: Data (Display 2)"
+        }
+
+      case CeEditSelector.Edit =>
+        cpuOpt.foreach { cpu =>
+          val addr = cpu.memory.psar
+          cpu.state.mal = addr
+          cpu.memory.aWord = cpu.memory.readWord(Address(addr.unsigned & 0x7fe))
+        }
+        log("Right CE slide switch set to [Edit]")
+        statusMessage = "Edit Memory Selector switch: Edit"
+
+      case CeEditSelector.Proc =>
+        cpuOpt.foreach { cpu =>
+          cpu.state.halted = false
+          cpu.state.mal = cpu.memory.psar
+        }
+        log("Right CE slide switch set to [Proc]")
+        statusMessage = cpuOpt match {
+          case Some(cpu) =>
+            val a = cpu.memory.psar.unsigned
+            if ((a & 1) != 0)
+              f"Edit Selector [Proc]: Note — PSAR is at odd byte $a (0x$a%03X); set Addr to an even instruction address (e.g. 42 / 0x02A)."
+            else
+              f"Edit Memory Selector switch: Proc (ready at PSAR $a / 0x$a%03X)."
+          case None =>
+            "Edit Memory Selector switch: Proc"
+        }
+
+      case CeEditSelector.Prog =>
+        log("Right CE slide switch set to [Prog]")
+        statusMessage = "Edit Memory Selector switch: Prog"
+    }
+
     editSelector
+  }
+
+  def cycleEditSelector(cpuOpt: Option[Ccu] = None): CeEditSelector = {
+    val all = CeEditSelector.values
+    val nextIdx = (all.indexOf(editSelector) + 1) % all.length
+    selectEditSelector(all(nextIdx), cpuOpt)
+  }
+
+  /**
+   * Handles the CE `Clear` plunger button per Page 0603 (`INH RD IF CLR`):
+   * - In `Addr` mode: inhibits reading PSAR at `I-0`, clearing PSAR & MAL to `0x000`.
+   * - In `Data` mode: inhibits reading MEM LOC at `I-1`, clearing the single byte at PSAR & O REG to `0x00`.
+   * - Otherwise: resets condition and tape parity error indicators (`RES INDS`).
+   */
+  def pressCeClear(cpu: Ccu): String = {
+    val msg = editSelector match {
+      case CeEditSelector.Addr =>
+        cpu.memory.psar = Address(0)
+        cpu.state.mal = Address(0)
+        cpu.state.outputReg = cpu.memory.readByte(Address(0))
+        log("CE Clear [Addr]: cleared PSAR & MAL to 0x000 (0).")
+        "Cleared PSAR & MAL to 0 (0x000)."
+
+      case CeEditSelector.Data =>
+        val addr = cpu.memory.psar
+        cpu.memory.writeByte(addr, 0)
+        cpu.state.mal = addr
+        cpu.state.outputReg = 0
+        log(f"CE Clear [Data]: cleared byte at ${addr.unsigned} (0x${addr.unsigned}%03X) to 0x00.")
+        f"Cleared byte at ${addr.unsigned} (0x${addr.unsigned}%03X) to 0000 0000 (0x00)."
+
+      case _ =>
+        cpu.state.inhibit = false
+        cpu.state.low = false
+        cpu.state.equal = false
+        cpu.ioBus match {
+          case s: SystemIoBus =>
+            s.rightTape.parityError = false
+            s.leftTape.parityError = false
+          case _ => ()
+        }
+        log("CE Clear: reset condition and error indicators (RES INDS).")
+        "Indicators cleared."
+    }
+    statusMessage = msg
+    msg
+  }
+
+  /**
+   * Handles pressing one of the 12 console keys when the CE chassis is exposed
+   * and `EDIT MEMORY SELECTOR` is in `Addr` or `Data` position (ILD 0308 & Page 0603).
+   *
+   * Returns `Some(status)` if consumed by CE manual entry, or `None` for normal processing.
+   */
+  def pressCeKey(key: ConsoleKey, cpu: Ccu): Option[String] = {
+    if (faceplateInstalled) return None
+
+    editSelector match {
+      case CeEditSelector.Addr =>
+        displayMode = CeDisplayMode.Display1
+        val msg = key.addrBitIndex match {
+          case Some(bit) =>
+            val updated = (cpu.memory.psar.unsigned | (1 << bit)) & 0x7ff
+            val addr = Address(updated)
+            cpu.memory.psar = addr
+            cpu.state.mal = addr
+            cpu.memory.aWord = cpu.memory.readWord(Address(updated & 0x7fe))
+            cpu.state.outputReg = cpu.memory.readByte(addr)
+            cpu.state.pBuffer = 1 << (bit & 3)
+            val m = f"CE Edit Addr [Key ${key.topLegend} -> Y ${bit + 1} (+${1 << bit})]: PSAR = $updated (0x$updated%03X)."
+            log(m)
+            m
+
+          case None =>
+            "CE Edit Addr: START has no Y-latch bit (use keys 0..9, R for Y 11..Y 1; press Clear to zero)."
+        }
+        statusMessage = msg
+        Some(msg)
+
+      case CeEditSelector.Data =>
+        displayMode = CeDisplayMode.Display2
+        val msg = key.dataBitIndex match {
+          case Some(bit) =>
+            val addr = cpu.memory.psar
+            val cur = cpu.memory.readByte(addr)
+            val updated = (cur | (1 << bit)) & 0xff
+            cpu.memory.writeByte(addr, updated)
+            cpu.state.mal = addr
+            cpu.state.outputReg = updated
+            cpu.state.pBuffer = 1 << (bit & 3)
+            val binStr = s"${toNibbleBinary(updated >> 4)} ${toNibbleBinary(updated)}"
+            val m = f"CE Edit Data [Key ${key.topLegend} -> O ${bit + 1}] at ${addr.unsigned} (0x${addr.unsigned}%03X): $binStr (0x$updated%02X)."
+            log(m)
+            m
+
+          case None =>
+            s"CE Edit Data: Key ${key.topLegend} ignored by -BT CTR B gate (use keys 3..9, R for O 8..O 1; press Clear to zero byte)."
+        }
+        statusMessage = msg
+        Some(msg)
+
+      case _ =>
+        None
+    }
   }
 
   def toggleBreakpoint(addr: Address): Boolean = {

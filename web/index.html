@@ -96,8 +96,9 @@
             <div class="loader-header">
               <span>INITIAL LOADER</span>
               <div class="loader-actions">
-                <button id="ce-btn-init-loader" class="btn-key-loader" title="Auto-key bytes 40..47 for Right Station (m=0) into Core Memory">Key Right</button>
-                <button id="ce-btn-init-loader-left" class="btn-key-loader" title="Auto-key bytes 40..47 for Left Station (m=1) into Core Memory">Key Left</button>
+                <button id="ce-btn-zero-ram" type="button" class="btn-key-loader btn-zero-ram" title="Zero all 2,048 bytes of Core Memory (0x000..0x7FF) for a cold boot">Zero RAM</button>
+                <button id="ce-btn-init-loader-left" type="button" class="btn-key-loader" title="Auto-key bytes 40..47 for Left Station (m=1) into Core Memory">Key Left</button>
+                <button id="ce-btn-init-loader" type="button" class="btn-key-loader" title="Auto-key bytes 40..47 for Right Station (m=0) into Core Memory">Key Right</button>
               </div>
             </div>
             <table class="loader-table">
@@ -404,14 +405,20 @@
           <div class="station-box" id="station-box-left">
             <div class="station-box-top">
               <span class="station-lbl">LEFT STATION (Merge / Alt)</span>
-              <button id="btn-quick-sample-left" class="station-mini-btn" title="Mount authentic sample revision tape on Left Station">Sample</button>
+              <div class="station-mini-group">
+                <button id="btn-quick-prog-left" type="button" class="station-mini-btn station-mini-prog" title="Mount bootable binary Factory Program Tape on Left Station">Program<span class="visually-hidden"> (Left Station)</span></button>
+                <button id="btn-quick-sample-left" type="button" class="station-mini-btn" title="Mount authentic sample revision tape on Left Station">Sample<span class="visually-hidden"> (Left Station)</span></button>
+              </div>
             </div>
             <span id="tape-left-status" class="station-val">No Cartridge</span>
           </div>
           <div class="station-box" id="station-box-right">
             <div class="station-box-top">
               <span class="station-lbl">RIGHT STATION (Primary Input)</span>
-              <button id="btn-quick-sample-right" class="station-mini-btn" title="Mount authentic sample manuscript tape on Right Station">Sample</button>
+              <div class="station-mini-group">
+                <button id="btn-quick-prog-right" type="button" class="station-mini-btn station-mini-prog" title="Mount bootable binary Factory Program Tape on Right Station">Program<span class="visually-hidden"> (Right Station)</span></button>
+                <button id="btn-quick-sample-right" type="button" class="station-mini-btn" title="Mount authentic sample manuscript tape on Right Station">Sample<span class="visually-hidden"> (Right Station)</span></button>
+              </div>
             </div>
             <span id="tape-right-status" class="station-val">Historical MT Tape (LOADED)</span>
           </div>
@@ -421,16 +428,17 @@
         <div class="custom-tape-box">
           <div class="custom-tape-header">
             <div class="custom-tape-title-row">
-              <label for="custom-tape-text">Mount Manuscript Text on Tape Reader:</label>
-              <div class="tape-station-pills" role="radiogroup" aria-label="Target Tape Station">
-                <button type="button" class="tape-pill-btn active" id="pill-station-right" title="Target Right Station (Primary Input)">Right Station</button>
-                <button type="button" class="tape-pill-btn" id="pill-station-left" title="Target Left Station (Merge / Revision Tape)">Left Station</button>
+              <label for="custom-tape-text">Mount Tape on Station:</label>
+              <div class="tape-station-pills" role="group" aria-label="Target Tape Station">
+                <button type="button" class="tape-pill-btn" id="pill-station-left" aria-pressed="false" title="Target Left Station (Merge / Revision Tape)">Left Station</button>
+                <button type="button" class="tape-pill-btn active" id="pill-station-right" aria-pressed="true" title="Target Right Station (Primary Input)">Right Station</button>
               </div>
             </div>
             <div class="custom-tape-btns">
-              <button id="btn-mount-sample-tape" class="btn-chip" title="Mount authentic sample text on selected station">Mount Sample</button>
-              <button id="btn-inject-parity" class="btn-chip" title="Corrupt current tape track on target station to test parity error halt">Inject Parity Fault</button>
-              <button id="btn-mount-custom-tape" class="btn-secondary">Mount &amp; Load Tape</button>
+              <button id="btn-mount-program-tape" type="button" class="btn-chip" title="Mount bootable 8-bit Factory Program Tape on selected station">Mount Program Tape</button>
+              <button id="btn-mount-sample-tape" type="button" class="btn-chip" title="Mount authentic sample text on selected station">Mount Sample</button>
+              <button id="btn-inject-parity" type="button" class="btn-chip" title="Corrupt current tape track on target station to test parity error halt">Inject Parity Fault</button>
+              <button id="btn-mount-custom-tape" type="button" class="btn-secondary">Mount &amp; Load Tape</button>
             </div>
           </div>
           <textarea id="custom-tape-text" rows="3" placeholder="Type or paste any multi-paragraph text here and click 'Mount &amp; Load Tape' to watch the MT/SC justify and print it at 14 characters/sec..."></textarea>
@@ -495,8 +503,9 @@
           <div class="mem-panel-header">
             <h3>Core Memory (2,048 Bytes • 0x000–0x7FF)</h3>
             <div class="mem-nav">
-              <button id="btn-mem-psar" class="btn-chip" title="Scroll view to current program counter (PSAR)">Jump to PSAR</button>
-              <button id="btn-mem-expand" class="btn-chip" title="Expand to full 2,048-byte matrix overlay">⛶ Expand Map</button>
+              <button id="btn-mem-zero" type="button" class="btn-chip" title="Clear all 2,048 bytes of Core Memory to 0x00">Zero Core Memory</button>
+              <button id="btn-mem-psar" type="button" class="btn-chip" title="Scroll view to current program counter (PSAR)">Jump to PSAR</button>
+              <button id="btn-mem-expand" type="button" class="btn-chip" title="Expand to full 2,048-byte matrix overlay">⛶ Expand Map</button>
             </div>
           </div>
           <div id="ce-memory-dump" class="memory-dump"></div>

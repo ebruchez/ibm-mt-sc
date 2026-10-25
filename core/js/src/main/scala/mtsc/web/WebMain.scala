@@ -3,6 +3,7 @@ package mtsc.web
 import scala.scalajs.js
 import scala.scalajs.js.annotation.*
 import mtsc.types.*
+import mtsc.isa.{Decoder, Instruction}
 import mtsc.cpu.StepResult
 import mtsc.asm.Disassembler
 import mtsc.diag.{DiagnosticPrograms, EscapementRoutine}
@@ -166,30 +167,23 @@ object WebMain {
     })
     onClick("ce-btn-clear", () => {
       stopContinuousRun()
-      if (consoleState.editSelector == CeEditSelector.Data) {
-        system.memory.writeWord(system.memory.psar, Word.Zero)
-        consoleState.log(f"CE Clear: cleared word at 0x${system.memory.psar.unsigned}%03X.")
-        consoleState.statusMessage = f"Cleared word at 0x${system.memory.psar.unsigned}%03X."
-      } else if (consoleState.editSelector == CeEditSelector.Addr) {
-        system.memory.psar = Address(0)
-        system.cpu.state.mal = Address(0)
-        consoleState.log("CE Clear: cleared PSAR & MAL to 0x000.")
-        consoleState.statusMessage = "Cleared PSAR to 0x000."
-      } else {
-        system.cpu.state.inhibit = false
-        system.cpu.state.low = false
-        system.cpu.state.equal = false
-        system.rightTape.parityError = false
-        system.leftTape.parityError = false
-        consoleState.log("CE Clear: reset condition and error indicators (RES INDS).")
-        consoleState.statusMessage = "Indicators cleared."
-      }
+      consoleState.pressCeClear(system.cpu)
       playClickSound(440)
+    })
+    onClick("ce-btn-zero-ram", () => {
+      stopContinuousRun()
+      system.clearMemory()
+      consoleState.memoryInspectionAddress = Address(0)
+      consoleState.log("Zeroed all 2,048 bytes of Core Memory (0x000..0x7FF = 0x00, PSAR = 0x000).")
+      consoleState.statusMessage =
+        "Core Memory zeroed (0x000..0x7FF = 0x00). Key INITIAL LOADER (40..47), mount Program Tape, and click Run to cold boot!"
+      playClickSound(420)
     })
     onClick("ce-btn-init-loader", () => {
       stopContinuousRun()
       InitialLoaderTable.loadIntoMemory(system.memory, paperTape = false, leftStation = false)
       system.cpu.state.mal = Address(42)
+      system.cpu.state.halted = false
       consoleState.memoryInspectionAddress = Address(32)
       consoleState.log("Keyed 8-byte INITIAL LOADER for Right Station into Core Memory (bytes 40..47, PSAR=42).")
       consoleState.statusMessage = "INITIAL LOADER (Right Station, m=0) loaded into Core Memory (PSAR = 42 / 0x02A)."
@@ -199,6 +193,7 @@ object WebMain {
       stopContinuousRun()
       InitialLoaderTable.loadIntoMemory(system.memory, paperTape = false, leftStation = true)
       system.cpu.state.mal = Address(42)
+      system.cpu.state.halted = false
       consoleState.memoryInspectionAddress = Address(32)
       consoleState.log("Keyed 8-byte INITIAL LOADER for Left Station (m=1) into Core Memory (bytes 40..47, PSAR=42).")
       consoleState.statusMessage = "INITIAL LOADER (Left Station, m=1) loaded into Core Memory (PSAR = 42 / 0x02A)."
@@ -268,15 +263,8 @@ object WebMain {
     }
     for (e <- CeEditSelector.values) {
       onClick(s"slider-right-${e.ordinal}", () => {
-        consoleState.editSelector = e
-        consoleState.mode = e match {
-          case CeEditSelector.Proc => CeConsoleMode.Process
-          case CeEditSelector.Addr => CeConsoleMode.EditAddress
-          case CeEditSelector.Data => CeConsoleMode.EditData
-          case _                   => CeConsoleMode.SingleStep
-        }
-        consoleState.log(s"Right CE slide switch set to [${e.label}]")
-        consoleState.statusMessage = s"Edit Memory Selector switch set to ${e.label}."
+        stopContinuousRun()
+        consoleState.selectEditSelector(e, Some(system.cpu))
         playClickSound(340)
       })
     }
@@ -338,6 +326,35 @@ object WebMain {
       consoleState.statusMessage = "Target Tape Station set to Left Station (Merge / Revision Tape)."
       playClickSound(400)
       renderAll(doc)
+    })
+    def mountFactoryProgram(station: Device): Unit = {
+      stopContinuousRun()
+      val prog = DiagnosticPrograms.AllPrograms(currentProgramIdx)
+      val cart = MtscSystem.createFactoryProgramTape(station, prog, system.operatorPanel.measure)
+      system.loadTape(station, cart)
+      selectedTapeTarget = station
+      val stName = if (station == Device.LeftTape) "Left Station" else "Right Station"
+      val keyBtn = if (station == Device.LeftTape) "Key Left" else "Key Right"
+      consoleState.log(s"Mounted ${cart.label} (${cart.length} binary 8-bit tracks) on $stName.")
+      if (system.memory.psar.unsigned >= 42 && system.memory.psar.unsigned <= 47) {
+        consoleState.statusMessage =
+          s"Mounted ${cart.label} on $stName. INITIAL LOADER is ready at 0x02A — click Run to boot Core Memory!"
+      } else {
+        consoleState.statusMessage =
+          s"Mounted ${cart.label} (${cart.length} tracks) on $stName. Open CE Console, click '$keyBtn' (or key 40..47 manually), then Run!"
+      }
+      playClickSound(560)
+      renderAll(doc)
+    }
+
+    onClick("btn-quick-prog-left", () => {
+      mountFactoryProgram(Device.LeftTape)
+    })
+    onClick("btn-quick-prog-right", () => {
+      mountFactoryProgram(Device.RightTape)
+    })
+    onClick("btn-mount-program-tape", () => {
+      mountFactoryProgram(selectedTapeTarget)
     })
     onClick("btn-quick-sample-left", () => {
       system.loadTape(Device.LeftTape, TapeCartridge.fromText(TapeCartridge.HistoricalMergeSampleText, "Merge Revision Tape"))
@@ -436,8 +453,12 @@ object WebMain {
           stopContinuousRun()
           val name = if (selectedTapeTarget == Device.LeftTape) "Left Station" else "Right Station"
           val label = if (selectedTapeTarget == Device.LeftTape) "Custom Revision Tape" else "Custom Copy Tape"
-          system.loadTape(selectedTapeTarget, TapeCartridge.fromText(text, label))
-          loadProgram(0) // Load Continuous Composition program
+          if (system.memory.readWord(Address.PowerOn) == Word.Zero || currentProgramIdx != 0) {
+            loadProgram(0)
+          } else {
+            system.cpu.state.halted = false
+            system.memory.psar = Address.PowerOn
+          }
           system.loadTape(selectedTapeTarget, TapeCartridge.fromText(text, label))
           system.setInputStation(selectedTapeTarget)
           consoleState.log(s"Mounted $label (${text.length} chars) on $name.")
@@ -448,7 +469,16 @@ object WebMain {
       }
     })
 
-    // Core Storage "Jump to PSAR" button
+    // Core Storage "Zero Core Memory" & "Jump to PSAR" buttons
+    onClick("btn-mem-zero", () => {
+      stopContinuousRun()
+      system.clearMemory()
+      consoleState.memoryInspectionAddress = Address(0)
+      consoleState.log("Zeroed all 2,048 bytes of Core Memory (0x000..0x7FF = 0x00, PSAR = 0x000).")
+      consoleState.statusMessage =
+        "Core Memory zeroed (0x000..0x7FF = 0x00). Key INITIAL LOADER (40..47), mount Program Tape, and click Run to cold boot!"
+      playClickSound(420)
+    })
     onClick("btn-mem-psar", () => {
       val memEl = doc.getElementById("ce-memory-dump")
       if (memEl != null && !js.isUndefined(memEl)) {
@@ -549,12 +579,28 @@ object WebMain {
           case "Enter" =>
             handleConsoleKeyPress(ConsoleKey.Start, doc)
             renderAll(doc)
+          case "Backspace" | "Delete"
+              if !consoleState.faceplateInstalled &&
+                (consoleState.editSelector == CeEditSelector.Addr || consoleState.editSelector == CeEditSelector.Data) =>
+            stopContinuousRun()
+            consoleState.pressCeClear(system.cpu)
+            playClickSound(440)
+            renderAll(doc)
+          case "r" | "R"
+              if !consoleState.faceplateInstalled &&
+                (consoleState.editSelector == CeEditSelector.Addr || consoleState.editSelector == CeEditSelector.Data) =>
+            handleConsoleKeyPress(ConsoleKey.KeyR, doc)
+            renderAll(doc)
           case "r" | "R" if consoleState.faceplateInstalled && system.operatorPanel.activeSetupParam.isDefined =>
             handleConsoleKeyPress(ConsoleKey.KeyR, doc)
             renderAll(doc)
           case d if d.length == 1 && d.charAt(0).isDigit =>
             val digit = d.charAt(0) - '0'
-            if (consoleState.faceplateInstalled) {
+            if (
+              consoleState.faceplateInstalled ||
+              consoleState.editSelector == CeEditSelector.Addr ||
+              consoleState.editSelector == CeEditSelector.Data
+            ) {
               ConsoleKey.fromDigit(digit).foreach(k => handleConsoleKeyPress(k, doc))
               renderAll(doc)
             } else {
@@ -575,25 +621,8 @@ object WebMain {
 
   private def handleConsoleKeyPress(key: ConsoleKey, doc: js.Dynamic): Unit = {
     playClickSound(450)
-    // If CE Edit Address or Edit Data is active on the right slide switch, allow direct nibble entry
-    if (!consoleState.faceplateInstalled && consoleState.editSelector == CeEditSelector.Addr) {
-      key.topLegend.toIntOption.foreach { d =>
-        val nextAddr = ((system.memory.psar.unsigned << 4) | (d & 0xf)) & 0x7fe
-        system.memory.psar = Address(nextAddr)
-        system.cpu.state.mal = Address(nextAddr)
-        consoleState.statusMessage = f"CE Edit Address: PSAR set to 0x$nextAddr%03X ($nextAddr)."
-      }
-      return
-    }
-    if (!consoleState.faceplateInstalled && consoleState.editSelector == CeEditSelector.Data) {
-      key.topLegend.toIntOption.foreach { d =>
-        val addr = system.memory.psar
-        val cur = system.memory.readWord(addr).unsigned
-        val updated = ((cur << 4) | (d & 0xf)) & 0xffff
-        system.memory.writeWord(addr, Word(updated))
-        system.cpu.state.pBuffer = d & 0xf
-        consoleState.statusMessage = f"CE Edit Data at 0x${addr.unsigned}%03X: word = 0x$updated%04X."
-      }
+    // Authentic CE Edit Addr / Edit Data hardware bit entry (ILD 0308 & Page 0603)
+    if (consoleState.pressCeKey(key, system.cpu).isDefined) {
       return
     }
 
@@ -612,7 +641,12 @@ object WebMain {
     // If START or 0/TAPE was pressed with no active setup prompt, start composition!
     if (!hadActiveSetup && (key == ConsoleKey.Start || key == ConsoleKey.Key0)) {
       if (system.cpu.state.halted) {
-        loadProgram(currentProgramIdx)
+        if (system.memory.readWord(Address.PowerOn) != Word.Zero) {
+          system.cpu.state.halted = false
+          system.memory.psar = Address.PowerOn
+        } else {
+          loadProgram(currentProgramIdx)
+        }
       }
       startContinuousRun(doc)
     }
@@ -662,12 +696,36 @@ object WebMain {
       consoleState.statusMessage = "Cannot run: Power Switch is OFF."
       return
     }
-    if (system.cpu.state.halted) {
-      loadProgram(currentProgramIdx)
+    if (consoleState.editSelector != CeEditSelector.Proc) {
+      consoleState.selectEditSelector(CeEditSelector.Proc, Some(system.cpu))
     }
+    if (system.cpu.state.halted) {
+      if (system.memory.readWord(Address.PowerOn) != Word.Zero) {
+        system.cpu.state.halted = false
+        system.memory.psar = Address.PowerOn
+      } else {
+        loadProgram(currentProgramIdx)
+      }
+    }
+
+    val bootingFromLoader = system.memory.psar.unsigned >= 42 && system.memory.psar.unsigned <= 47
 
     if (!consoleState.realTimePacing) {
       // Instant execution
+      if (bootingFromLoader) {
+        val bootRes = system.runBootLoader()
+        consoleState.statusMessage = bootRes match {
+          case StepResult.Normal =>
+            f"Cold boot complete! Program loaded from tape — CPU ready at 0x${system.memory.psar.unsigned}%03X. Mount a manuscript tape and press Run."
+          case StepResult.Stalled =>
+            "Initial Loader stalled on I/O (mount & load a Program Tape on the selected station)."
+          case other =>
+            s"Cold boot stopped: $other"
+        }
+        renderAll(doc)
+        return
+      }
+
       val res = system.run(maxCycles = 100000L)
       consoleState.statusMessage = res match {
         case StepResult.Halted =>
@@ -681,7 +739,8 @@ object WebMain {
 
     val intervalMs = math.max(12, consoleState.printDelayMs.toInt)
     consoleState.statusMessage =
-      f"Composing at ${consoleState.pacingSpeed}%.0fx (${(14 * consoleState.pacingSpeed).toInt} cps)..."
+      if (bootingFromLoader) "Cold-booting Core Memory from Factory Program Tape via INITIAL LOADER (0x02A)..."
+      else f"Composing at ${consoleState.pacingSpeed}%.0fx (${(14 * consoleState.pacingSpeed).toInt} cps)..."
 
     val handle = js.Dynamic.global.window.setInterval(() => {
       var stepsThisTick = 0
@@ -699,7 +758,21 @@ object WebMain {
         system.cpu.state.insnTimeCtr = (stepsThisTick % 6)
         system.cpu.state.bitTimeCtr = (stepsThisTick & 3)
 
-        if (system.translator.printCount > prevPrints) {
+        if (bootingFromLoader && (system.memory.psar.unsigned < 42 || system.memory.psar.unsigned > 47)) {
+          // Step past page-0 trampoline `JMP entryPoint` if present so PSAR lands directly on `0x222`
+          if (res == StepResult.Normal && !system.cpu.state.halted && system.memory.psar.unsigned < 256) {
+            Decoder.decode(system.memory.readWord(system.memory.psar)) match {
+              case Right(Instruction.Branch(Condition.Unconditional, false, target))
+                  if target != system.memory.psar && target.unsigned >= 256 =>
+                val _ = system.step()
+              case _ => ()
+            }
+          }
+          stopped = true
+          consoleState.log(f"Cold boot complete: Factory Program Tape loaded, CPU ready at 0x${system.memory.psar.unsigned}%03X.")
+          consoleState.statusMessage =
+            f"Cold boot complete! Program loaded from tape — CPU ready at 0x${system.memory.psar.unsigned}%03X. Mount a manuscript tape and press Run!"
+        } else if (system.translator.printCount > prevPrints) {
           printedChar = true
           if (system.paper.lines.length > prevLines) {
             playCarrierReturnSound()
@@ -857,6 +930,14 @@ object WebMain {
     setClassFlag("tape-btn-reread",       "lit-red",   rTape.parityError || lTape.parityError)
     setClassFlag("pill-station-right",    "active",    selectedTapeTarget == Device.RightTape)
     setClassFlag("pill-station-left",     "active",    selectedTapeTarget == Device.LeftTape)
+    val pillRight = doc.getElementById("pill-station-right")
+    if (pillRight != null && !js.isUndefined(pillRight)) {
+      pillRight.setAttribute("aria-pressed", (selectedTapeTarget == Device.RightTape).toString)
+    }
+    val pillLeft = doc.getElementById("pill-station-left")
+    if (pillLeft != null && !js.isUndefined(pillLeft)) {
+      pillLeft.setAttribute("aria-pressed", (selectedTapeTarget == Device.LeftTape).toString)
+    }
 
     def stationSummary(r: TapeReader): String = r.mountedCartridge match {
       case None => "No Cartridge"

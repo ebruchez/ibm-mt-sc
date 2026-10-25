@@ -284,4 +284,77 @@ class TapeReaderSuite extends munit.FunSuite {
     assert(printed.contains("camera-ready text"), s"Printed output was: $printed")
     assert(system.leftTape.headPosition > 1, "Left Tape reader head must have stepped forward")
   }
+
+  test("Cold Boot from zeroed Core Memory via Right Station Factory Program Tape -> Justified Galley Proof") {
+    import mtsc.console.InitialLoaderTable
+
+    val system = new MtscSystem()
+    system.clearMemory()
+
+    // Confirm all 2,048 bytes of Core Memory are completely zeroed
+    for (addr <- 0 until 2048) {
+      assertEquals(system.memory.readByte(Address(addr)), 0)
+    }
+
+    // 1. Key 8-byte Initial Loader for Right Station (m=0) into 40..47
+    InitialLoaderTable.loadIntoMemory(system.memory, paperTape = false, leftStation = false)
+
+    // 2. Mount Factory Program Tape on Right Station
+    val progTape = MtscSystem.createFactoryProgramTape(Device.RightTape)
+    assertEquals(progTape.length, 2083)
+    assert(progTape.getFrame(0).get.is8Bit)
+    assert(progTape.getFrame(0).get.hasOddParity)
+    system.loadTape(Device.RightTape, progTape)
+
+    // 3. Execute Initial Loader until control lands at power-on entry point 0x222 (546)
+    val bootRes = system.runBootLoader()
+    assertEquals(bootRes, StepResult.Normal)
+    assertEquals(system.memory.psar, Address.PowerOn)
+    assert(system.rightTape.isAtEnd, "Factory Program Tape should reach EOT upon boot completion")
+    assertEquals(system.memory.readReg(RegId(30)), Word(140))
+    assertEquals(system.memory.readByte(Address(64 + 'M'.toInt)), 9, "Escapement table must be populated from tape")
+
+    // 4. Mount manuscript text tape on Right Station and run booted composer microprogram
+    val copyTape = TapeCartridge.fromText(
+      "Cold-booted directly from zeroed magnetic core storage via the eight-byte Customer Engineer Initial Loader.",
+      "Cold Boot Copy"
+    )
+    system.loadTape(Device.RightTape, copyTape)
+    val composeRes = system.run(maxCycles = 500000L)
+    assertEquals(composeRes, StepResult.Halted)
+    assert(system.paper.lines.length >= 2, s"Expected multi-line justified proof, got: ${system.paper.lines}")
+    assert(system.paper.lines.mkString(" ").contains("Customer Engineer Initial Loader"))
+  }
+
+  test("Cold Boot from zeroed Core Memory via Left Station (m=1) Factory Program Tape & 8-bit parity check") {
+    import mtsc.console.InitialLoaderTable
+
+    val system = new MtscSystem()
+    system.clearMemory()
+    InitialLoaderTable.loadIntoMemory(system.memory, paperTape = false, leftStation = true)
+
+    val progTape = MtscSystem.createFactoryProgramTape(Device.LeftTape)
+    // Inject an 8-bit parity fault on track 10 to verify 9th-track parity protection during boot
+    progTape.corruptParityAt(10)
+    system.loadTape(Device.LeftTape, progTape)
+
+    val stalledBoot = system.runBootLoader()
+    assertEquals(stalledBoot, StepResult.Stalled)
+    assert(system.leftTape.parityError, "9th-track parity fault on binary program tape must assert parityError")
+    assertEquals(system.leftTape.headPosition, 10)
+
+    // Repair parity, reload clean Left Factory Program Tape, and complete cold boot
+    system.loadTape(Device.LeftTape, MtscSystem.createFactoryProgramTape(Device.LeftTape))
+    InitialLoaderTable.loadIntoMemory(system.memory, paperTape = false, leftStation = true)
+    assertEquals(system.runBootLoader(), StepResult.Normal)
+    assertEquals(system.memory.psar, Address.PowerOn)
+
+    // Mount manuscript text on Left Station and compose!
+    system.loadTape(
+      Device.LeftTape,
+      TapeCartridge.fromText("Booted and composed entirely through the Left Magnetic Tape Station.", "Left Boot Copy")
+    )
+    assertEquals(system.run(maxCycles = 500000L), StepResult.Halted)
+    assert(system.paper.lines.mkString(" ").contains("Left Magnetic Tape Station"))
+  }
 }

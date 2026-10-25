@@ -338,6 +338,14 @@ button, select {
   border-radius: 3px;
 }
 
+.btn-key-loader.btn-zero-ram {
+  background: #475569;
+}
+
+.btn-key-loader.btn-zero-ram:hover {
+  background: #334155;
+}
+
 .loader-table {
   border-collapse: collapse;
   font-size: 0.68rem;
@@ -950,6 +958,13 @@ button, select {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 6px;
+}
+
+.station-mini-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .station-mini-btn {
@@ -962,6 +977,23 @@ button, select {
   color: #94a3b8;
   cursor: pointer;
   transition: all 0.15s ease;
+}
+
+.station-mini-btn.station-mini-prog {
+  border-color: #1d4ed8;
+  color: #93c5fd;
+}
+
+.visually-hidden:where(:not(:focus-within, :active)) {
+  position: absolute !important;
+  clip-path: inset(50%) !important;
+  overflow: hidden !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  white-space: nowrap !important;
 }
 
 .station-mini-btn:hover {

@@ -5,7 +5,7 @@ import mtsc.cpu.StepResult
 import mtsc.memory.CoreMemory
 import mtsc.periph.{ConsoleKey, MtscSystem, SystemIoBus, TapeCartridge, TapeConsoleButton, TapeReader}
 import mtsc.diag.{ContinuousComposerRoutine, DiagnosticPrograms, EscapementRoutine}
-import mtsc.console.{AnsiTerminal, CeConsoleMode, CeConsoleState, CeConsoleView, CeDisplayMode, InitialLoaderTable}
+import mtsc.console.{AnsiTerminal, CeConsoleMode, CeConsoleState, CeConsoleView, CeDisplayMode, CeEditSelector, InitialLoaderTable}
 
 /**
  * Main Interactive Customer Engineer Console Debugger for the IBM MT/SC CCU.
@@ -164,6 +164,21 @@ object Main {
 
     val lower = cmd.toLowerCase
 
+    // If CE Chassis is exposed and Edit Selector is in Addr or Data position, route console keys 0..9 and R to hardware bit entry
+    if (
+      !consoleState.faceplateInstalled &&
+      (consoleState.editSelector == CeEditSelector.Addr || consoleState.editSelector == CeEditSelector.Data) &&
+      lower.length == 1
+    ) {
+      val ch = lower.charAt(0)
+      if (ch.isDigit || ch == 'r') {
+        ConsoleKey.fromChar(ch).foreach { key =>
+          consoleState.pressCeKey(key, system.cpu)
+        }
+        return true
+      }
+    }
+
     // If Operator Faceplate is installed and digits 0..9 or START/R are pressed during Setup
     if (consoleState.faceplateInstalled && lower.length == 1 && lower.charAt(0).isDigit) {
       val digit = lower.charAt(0) - '0'
@@ -257,11 +272,21 @@ object Main {
         consoleState.cycleStepGranularity()
 
       case "m" | "mode" =>
-        consoleState.cycleEditSelector()
+        consoleState.cycleEditSelector(Some(system.cpu))
+
+      case "clr" | "clear" =>
+        consoleState.pressCeClear(system.cpu)
+
+      case "z" | "zero" =>
+        system.clearMemory()
+        consoleState.memoryInspectionAddress = Address(0)
+        consoleState.log("Zeroed all 2,048 bytes of Core Memory (0x000..0x7FF = 0x00, PSAR = 0x000).")
+        consoleState.statusMessage = "Core Memory zeroed (PSAR = 0x000). Key INITIAL LOADER [i] and mount Program Tape [t prog] to cold boot."
 
       case s if s == "i" || s == "init" || s == "loader" || s == "i right" || s == "i left" =>
         val isLeft = s.endsWith("left") || (s == "i" && system.leftTape.isTapeLoaded && !system.rightTape.isTapeLoaded)
         InitialLoaderTable.loadIntoMemory(system.memory, paperTape = false, leftStation = isLeft)
+        system.cpu.state.mal = Address(42)
         val stName = if (isLeft) "Left Station (m=1)" else "Right Station (m=0)"
         consoleState.log(s"Keyed 8-byte INITIAL LOADER for $stName into Core Memory (bytes 40..47, PSAR=42).")
         consoleState.statusMessage = s"INITIAL LOADER ($stName) keyed into memory (PSAR = 0x02A)."
@@ -313,6 +338,18 @@ object Main {
         system.loadTape(Device.RightTape, TapeCartridge.fromText(TapeCartridge.HistoricalSampleText, "Historical MT Tape"))
         consoleState.log("Mounted historical 4-paragraph tape on Right Tape Reader.")
         consoleState.statusMessage = "Mounted historical 4-paragraph tape cartridge on Right Tape Reader."
+
+      case "t prog" | "tape prog" | "t right prog" | "tape right prog" =>
+        val cart = MtscSystem.createFactoryProgramTape(Device.RightTape)
+        system.loadTape(Device.RightTape, cart)
+        consoleState.log(s"Mounted ${cart.label} (${cart.length} tracks) on Right Tape Reader.")
+        consoleState.statusMessage = s"Mounted ${cart.label} on Right Station. Key [i right] and [r] to cold boot."
+
+      case "t left prog" | "tape left prog" =>
+        val cart = MtscSystem.createFactoryProgramTape(Device.LeftTape)
+        system.loadTape(Device.LeftTape, cart)
+        consoleState.log(s"Mounted ${cart.label} (${cart.length} tracks) on Left Tape Reader.")
+        consoleState.statusMessage = s"Mounted ${cart.label} on Left Station. Key [i left] and [r] to cold boot."
 
       case "t left" | "tape left" =>
         system.loadTape(Device.LeftTape, TapeCartridge.fromText(TapeCartridge.HistoricalMergeSampleText, "Merge Correction Tape"))
@@ -405,6 +442,18 @@ object Main {
     terminal: AnsiTerminal,
     rawMode: Boolean
   ): Unit = {
+    if (system.memory.psar.unsigned >= 42 && system.memory.psar.unsigned <= 47) {
+      val bootRes = system.runBootLoader()
+      bootRes match {
+        case StepResult.Normal =>
+          consoleState.log(f"Cold boot complete: loaded program from tape, CPU at 0x${system.memory.psar.unsigned}%03X.")
+          consoleState.statusMessage = f"Cold boot complete! CPU ready at 0x${system.memory.psar.unsigned}%03X. Mount text tape [t] and [r] to compose."
+        case other =>
+          consoleState.statusMessage = s"Boot loader stopped: $other"
+      }
+      return
+    }
+
     var steps = 0
     var hitBreakpoint = false
     var res: StepResult = StepResult.Normal

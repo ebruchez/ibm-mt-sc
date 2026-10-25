@@ -54,6 +54,20 @@ final class CoreMemory(private val storage: Array[Byte]) {
     aWord = Word.Zero
     bWord = Word.Zero
   }
+
+  /**
+   * Clears all 2,048 bytes of core storage to 0x00 and resets PSAR, A-Word, and B-Word to 0.
+   */
+  def clear(): Unit = {
+    var i = 0
+    while (i < storage.length) {
+      storage(i) = 0
+      i += 1
+    }
+    psar = Address(0)
+    aWord = Word.Zero
+    bWord = Word.Zero
+  }
 }
 
 object CoreMemory {

@@ -1,5 +1,8 @@
 package mtsc.periph
 
+import mtsc.isa.{Encoder, Instruction}
+import mtsc.memory.{CoreImage, CoreMemory}
+import mtsc.types.{Address, Condition}
 import scala.collection.mutable.ArrayBuffer
 
 /**
@@ -67,7 +70,8 @@ class TapeCartridge(val label: String, private val frames: ArrayBuffer[TapeFrame
   def corruptParityAt(index: Int): Unit =
     if (index >= 0 && index < frames.length) {
       val cur = frames(index)
-      frames(index) = TapeFrame(cur.rawByte ^ 0x80)
+      val parityMask = if (cur.is8Bit) 0x100 else 0x80
+      frames(index) = TapeFrame(cur.rawByte ^ parityMask, is8Bit = cur.is8Bit)
     }
 }
 
@@ -140,5 +144,86 @@ object TapeCartridge {
       buf += TapeFrame.encodeByte8WithOddParity(b & 0xff)
     }
     new TapeCartridge(label, buf)
+  }
+
+  /**
+   * Encodes a complete 2,048-byte `CoreImage` into a bootable binary Factory Program Tape
+   * designed to be loaded by the 8-byte `INITIAL LOADER` (`40..47`, `PSAR = 42` / `0x02A`).
+   *
+   * Stream layout (2,083 8-bit odd-parity frames):
+   * 1. Pass 1 (`40` bytes `0..39`): advances `R20` from `0` to `40`.
+   * 2. Redirect (`1` byte at `40` = `48` / `0x30`): leaps `R20` over the live `INITIAL LOADER` (`41..47`).
+   * 3. Upper Core (`2,000` bytes `48..2047`): populates escapement tables, buffers, and microcode;
+   *    `(2047 + 1) & 0x7FF` wraps `R20` back to `0`. If `entryPoint >= 256`, places a 2-byte
+   *    `JMP entryPoint` trampoline in an unused even word `< 256` (preferring `194..195`).
+   * 4. Pass 2 (`40` bytes `0..39`): restores working registers `R0` and `R2..R19`.
+   * 5. Exit (`2` bytes): redirects `R20` at `40` to `46`, then overwrites byte `46` (the low byte
+   *    of `JMP 0x02A`) so execution transfers cleanly to `entryPoint`.
+   */
+  def fromCoreImage(
+    image: CoreImage,
+    entryPoint: Address = Address.PowerOn,
+    label: String = "Factory Program Tape"
+  ): TapeCartridge = {
+    require(image.bytes.length == CoreMemory.Size, s"CoreImage must be ${CoreMemory.Size} bytes")
+    require((entryPoint.unsigned & 1) == 0, s"Entry point must be word-aligned (even): $entryPoint")
+    require(
+      entryPoint.unsigned < 40 || entryPoint.unsigned >= 48,
+      s"Entry point cannot lie inside Initial Loader workspace (40..47): $entryPoint"
+    )
+
+    val jmpWord = Encoder.encode(Instruction.Branch(Condition.Unconditional, link = false, entryPoint))
+    val trampolineOpt: Option[Int] =
+      if (entryPoint.unsigned < 256) {
+        None
+      } else {
+        val candidates = Seq(194, 192, 196) ++ (198 to 254 by 2) ++ (48 to 190 by 2)
+        val existing = candidates.find { addr =>
+          (image.bytes(addr) & 0xff) == jmpWord.lowByte &&
+          (image.bytes(addr + 1) & 0xff) == jmpWord.highByte
+        }
+        val zeroSlot = candidates.find { addr =>
+          image.bytes(addr) == 0 && image.bytes(addr + 1) == 0
+        }
+        Some(existing.orElse(zeroSlot).getOrElse(194))
+      }
+
+    val stream = ArrayBuffer.empty[Int]
+    stream.sizeHint(2083)
+
+    // 1. Pass 1 over 0..39 (40 bytes) -> R20 advances to 40
+    var i = 0
+    while (i < 40) {
+      stream += (image.bytes(i) & 0xff)
+      i += 1
+    }
+
+    // 2. Redirect R20 at byte 40 to 48 (0x30), preserving live Initial Loader at 42..47
+    stream += 48
+
+    // 3. Upper Core 48..2047 (2,000 bytes) -> R20 wraps (2047 + 1) & 0x7FF -> 0
+    var addr = 48
+    while (addr < CoreMemory.Size) {
+      val b = trampolineOpt match {
+        case Some(tAddr) if addr == tAddr     => jmpWord.lowByte
+        case Some(tAddr) if addr == tAddr + 1 => jmpWord.highByte
+        case _                                => image.bytes(addr) & 0xff
+      }
+      stream += b
+      addr += 1
+    }
+
+    // 4. Pass 2 over 0..39 (40 bytes) -> restores R0 and R2..R19; R20 advances to 40
+    i = 0
+    while (i < 40) {
+      stream += (image.bytes(i) & 0xff)
+      i += 1
+    }
+
+    // 5. Redirect R20 at byte 40 to 46, then patch byte 46 of `JMP 0x02A` to jump out
+    stream += 46
+    stream += trampolineOpt.getOrElse(jmpWord.lowByte)
+
+    fromProgramBytes(stream.toSeq, label)
   }
 }

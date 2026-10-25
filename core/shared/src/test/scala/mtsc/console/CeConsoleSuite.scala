@@ -334,4 +334,86 @@ class CeConsoleSuite extends munit.FunSuite {
     assert(sys.operatorPanel.clearDecision)
     assertEquals(sys.operatorPanel.activeSetupParam, Some(SetupParam.Merge))
   }
+
+  test("CE manual Addr/Data bit keying (ILD 0308/0312/0603) keys entire 8-byte Initial Loader byte-by-byte") {
+    import mtsc.periph.{ConsoleKey, MtscSystem}
+
+    val sys = new MtscSystem()
+    sys.clearMemory()
+    val state = new CeConsoleState()
+    state.faceplateInstalled = false
+
+    // Verify ILD 0308 contact-to-bit mapping (right-to-left: R=bit 0 .. 0=bit 10; Data gated to R..3 = bits 0..7)
+    assertEquals(ConsoleKey.KeyR.addrBitIndex, Some(0))
+    assertEquals(ConsoleKey.Key9.addrBitIndex, Some(1))
+    assertEquals(ConsoleKey.Key0.addrBitIndex, Some(10))
+    assertEquals(ConsoleKey.Start.addrBitIndex, None)
+
+    assertEquals(ConsoleKey.KeyR.dataBitIndex, Some(0))
+    assertEquals(ConsoleKey.Key3.dataBitIndex, Some(7))
+    assertEquals(ConsoleKey.Key2.dataBitIndex, None)
+    assertEquals(ConsoleKey.Key1.dataBitIndex, None)
+    assertEquals(ConsoleKey.Key0.dataBitIndex, None)
+    assertEquals(ConsoleKey.Start.dataBitIndex, None)
+
+    // Helper to manually enter an 11-bit byte address using Addr + Clear + Keys 0..9/R
+    val addrKeysByBit: Vector[ConsoleKey] = Vector(
+      ConsoleKey.KeyR, ConsoleKey.Key9, ConsoleKey.Key8, ConsoleKey.Key7,
+      ConsoleKey.Key6, ConsoleKey.Key5, ConsoleKey.Key4, ConsoleKey.Key3,
+      ConsoleKey.Key2, ConsoleKey.Key1, ConsoleKey.Key0
+    )
+    val dataKeysByBit: Vector[ConsoleKey] = addrKeysByBit.take(8)
+
+    def keyAddress(addr: Int): Unit = {
+      state.selectEditSelector(CeEditSelector.Addr, Some(sys.cpu))
+      assertEquals(state.displayMode, CeDisplayMode.Display1, "Addr mode must wire to Display 1 (Y 11..Y 1)")
+      state.pressCeClear(sys.cpu)
+      assertEquals(sys.memory.psar, Address(0))
+      for (bit <- 0 until 11 if ((addr >> bit) & 1) == 1) {
+        state.pressCeKey(addrKeysByBit(bit), sys.cpu)
+      }
+      assertEquals(sys.memory.psar, Address(addr))
+      assertEquals(sys.cpu.state.mal, Address(addr))
+    }
+
+    def keyDataByte(byteVal: Int): Unit = {
+      state.selectEditSelector(CeEditSelector.Data, Some(sys.cpu))
+      assertEquals(state.displayMode, CeDisplayMode.Display2, "Data mode must wire to Display 2 (O 8..O 1)")
+      state.pressCeClear(sys.cpu)
+      assertEquals(sys.memory.readByte(sys.memory.psar), 0)
+      for (bit <- 0 until 8 if ((byteVal >> bit) & 1) == 1) {
+        state.pressCeKey(dataKeysByBit(bit), sys.cpu)
+      }
+      assertEquals(sys.memory.readByte(sys.memory.psar), byteVal & 0xff)
+      assertEquals(sys.cpu.state.outputReg, byteVal & 0xff)
+    }
+
+    // Key all 8 bytes (40..47) of the Right-Station Initial Loader manually, including odd byte addresses!
+    for (row <- InitialLoaderTable.Rows) {
+      keyAddress(row.byteAddress)
+      keyDataByte(row.resolveByte(paperTape = false, leftStation = false))
+    }
+
+    // Verify Clear in Data mode on odd byte 47 did NOT clobber even byte 46 (0x2A)!
+    assertEquals(sys.memory.readByte(Address(40)), 0x00)
+    assertEquals(sys.memory.readByte(Address(41)), 0x00)
+    assertEquals(sys.memory.readByte(Address(42)), 0x02)
+    assertEquals(sys.memory.readByte(Address(43)), 0x18)
+    assertEquals(sys.memory.readByte(Address(44)), 0x03)
+    assertEquals(sys.memory.readByte(Address(45)), 0x7a)
+    assertEquals(sys.memory.readByte(Address(46)), 0x2a)
+    assertEquals(sys.memory.readByte(Address(47)), 0x00)
+
+    // Set PSAR = 42 using Key 5 (+32), Key 7 (+8), Key 9 (+2), then return switch to Proc
+    state.selectEditSelector(CeEditSelector.Addr, Some(sys.cpu))
+    state.pressCeClear(sys.cpu)
+    state.pressCeKey(ConsoleKey.Key5, sys.cpu) // +32
+    state.pressCeKey(ConsoleKey.Key7, sys.cpu) // +8
+    state.pressCeKey(ConsoleKey.Key9, sys.cpu) // +2
+    assertEquals(sys.memory.psar, Address(42))
+
+    state.selectEditSelector(CeEditSelector.Proc, Some(sys.cpu))
+    assertEquals(state.editSelector, CeEditSelector.Proc)
+    assertEquals(sys.memory.psar, Address(42))
+  }
 }

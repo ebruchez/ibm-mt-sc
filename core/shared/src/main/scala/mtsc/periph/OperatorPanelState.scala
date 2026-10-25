@@ -73,27 +73,40 @@ object SetupParam {
 /**
  * The 12-key keyboard at the bottom of the MT/SC console (Operator Panel & CE Console).
  *
- * Per IBM Manual 241-5429-0 (Page 57 & ILD 0308 on Page 107), depressing a key
- * generates a 4-bit code (KB CDE A, B, C, D) plus KB CDE RDY.
+ * Per IBM Manual 241-5429-0 (Page 57 & ILD 0308 on Page 107):
+ * - Physical contacts are numbered 1..12 from right (`R` = 1) to left (`START` = 12).
+ * - Depressing a key generates a 4-bit code (`KB CDE A, B, C, D`) plus `KB CDE RDY`.
+ * - In CE `Addr` mode (`IT 0` & `DPLY 1`), Contacts 1..11 (`R, 9..0`) set `Y 1 .. Y 11` (bits 0..10 of PSAR).
+ * - In CE `Data` mode (`-BT CTR B` & `IT 1` & `DPLY 2`), Contacts 1..8 (`R, 9..3`) set `O 1 .. O 8` (bits 0..7 of byte at PSAR).
+ *
+ * Note: Enum cases are ordered left-to-right (`Start` .. `KeyR`) to match physical console rendering.
  */
 enum ConsoleKey(
-  val keyNumber: Int,
+  val keyNumber: Int, // Hardware contact 1..12 (1 = rightmost 'R', 12 = leftmost 'START')
   val topLegend: String,
   val bottomLegend: String,
-  val kbCodeABCD: Int // 4-bit code: bit 3=A, bit 2=B, bit 1=C, bit 0=D
+  val kbCodeABCD: Int // 4-bit code: bit 3=A, bit 2=B, bit 1=C, bit 0=D (ILD 0308)
 ) {
-  case Start extends ConsoleKey(12, "START", "",          0x0)
-  case Key0  extends ConsoleKey(10, "0",     "TAPE",      0xA)
-  case Key1  extends ConsoleKey(1,  "1",     "NO",        0x9) // A & D
-  case Key2  extends ConsoleKey(2,  "2",     "YES",       0x4) // B
-  case Key3  extends ConsoleKey(3,  "3",     "",          0x2) // C
-  case Key4  extends ConsoleKey(4,  "4",     "J",         0x3) // C & D
-  case Key5  extends ConsoleKey(5,  "5",     "L",         0x1) // D
-  case Key6  extends ConsoleKey(6,  "6",     "C",         0x5) // B & D
-  case Key7  extends ConsoleKey(7,  "7",     "R",         0x6) // B & C
-  case Key8  extends ConsoleKey(8,  "8",     "D",         0x7) // B, C & D
-  case Key9  extends ConsoleKey(9,  "9",     "",          0x8) // A
-  case KeyR  extends ConsoleKey(11, "R",     "LINE STOP", 0x3) // C & D (sets Line Stop Latch)
+  case Start extends ConsoleKey(12, "START", "",          0xD) // A, B, D (Bit Time 9-12, PB 4)
+  case Key0  extends ConsoleKey(11, "0",     "TAPE",      0x5) // B, D    (Bit Time 9-12, PB 3 -> Y 11)
+  case Key1  extends ConsoleKey(10, "1",     "NO",        0x9) // A, D    (Bit Time 9-12, PB 2 -> Y 10)
+  case Key2  extends ConsoleKey(9,  "2",     "YES",       0x1) // D       (Bit Time 9-12, PB 1 -> Y 9)
+  case Key3  extends ConsoleKey(8,  "3",     "",          0xE) // A, B, C (Bit Time 5-8,  PB 4 -> Y 8 / O 8)
+  case Key4  extends ConsoleKey(7,  "4",     "J",         0x6) // B, C    (Bit Time 5-8,  PB 3 -> Y 7 / O 7)
+  case Key5  extends ConsoleKey(6,  "5",     "L",         0xA) // A, C    (Bit Time 5-8,  PB 2 -> Y 6 / O 6)
+  case Key6  extends ConsoleKey(5,  "6",     "C",         0x2) // C       (Bit Time 5-8,  PB 1 -> Y 5 / O 5)
+  case Key7  extends ConsoleKey(4,  "7",     "R",         0xC) // A, B    (Bit Time 1-4,  PB 4 -> Y 4 / O 4)
+  case Key8  extends ConsoleKey(3,  "8",     "D",         0x4) // B       (Bit Time 1-4,  PB 3 -> Y 3 / O 3)
+  case Key9  extends ConsoleKey(2,  "9",     "",          0x8) // A       (Bit Time 1-4,  PB 2 -> Y 2 / O 2)
+  case KeyR  extends ConsoleKey(1,  "R",     "LINE STOP", 0x3) // C, D    (Bit Time 1-4,  PB 1 -> Y 1 / O 1)
+
+  /** Bit index (0..10, corresponding to Y 1 .. Y 11) gated in CE `Addr` mode (ILD 0308). */
+  def addrBitIndex: Option[Int] =
+    if (keyNumber >= 1 && keyNumber <= 11) Some(keyNumber - 1) else None
+
+  /** Bit index (0..7, corresponding to O 1 .. O 8) gated in CE `Data` mode via `-BT CTR B` (ILD 0308). */
+  def dataBitIndex: Option[Int] =
+    if (keyNumber >= 1 && keyNumber <= 8) Some(keyNumber - 1) else None
 }
 
 object ConsoleKey {
@@ -109,6 +122,13 @@ object ConsoleKey {
     case 8 => Some(Key8)
     case 9 => Some(Key9)
     case _ => None
+  }
+
+  def fromChar(ch: Char): Option[ConsoleKey] = ch.toLower match {
+    case d if d >= '0' && d <= '9' => fromDigit(d - '0')
+    case 'r'                       => Some(KeyR)
+    case 'c'                       => Some(Start)
+    case _                         => None
   }
 }
 
