@@ -106,4 +106,138 @@ class AssemblerSuite extends munit.FunSuite {
     val res = Assembler.assemble(src)
     assert(res.isRight, s"Assembly failed: $res")
   }
+
+  test("assemble reference guide examples") {
+    val examples = List(
+      // Example 1: Bootstrap loader
+      """
+        .org 546
+        BOOTSTRAP_LOADER:
+            IN      TAPE_R, R4
+            MOVB    [R8]++, R4
+            JMP     BOOTSTRAP_LOADER
+      """,
+      // Example 2: Subroutine linkage JMPL
+      """
+        .org 546
+        MAIN:
+            MOVI    R0, 25
+            JMPL    MULTIPLY_BY_FOUR
+            CMPI    R0, 100
+            JMP.EQ  SUCCESS
+        FAIL_HALT:
+            JMP     FAIL_HALT
+        SUCCESS:
+            MOVI    R30, 0xAA
+        DONE:
+            JMP     DONE
+
+        .org 600
+        MULTIPLY_BY_FOUR:
+            .word   0x0000
+            ADD     R0, R0
+            ADD     R0, R0
+            JMP     MULTIPLY_BY_FOUR
+      """,
+      // Example 3: Escapement table lookup
+      """
+        .org 546
+        START_MEASURE:
+            MOVI    R8, 60
+            SBIT    R8, 8
+            MOVI    R20, 0
+            MOVI    R30, 150
+        READ_LOOP:
+            MOVB    R4, [R8]++
+            CMPI    R4, 0
+            JMP.EQ  LINE_COMPLETE
+            ADDI    R4, 64
+            MOVB    R10, [R4]
+            ADD     R20, R10
+            CMP     R30, R20
+            JMP.LO  LINE_EXCEEDED
+            JMP     READ_LOOP
+        LINE_EXCEEDED:
+            MOVI    R24, 1
+            JMP     HALT
+        LINE_COMPLETE:
+            MOVI    R24, 0
+        HALT:
+            JMP     HALT
+      """,
+      // Example 4: Division subroutine
+      """
+        .org 768
+        DIVIDE_SUB:
+            .word   0x0000
+            MOVI    R4, 0
+        DIV_LOOP:
+            CMP     R0, R2
+            JMP.LO  DIV_DONE
+            SUB     R0, R2
+            ADDI    R4, 1
+            JMP     DIV_LOOP
+        DIV_DONE:
+            MOV     R6, R0
+            JMP     DIVIDE_SUB
+      """,
+      // Example 5: Justification
+      """
+        .org 546
+        JUSTIFY_CALC:
+            MOV     R12, R30
+            SUB     R12, R20
+            JMP.LO  JUSTIFY_FAIL
+            CMPI    R22, 0
+            JMP.EQ  JUSTIFY_FAIL
+            MOV     R0, R12
+            MOV     R2, R22
+            JMPL    DIVIDE_SUB
+            MOV     R14, R4
+            MOV     R16, R6
+            MOVI    R18, 4
+            ADD     R18, R14
+            CMPI    R18, 9
+            JMP.HI  JUSTIFY_FAIL
+            CMPI    R18, 3
+            JMP.LO  JUSTIFY_FAIL
+            MOVI    R18, 1
+            JMP     JUSTIFY_DONE
+        JUSTIFY_FAIL:
+            MOVI    R18, 0
+        JUSTIFY_DONE:
+            JMP     JUSTIFY_DONE
+
+        .org 768
+        DIVIDE_SUB:
+            .word   0x0000
+            MOVI    R4, 0
+        DIV_LOOP:
+            CMP     R0, R2
+            JMP.LO  DIV_FIN
+            SUB     R0, R2
+            ADDI    R4, 1
+            JMP     DIV_LOOP
+        DIV_FIN:
+            MOV     R6, R0
+            JMP     DIVIDE_SUB
+      """,
+      // Example 6: Multiplex print
+      """
+        .org 546
+        PRINT_JUSTIFIED_LINE:
+            MOVI    R0, 198
+            OUTM    TSLTR, [R0]
+        NEXT_TASK:
+            ADDI    R26, 1
+        IDLE_LOOP:
+            JMP     IDLE_LOOP
+      """
+    )
+
+    for ((src, idx) <- examples.zipWithIndex) {
+      val res = Assembler.assemble(src)
+      assert(res.isRight, s"Example ${idx + 1} failed to assemble: $res")
+    }
+  }
 }
