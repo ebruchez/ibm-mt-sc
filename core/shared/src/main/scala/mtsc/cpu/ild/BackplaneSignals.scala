@@ -234,9 +234,351 @@ final class BackplaneSignals {
   /** `+BEGINNING PROGRAM STEP` (AA092 BE4): `insnT0 && b1_4 && pTime && !cenBt`. */
   var begPrgStp: Boolean = false
 
+    // ===============================================================================================
+  // ILD 0305: Power, Start, Sense Amplifiers, Read Inhibit & Q-Buffer (AA052, AA061, AA083, AA101, AA121, AA151, AA241, AA261, AA262)
+  // ===============================================================================================
+
+  /** `+POWER ON` (AA151 AS4): DC power good indicator. */
+  var pwrOn: Boolean = true
+
+  /** `+START` latch (AA151 3G-AK): Run enable latch set after power-on reset at `BEG P.S.`. */
+  var start: Boolean = true
+
+  /** CE Console `CLEAR` pushbutton depressed (`+CLR` on AA151 / 0305 / 0312). */
+  var clrButtonPressed: Boolean = false
+
+  /** CE Console Display selector lines (`+DPLY 1` = Edit/Addr, `+DPLY 2` = Data/Prog on AA221 / 0312). */
+  var dply1: Boolean = false
+  var dply2: Boolean = false
+
+  /** `+INHIBIT` (`INH`, AA142 AF4 / ILD 0311): I/O wait / stall or multiplex interrupt inhibit latch. */
+  var inh: Boolean = false
+
+  /** `+MULTIPLEX` (`MPX`, AA141 / ILD 0311): Background Translator multiplex output mode latch. */
+  var mpx: Boolean = false
+
+  /** `+READY` (`RDY`, AA142 BC4 / ILD 0311): Selected I/O or Translator device ready signal. */
+  var rdy: Boolean = true
+
+  /** `+TRANS + COMP` (AA041 / AA061): Transfer or Compare decode (`oplCde2 && (oplCde3 || oplCde4 || oplCde6 || oplCde7)`). */
+  var transOrComp: Boolean = false
+
+  /** `16-bit Transfer` (`MOV` / `MOVI`, AA041): `oplCde2 && oplCde3 && oplCde4 && !oplCde6 && !oplCde7`. */
+  var trans16: Boolean = false
+
+  /** `+INHIBIT READ` (`INH RD`, AA061 AG4 / AA101): Suppresses Sense Amplifier outputs during destructive clear reads. */
+  var inhRd: Boolean = false
+
+  /** Upper-byte `CS Y LOG` suppression (`AA082 1C-AE, 1D-AG`): suppresses Y current during `B9-12` and `B13-16` for 8-bit operations. */
+  var killCsYUpperByte: Boolean = false
+
+  /** `+READ EVEN WRITE ODD` (`REWO`, AA121 BS4) and `+READ ODD WRITE EVEN` (`ROWE`, AA121 AY4). */
+  var rewoGate: Boolean = false
+  var roweGate: Boolean = false
+
+  /** `+READ EVEN WRITE ODD GATE` (`AA241 AQ4`) and `+READ ODD WRITE EVEN GATE` (`AA241 AS4`). */
+  var rewoSenseGate: Boolean = false
+  var roweSenseGate: Boolean = false
+
+  /** `+READ GATE` (`AA241 AP4`): Active during core read when `csYLog && !twr`. */
+  var readGate: Boolean = false
+
+  /** Sense Amplifier outputs `SENSE AMP 1..4` (`AA261`, `AA262`). */
+  var senseAmp1: Boolean = false
+  var senseAmp2: Boolean = false
+  var senseAmp3: Boolean = false
+  var senseAmp4: Boolean = false
+
+  /** `-RESET BUFFER` (`RES BFR` in positive logic, AA083 AJ4): `(!ssa && !b && !twr && pTime) || masterReset`. */
+  var resBfr: Boolean = false
+
+  /** `+LOAD Q BUFFER 1` (`LD Q BFR 1`, AA101 AF4): Adds `+1` into `Q BFR 1` at `B1-4, BMP STRB T`. */
+  var ldQBfr1: Boolean = false
+
+  /** `+LOAD Q BUFFER 2` (`LD Q BFR 2`, AA101 AY4): Adds `+2` into `Q BFR 2` at `B1-4, BMP STRB T` (or sets power-on PSAR on MR). */
+  var ldQBfr2: Boolean = false
+
+  /** `Q BUFFER 1..4` Sense Amplifier Triggers (`+Q BUFFER 1..4`, AA261 / AA262). */
+  var qBfr1: Boolean = false
+  var qBfr2: Boolean = false
+  var qBfr3: Boolean = false
+  var qBfr4: Boolean = false
+
+  // ===============================================================================================
+  // ILD 0306 & 0307: Memory Address Latches Y1..Y11 & X/Y Current Decoders (AA042, AA101, AA111, AA112, AA121, AA122, AA161)
+  // ===============================================================================================
+
+  /** `+SELECT PROGRAM STEP ADDRESS` (`SEL PROG STEP ADDR`, AA042 AR4). */
+  var selProgStepAddr: Boolean = true
+
+  /** `+SELECT A WORD` (`SEL A WD`, AA042 AT4). */
+  var selAWd: Boolean = false
+
+  /** `+SELECT B WORD` (`SEL B WD`, AA042 BA4). */
+  var selBWd: Boolean = false
+
+  /** `+SELECT MEMORY SPECIAL` (`SEL MEM SPEC`, AA112): `selProgStepAddr || selAWd || selBWd`. */
+  var selMemSpec: Boolean = true
+
+  /** `+SELECT MEMORY UPPER` (`SEL MEM UP`, AA042 AF4): True when addressing all 11 bits `Y1..Y11` vs working registers `Y2..Y6`. */
+  var selMemUp: Boolean = false
+
+  /** `+LOAD Y` (`LD Y`, AA101): `!insnTCtrA && !insnT6 && cenBt` (`I-0, I-2, I-4, I-8` at `CEN BT`). */
+  var ldY: Boolean = false
+
+  /** `+LOAD Y INSN T 6` (`AA101`): `insnT6 && cenBt`. */
+  var ldYInsnT6: Boolean = false
+
+  /** `+INCR JUMP RESET Y` (`AA101`): `pTime && b5_8 && oplCde1 && insnT2`. */
+  var incrJmpResY: Boolean = false
+
+  /** `-RESET Y` (`RES Y` in positive logic, AA101 BG4): Resets `Y1..Y11` prior to loading in even I-times or during MPX I-3. */
+  var resY: Boolean = false
+
+  /** 11-bit Memory Address Latches `Y1..Y11` (weights `1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024`, AA111 / AA161). */
+  var y1: Boolean = false
+  var y2: Boolean = false
+  var y3: Boolean = false
+  var y4: Boolean = false
+  var y5: Boolean = false
+  var y6: Boolean = false
+  var y7: Boolean = false
+  var y8: Boolean = false
+  var y9: Boolean = false
+  var y10: Boolean = false
+  var y11: Boolean = false
+
+  /** Intermediate X/Y Decode lines (`AA112`, `AA121`, `AA122`). */
+  var dcdDrvrY1234: Boolean = false
+  var dcdDrvrY2468: Boolean = true
+  var dcdDrvrY3478: Boolean = true
+  var dcdDrvrY5678: Boolean = true
+  var dcdSwY24: Boolean = false
+  var dcdSwY34: Boolean = true
+
+  var dcdDrvrX1: Boolean = false
+  var dcdDrvrX234: Boolean = false
+  var dcdDrvrX567: Boolean = false
+  var dcdDrvrX8: Boolean = true
+  var dcdSwX1234: Boolean = false
+  var dcdSwX56: Boolean = false
+  var dcdSwX57: Boolean = false
+  var dcdSwX8: Boolean = true
+
+  /** Selected X-Driver (`0..7` for `X DRV 1..8`), X-Switch (`0..7` for `X SW 1..8`), Y-Driver (`0..7` for `Y DRV 1..8`), Y-Switch (`0..3` for `Y SW 1..4`). */
+  var activeXDriver: Int = 7
+  var activeXSwitch: Int = 7
+  var activeYDriver: Int = 7
+  var activeYSwitch: Int = 2
+
+  // ===============================================================================================
+  // ILD 0308: P-Buffer, Carry Over Latch & 4-Bit Serial Adder/Subtractor (AA011..AA014, AA051, AA083, AA101)
+  // ===============================================================================================
+
+  /** External Input Bit lines `IN BIT 1..8` from Tape / Paper Tape Reader (`AA141` / `0308`). */
+  var inBit1: Boolean = false
+  var inBit2: Boolean = false
+  var inBit3: Boolean = false
+  var inBit4: Boolean = false
+  var inBit5: Boolean = false
+  var inBit6: Boolean = false
+  var inBit7: Boolean = false
+  var inBit8: Boolean = false
+
+  /** Control Panel Keyboard Code lines `KB CODE A..D`, `KB CODE RDY`, `LN STP LTH` (`AA051` / `0308` / `0312`). */
+  var kbCodeA: Boolean = false
+  var kbCodeB: Boolean = false
+  var kbCodeC: Boolean = false
+  var kbCodeD: Boolean = false
+  var kbCodeRdy: Boolean = false
+  var lnStpLth: Boolean = false
+
+  /** `+KEYBOARD CODE` (`KB CDE`, AA121 AQ4): `y8 && y9 && y10` (Device `0111`). */
+  var kbCde: Boolean = false
+
+  /** `+INPUT STROBE` (`IN STRB`, AA141 AW4): `cenBt && insnT5 && !inh && !kbCde && input`. */
+  var inStrb: Boolean = false
+
+  /** `+KEYBOARD STROBE` (`KB STRB`, AA141 BC4) and `+KEYBOARD ENTRY STROBE` (`KB ENT STRB`, AA051). */
+  var kbStrb: Boolean = false
+  var kbEntStrb: Boolean = false
+
+  /** `RES P BFR` (`AA083` / `AA011`): `(resBfr && !cenBt) || masterReset`. */
+  var resPBfr: Boolean = false
+
+  /** `P BUFFER 1..4` Latches (`+P BUFFER 1..4`, AA011 / AA013). */
+  var pBfr1: Boolean = false
+  var pBfr2: Boolean = false
+  var pBfr3: Boolean = false
+  var pBfr4: Boolean = false
+
+  /** `+ADD` and `-ADD` (`AA101`): `add = !(insnT9 && athOp && !oplCde3)`. */
+  var add: Boolean = true
+  var notAdd: Boolean = false
+
+  /** Steering and Indicator latches for `+CARRY OVER LATCH` (`CAR OVER`, AA101 4G-AT..7G-BA). */
+  var strCarOver: Boolean = false
+  var carOver: Boolean = false
+
+  /** Ripple Carry / Borrow outputs `+CARRY 1..4` (`AA011`, `AA013`). */
+  var car1: Boolean = false
+  var car2: Boolean = false
+  var car3: Boolean = false
+  var car4: Boolean = false
+
+  /** 4-Bit Accumulator outputs `+ACCUMULATOR 1..4` (`AA011`..`AA014`). */
+  var acc1: Boolean = false
+  var acc2: Boolean = false
+  var acc3: Boolean = false
+  var acc4: Boolean = false
+
+  /** `+ACCUMULATOR EQUAL ZERO` (`AA012 AW4`) and `-ACCUMULATOR EQUAL ZERO` (`AA131 AX4`). */
+  var accEqualZero: Boolean = true
+
+  // ===============================================================================================
+  // ILD 0309: Operational Code Latches, Bit Sampling & LOW / EQUAL Latches (AA012, AA032, AA051, AA072, AA101, AA132)
+  // ===============================================================================================
+
+  /** `+LOAD OPERATIONAL CODE` (`LOAD OPL CDE`, AA101): `(!mpx || !rdy) && cenBt && insnT1`. */
+  var loadOplCde: Boolean = false
+
+  /** `+SAMPLED BIT TIME` (`SAM BT`, AA051 AE4): `(prgCtl || oplCde1) && (y11 == btCtrB) && (y10 == btCtrA)`. */
+  var samBt: Boolean = false
+
+  /** `+SAMPLED BIT POSITION` (`SAM B POS`, AA012 AZ4): True during `samBt` when the selected `ACC` bit is `0`. */
+  var samBPos: Boolean = false
+
+  /** `-RESET LOW AND EQUAL` (`RES LO & EQ` in positive logic, AA132 AK4): Presets `EQ = true, LOW = false` at `I-2, I-4, I-6, I-8`. */
+  var resLoAndEq: Boolean = false
+
+  /** External `-SET LOW` (`SET LO` in positive logic, AA193 AP4): Tape reader parity error / skip indicator. */
+  var setLo: Boolean = false
+
+  // ===============================================================================================
+  // ILD 0310: Write Controls, Current Source Logic & Sense Inhibit Lines (AA012, AA014, AA041, AA052, AA061, AA121, BA011)
+  // ===============================================================================================
+
+  /** `+WRITE P BUFFER` (`WR P BFR`, AA061 AU4). */
+  var wrPBfr: Boolean = false
+
+  /** `+WRITE ACCUMULATOR` (`WR ACC`, AA061 AJ4). */
+  var wrAcc: Boolean = false
+
+  /** `+EDIT PROGRAM CONTROL BIT` (`EDIT PRG CTL BIT`, AA041 AN4): `insnT3 && samBt && !oplCde6 && prgCtl`. */
+  var editPrgCtlBit: Boolean = false
+
+  /** `-EDIT BIT 1..4` (`EDIT BIT 1..4` in positive logic, AA012 / AA014). */
+  var editBit1: Boolean = false
+  var editBit2: Boolean = false
+  var editBit3: Boolean = false
+  var editBit4: Boolean = false
+
+  /** Data bits `1..4` to be written to Core Memory Planes `1..4` during `TWR` (`true` = write `1`, `false` = inhibit / write `0`). */
+  var writeBit1: Boolean = false
+  var writeBit2: Boolean = false
+  var writeBit3: Boolean = false
+  var writeBit4: Boolean = false
+
+  /** `+CURRENT SOURCE 1..4` (`CURR SOURCE 1..4`, AA012 / AA014): Inhibit driver enable (`twr && !inhibitMemory && !writeBit(i)`). */
+  var currSource1: Boolean = false
+  var currSource2: Boolean = false
+  var currSource3: Boolean = false
+  var currSource4: Boolean = false
+
+  /** `SENSE INH LINE EV 1..4` and `SENSE INH LINE ODD 1..4` (`BA011`). */
+  var senseInhLineEv1: Boolean = false
+  var senseInhLineEv2: Boolean = false
+  var senseInhLineEv3: Boolean = false
+  var senseInhLineEv4: Boolean = false
+  var senseInhLineOdd1: Boolean = false
+  var senseInhLineOdd2: Boolean = false
+  var senseInhLineOdd3: Boolean = false
+  var senseInhLineOdd4: Boolean = false
+
+  /** `OUTPUT 1..8` Latches (`+OUTPUT 1..8`, AA031 / ILD 0311): 8-bit Output Register. */
+  var out1: Boolean = false
+  var out2: Boolean = false
+  var out3: Boolean = false
+  var out4: Boolean = false
+  var out5: Boolean = false
+  var out6: Boolean = false
+  var out7: Boolean = false
+  var out8: Boolean = false
+
   // ===============================================================================================
   // Convenience Inspection & Setup Helpers
   // ===============================================================================================
+
+  /** Returns the current 11-bit Memory Address Latch value `(Y11..Y1)` in `0..2047`. */
+  def malValue: Int =
+    (if (y1) 1 else 0) |
+      (if (y2) 2 else 0) |
+      (if (y3) 4 else 0) |
+      (if (y4) 8 else 0) |
+      (if (y5) 16 else 0) |
+      (if (y6) 32 else 0) |
+      (if (y7) 64 else 0) |
+      (if (y8) 128 else 0) |
+      (if (y9) 256 else 0) |
+      (if (y10) 512 else 0) |
+      (if (y11) 1024 else 0)
+
+  /** Sets `Y1..Y11` from an integer byte address `0..2047`. */
+  def setMalValue(addr: Int): Unit = {
+    y1  = (addr & 1) != 0
+    y2  = (addr & 2) != 0
+    y3  = (addr & 4) != 0
+    y4  = (addr & 8) != 0
+    y5  = (addr & 16) != 0
+    y6  = (addr & 32) != 0
+    y7  = (addr & 64) != 0
+    y8  = (addr & 128) != 0
+    y9  = (addr & 256) != 0
+    y10 = (addr & 512) != 0
+    y11 = (addr & 1024) != 0
+  }
+
+  /** Returns the 4-bit `Q BUFFER` value `(qBfr4..qBfr1)` in `0..15`. */
+  def qBufferNibble: Int =
+    (if (qBfr1) 1 else 0) |
+      (if (qBfr2) 2 else 0) |
+      (if (qBfr3) 4 else 0) |
+      (if (qBfr4) 8 else 0)
+
+  /** Returns the 4-bit `P BUFFER` value `(pBfr4..pBfr1)` in `0..15`. */
+  def pBufferNibble: Int =
+    (if (pBfr1) 1 else 0) |
+      (if (pBfr2) 2 else 0) |
+      (if (pBfr3) 4 else 0) |
+      (if (pBfr4) 8 else 0)
+
+  /** Returns the 4-bit `ACCUMULATOR` value `(acc4..acc1)` in `0..15`. */
+  def accNibble: Int =
+    (if (acc1) 1 else 0) |
+      (if (acc2) 2 else 0) |
+      (if (acc3) 4 else 0) |
+      (if (acc4) 8 else 0)
+
+  /** Returns the 8-bit `OUTPUT 1..8` register value in `0..255`. */
+  def outputByte: Int =
+    (if (out1) 1 else 0) |
+      (if (out2) 2 else 0) |
+      (if (out3) 4 else 0) |
+      (if (out4) 8 else 0) |
+      (if (out5) 16 else 0) |
+      (if (out6) 32 else 0) |
+      (if (out7) 64 else 0) |
+      (if (out8) 128 else 0)
+
+  /** Returns the 7-bit packed Operational Code Latches matching `CcuState.opCodeLatches`. */
+  def packedOpCodeLatches: Int =
+    (if (oplCde1) 1 else 0) |
+      (if (oplCde2) 2 else 0) |
+      (if (oplCde3) 4 else 0) |
+      (if (oplCde4) 8 else 0) |
+      (if (oplCde5) 16 else 0) |
+      (if (oplCde6) 32 else 0) |
+      (if (oplCde7) 64 else 0)
 
   /** Returns the current Instruction Time as an integer `0..9` from `insnTCtrA..D` (BCD 8-4-2-1). */
   def insnTime: Int =
