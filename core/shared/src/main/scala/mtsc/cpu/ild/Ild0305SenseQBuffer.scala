@@ -27,7 +27,7 @@ object Ild0305SenseQBuffer {
     // [AA041] 16-bit Direct/Immediate Transfer (MOV / MOVI) and Transfer-or-Compare (TRANS + COMP)
     // Note: For 16-bit Direct/Immediate, Transfer (11) & Compare (01) have oplCde4 = 1 (whereas Add = 10 & Sub = 00 have oplCde4 = 0).
     // For Byte Indirect (!immediate && (oplCde6 || oplCde7)), all instructions are Transfer (MOVB) or Compare (CMPB).
-    s.trans16 = s.oplCde2 && s.oplCde3 && s.oplCde4 && !s.oplCde6 && !s.oplCde7
+    s.trans16 = s.oplCde2 && s.oplCde3 && s.oplCde4 && (s.immediate || (!s.oplCde6 && !s.oplCde7))
     s.transOrComp = s.oplCde2 && (s.oplCde4 || (!s.immediate && (s.oplCde6 || s.oplCde7)))
 
     // [AA061 / AA101] +INHIBIT READ (INH RD): suppresses Sense Amplifier outputs during destructive clear reads

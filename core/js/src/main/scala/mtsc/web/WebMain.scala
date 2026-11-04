@@ -4,7 +4,7 @@ import scala.scalajs.js
 import scala.scalajs.js.annotation.*
 import mtsc.types.*
 import mtsc.isa.{Decoder, Instruction}
-import mtsc.cpu.StepResult
+import mtsc.cpu.{CcuEngineMode, StepResult}
 import mtsc.asm.Disassembler
 import mtsc.diag.{DiagnosticPrograms, EscapementRoutine}
 import mtsc.periph.*
@@ -21,7 +21,16 @@ import mtsc.console.*
  */
 object WebMain {
 
-  private val system = new MtscSystem()
+  /**
+   * Default CCU execution engine for the Scala.js Web simulator:
+   * - [[CcuEngineMode.Ild]]: Hardware-accurate gate- and latch-level ILD engine (`0303`–`0312`)
+   * - [[CcuEngineMode.Behavioral]]: High-level ISA behavioral engine
+   *
+   * Can also be overridden in the browser via URL query parameter `?engine=ild` or `?engine=behavioral`.
+   */
+  val DefaultEngineMode: CcuEngineMode = CcuEngineMode.Ild
+
+  private val system = new MtscSystem(initialEngineMode = DefaultEngineMode)
   private val consoleState = new CeConsoleState()
   private var currentProgramIdx: Int = 0
   private var runTimerId: Option[Int] = None
@@ -36,6 +45,17 @@ object WebMain {
     val doc = js.Dynamic.global.document
     val root = doc.getElementById("mtsc-app")
     if (root == null || js.isUndefined(root)) return
+
+    // Optional URL query override: ?engine=ild or ?engine=behavioral
+    if (js.typeOf(js.Dynamic.global.window) != "undefined" && !js.isUndefined(js.Dynamic.global.window.location)) {
+      val search = js.Dynamic.global.window.location.search.toString.toLowerCase
+      if (search.contains("engine=behavioral") || search.contains("engine=isa")) {
+        system.setEngineMode(CcuEngineMode.Behavioral)
+      } else if (search.contains("engine=ild") || search.contains("engine=gate")) {
+        system.setEngineMode(CcuEngineMode.Ild)
+      }
+    }
+    consoleState.log(s"CCU Engine Mode: ${system.engineMode.label}.")
 
     // Start in Operator Faceplate mode by default so the user can unlatch it to reveal the CE chassis
     consoleState.faceplateInstalled = true
@@ -406,6 +426,12 @@ object WebMain {
         vp.scrollTop = 0
       }
       consoleState.statusMessage = "Fresh camera-ready galley sheet loaded into Selectric Composer."
+    })
+    onClick("btn-engine-toggle", () => {
+      val mode = system.toggleEngineMode()
+      consoleState.log(s"Switched CCU Engine to ${mode.label}.")
+      consoleState.statusMessage = s"CCU Execution Engine switched to ${mode.label}."
+      playClickSound(440)
     })
     onClick("btn-sound-toggle", () => {
       soundEnabled = !soundEnabled
@@ -848,8 +874,10 @@ object WebMain {
     )
     setText(
       "console-mode-badge",
-      if (consoleState.faceplateInstalled) "OPERATOR MODE (FACEPLATE INSTALLED)"
-      else s"CUSTOMER ENGINEER MODE (EXPOSED CHASSIS • ${consoleState.displayMode.rowLabel.toUpperCase})"
+      if (consoleState.faceplateInstalled)
+        s"OPERATOR MODE (FACEPLATE INSTALLED • ENGINE: ${system.engineMode.label.toUpperCase})"
+      else
+        s"CUSTOMER ENGINEER MODE (EXPOSED CHASSIS • ${consoleState.displayMode.rowLabel.toUpperCase} • ENGINE: ${system.engineMode.label.toUpperCase})"
     )
 
     // 2. Power Rocker Switch
@@ -958,6 +986,8 @@ object WebMain {
     setClassFlag("speed-2x",  "active", consoleState.realTimePacing && consoleState.pacingSpeed == 2.0)
     setClassFlag("speed-5x",  "active", consoleState.realTimePacing && consoleState.pacingSpeed == 5.0)
     setClassFlag("speed-max", "active", !consoleState.realTimePacing)
+    setText("btn-engine-toggle", s"Engine: ${system.engineMode.shortLabel}")
+    setClassFlag("btn-engine-toggle", "active", system.cpu.isIldMode)
     setText("btn-sound-toggle", if (soundEnabled) "Sound: ON" else "Sound: OFF")
     setText("status-banner", consoleState.statusMessage)
 
@@ -1078,6 +1108,7 @@ object WebMain {
     val bw   = system.memory.bWord.unsigned
     val out  = system.cpu.state.outputReg
 
+    setText("ce-reg-engine", system.engineMode.shortLabel)
     setText("ce-reg-psar", f"0x$psar%03X ($psar%4d)")
     setText("ce-reg-mal",  f"0x$mal%03X ($mal%4d)")
     setText("ce-reg-aw",   f"0x$aw%04X")

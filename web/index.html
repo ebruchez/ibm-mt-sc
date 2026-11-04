@@ -47,6 +47,7 @@
           <option value="6">6: Branch &amp; Bit Control Diagnostic</option>
         </select>
 
+        <button id="btn-engine-toggle" class="btn-chip active" title="Toggle CCU Execution Engine between Gate-Level ILD (0303–0312) and Behavioral ISA">Engine: ILD</button>
         <button id="btn-sound-toggle" class="btn-chip">Sound: ON</button>
       </div>
     </header>
@@ -476,6 +477,7 @@
       <summary class="ce-drawer-summary">
         <span>Customer Engineer (CE) CCU 6320 Hardware Internals — 32 Working Registers, Live Disassembly &amp; 2,048-Byte Core Memory</span>
         <div class="ce-quick-regs">
+          <span>ENGINE: <strong id="ce-reg-engine">ILD</strong></span>
           <span>PSAR: <strong id="ce-reg-psar">0x222</strong></span>
           <span>MAL: <strong id="ce-reg-mal">0x222</strong></span>
           <span>AW: <strong id="ce-reg-aw">0x0000</strong></span>

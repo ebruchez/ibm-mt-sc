@@ -221,10 +221,14 @@ class CeConsoleState {
       case CeEditSelector.Addr =>
         displayMode = CeDisplayMode.Display1
         cpuOpt.foreach { cpu =>
-          val addr = cpu.memory.psar
-          cpu.state.mal = addr
-          cpu.memory.aWord = cpu.memory.readWord(Address(addr.unsigned & 0x7fe))
-          cpu.state.outputReg = cpu.memory.readByte(addr)
+          if (cpu.isIldMode) {
+            cpu.ild.setEditSelector(CeEditSelector.Addr)
+          } else {
+            val addr = cpu.memory.psar
+            cpu.state.mal = addr
+            cpu.memory.aWord = cpu.memory.readWord(Address(addr.unsigned & 0x7fe))
+            cpu.state.outputReg = cpu.memory.readByte(addr)
+          }
         }
         log("Right CE slide switch set to [Addr] (Display 1: Y 11..Y 1)")
         statusMessage = cpuOpt match {
@@ -238,10 +242,14 @@ class CeConsoleState {
       case CeEditSelector.Data =>
         displayMode = CeDisplayMode.Display2
         cpuOpt.foreach { cpu =>
-          val addr = cpu.memory.psar
-          val b = cpu.memory.readByte(addr)
-          cpu.state.mal = addr
-          cpu.state.outputReg = b
+          if (cpu.isIldMode) {
+            cpu.ild.setEditSelector(CeEditSelector.Data)
+          } else {
+            val addr = cpu.memory.psar
+            val b = cpu.memory.readByte(addr)
+            cpu.state.mal = addr
+            cpu.state.outputReg = b
+          }
         }
         log("Right CE slide switch set to [Data] (Display 2: O 8..O 1)")
         statusMessage = cpuOpt match {
@@ -256,15 +264,22 @@ class CeConsoleState {
 
       case CeEditSelector.Edit =>
         cpuOpt.foreach { cpu =>
-          val addr = cpu.memory.psar
-          cpu.state.mal = addr
-          cpu.memory.aWord = cpu.memory.readWord(Address(addr.unsigned & 0x7fe))
+          if (cpu.isIldMode) {
+            cpu.ild.setEditSelector(CeEditSelector.Edit)
+          } else {
+            val addr = cpu.memory.psar
+            cpu.state.mal = addr
+            cpu.memory.aWord = cpu.memory.readWord(Address(addr.unsigned & 0x7fe))
+          }
         }
         log("Right CE slide switch set to [Edit]")
         statusMessage = "Edit Memory Selector switch: Edit"
 
       case CeEditSelector.Proc =>
         cpuOpt.foreach { cpu =>
+          if (cpu.isIldMode) {
+            cpu.ild.setEditSelector(CeEditSelector.Proc)
+          }
           cpu.state.halted = false
           cpu.state.mal = cpu.memory.psar
         }
@@ -281,6 +296,11 @@ class CeConsoleState {
         }
 
       case CeEditSelector.Prog =>
+        cpuOpt.foreach { cpu =>
+          if (cpu.isIldMode) {
+            cpu.ild.setEditSelector(CeEditSelector.Prog)
+          }
+        }
         log("Right CE slide switch set to [Prog]")
         statusMessage = "Edit Memory Selector switch: Prog"
     }
@@ -301,6 +321,9 @@ class CeConsoleState {
    * - Otherwise: resets condition and tape parity error indicators (`RES INDS`).
    */
   def pressCeClear(cpu: Ccu): String = {
+    if (cpu.isIldMode) {
+      return pressCeClear(cpu.ild)
+    }
     val msg = editSelector match {
       case CeEditSelector.Addr =>
         cpu.memory.psar = Address(0)
@@ -341,6 +364,9 @@ class CeConsoleState {
    * Returns `Some(status)` if consumed by CE manual entry, or `None` for normal processing.
    */
   def pressCeKey(key: ConsoleKey, cpu: Ccu): Option[String] = {
+    if (cpu.isIldMode) {
+      return pressCeKey(key, cpu.ild)
+    }
     if (faceplateInstalled) return None
 
     editSelector match {
@@ -431,6 +457,9 @@ class CeConsoleState {
    *   Lamps are multiplexed by `displayMode` (`Display 1..4` or `ClockDefault`).
    */
   def computeLamps(cpu: Ccu): Vector[LampState] = {
+    if (cpu.isIldMode) {
+      return computeLamps(cpu.ild)
+    }
     val sysBusOpt = cpu.ioBus match {
       case s: SystemIoBus => Some(s)
       case _              => None

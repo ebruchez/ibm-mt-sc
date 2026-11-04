@@ -1,7 +1,7 @@
 package mtsc.cli
 
 import mtsc.types.*
-import mtsc.cpu.StepResult
+import mtsc.cpu.{CcuEngineMode, StepResult}
 import mtsc.memory.CoreMemory
 import mtsc.periph.{ConsoleKey, MtscSystem, SystemIoBus, TapeCartridge, TapeConsoleButton, TapeReader}
 import mtsc.diag.{ContinuousComposerRoutine, DiagnosticPrograms, EscapementRoutine}
@@ -16,32 +16,62 @@ import mtsc.console.{AnsiTerminal, CeConsoleMode, CeConsoleState, CeConsoleView,
  */
 object Main {
 
+  /** Default execution engine for JVM and Scala Native CLI (`CcuEngineMode.Ild` or `CcuEngineMode.Behavioral`). */
+  val DefaultEngineMode: CcuEngineMode = CcuEngineMode.Default
+
   private var currentProgramIndex: Int = 0
   private var currentTapeButtonIndex: Int = 0
+
+  /**
+   * Parses command-line arguments, applying engine mode (`--ild` / `--behavioral`),
+   * pacing speed (`--max`, `--2x`, `--5x`), and console faceplate (`--operator`) options.
+   *
+   * Returns an optional initial tape file path if a non-flag argument was supplied.
+   */
+  def parseArgs(
+    args: Array[String],
+    system: MtscSystem,
+    consoleState: CeConsoleState
+  ): Option[String] = {
+    var initialFile: Option[String] = None
+    var i = 0
+    while (i < args.length) {
+      val arg = args(i)
+      val lower = arg.toLowerCase
+      if (lower == "--ild" || lower == "--gate" || lower == "--gate-level" || lower == "--engine=ild" || lower == "--engine=gate") {
+        system.setEngineMode(CcuEngineMode.Ild)
+      } else if (lower == "--behavioral" || lower == "--isa" || lower == "--engine=behavioral" || lower == "--engine=isa") {
+        system.setEngineMode(CcuEngineMode.Behavioral)
+      } else if (lower == "--engine" && i + 1 < args.length) {
+        CcuEngineMode.fromString(args(i + 1)).foreach(system.setEngineMode)
+        i += 1
+      } else if (lower == "--max" || lower == "--turbo" || lower == "--instant") {
+        consoleState.realTimePacing = false
+      } else if (lower == "--fast" || lower == "--2x") {
+        consoleState.pacingSpeed = 2.0
+      } else if (lower == "--5x") {
+        consoleState.pacingSpeed = 5.0
+      } else if (lower == "--operator" || lower == "--panel") {
+        consoleState.faceplateInstalled = true
+      } else if (!arg.startsWith("-")) {
+        initialFile = Some(arg)
+      }
+      i += 1
+    }
+    initialFile
+  }
 
   def main(args: Array[String]): Unit = {
     println("Initializing IBM MT/SC CCU 6320 Emulator...")
 
-    val system = new MtscSystem()
+    val system = new MtscSystem(initialEngineMode = DefaultEngineMode)
     val consoleState = new CeConsoleState()
     consoleState.viewGalley = true
     val terminal = new AnsiTerminal(width = 104, height = 38)
 
     // Check command line arguments for initial text file or flags
-    var initialFile: Option[String] = None
-    for (arg <- args) {
-      if (arg == "--max" || arg == "--turbo" || arg == "--instant") {
-        consoleState.realTimePacing = false
-      } else if (arg == "--fast" || arg == "--2x") {
-        consoleState.pacingSpeed = 2.0
-      } else if (arg == "--5x") {
-        consoleState.pacingSpeed = 5.0
-      } else if (arg == "--operator" || arg == "--panel") {
-        consoleState.faceplateInstalled = true
-      } else if (!arg.startsWith("-")) {
-        initialFile = Some(arg)
-      }
-    }
+    val initialFile = parseArgs(args, system, consoleState)
+    consoleState.log(s"CCU Engine Mode: ${system.engineMode.label} (${system.engineMode.cliFlag}).")
 
     // Load initial demo: Continuous Document Composition
     loadProgram(DiagnosticPrograms.AllPrograms(0), system, consoleState)
@@ -399,6 +429,21 @@ object Main {
         system.reset()
         consoleState.log("CCU & I/O Bus Reset to power-on state (PSAR = 0x222).")
         consoleState.statusMessage = "CPU Reset."
+
+      case "engine" =>
+        val mode = system.toggleEngineMode()
+        consoleState.log(s"Switched CCU Engine to ${mode.label} (${mode.cliFlag}).")
+        consoleState.statusMessage = s"CCU Engine switched to ${mode.label}."
+
+      case "ild" | "engine ild" | "engine gate" =>
+        system.setEngineMode(CcuEngineMode.Ild)
+        consoleState.log(s"Switched CCU Engine to ${CcuEngineMode.Ild.label} (--ild).")
+        consoleState.statusMessage = s"CCU Engine set to ${CcuEngineMode.Ild.label}."
+
+      case "behavioral" | "isa" | "engine behavioral" | "engine isa" =>
+        system.setEngineMode(CcuEngineMode.Behavioral)
+        consoleState.log(s"Switched CCU Engine to ${CcuEngineMode.Behavioral.label} (--behavioral).")
+        consoleState.statusMessage = s"CCU Engine set to ${CcuEngineMode.Behavioral.label}."
 
       case "l" | "load" =>
         val all = DiagnosticPrograms.AllPrograms

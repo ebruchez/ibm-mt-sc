@@ -100,6 +100,27 @@ final class IldCcu(
   }
 
   /**
+   * Synchronizes [[BackplaneSignals]] latches from [[CcuState]] (e.g. when switching engine modes
+   * or after external state updates).
+   */
+  def syncSignalsFromState(): Unit = {
+    signals.low = state.low
+    signals.eq = state.equal
+    signals.inh = state.inhibit
+    signals.mpx = state.multiplex
+    signals.setMalValue(state.mal.unsigned)
+    signals.setOutputByte(state.outputReg)
+    signals.oplCde1 = state.opBit(1)
+    signals.oplCde2 = state.opBit(2)
+    signals.oplCde3 = state.opBit(3)
+    signals.oplCde4 = state.opBit(4)
+    signals.oplCde5 = state.opBit(5)
+    signals.oplCde6 = state.opBit(6)
+    signals.oplCde7 = state.opBit(7)
+    syncAllCombinational()
+  }
+
+  /**
    * Advances the CCU by one complete Bit Time (`B1-4`, `B5-8`, `B9-12`, or `B13-16`),
    * executing all sub-phase clock transitions (`Indicator Load`, `Read P`, `BMP STRB T`,
    * optional `Read Q`, `Write Q`, `Write P`, and `Post-Write Transition`) across `0303`–`0310`
@@ -386,6 +407,8 @@ final class IldCcu(
 
     val s = signals
     s.mpx = state.multiplex
+    s.low = state.low
+    s.eq = state.equal
 
     // 1. If Multiplex mode is active and the Translator is ready, execute the hardware Multiplex Interrupt cycle
     if (s.mpx && ioBus.isTranslatorReady) {
@@ -769,6 +792,19 @@ final class IldCcu(
         LampState(spec, label, isOn && powerOn)
       }
     } else {
+      val savedMal = s.malValue
+      val savedOut = s.outputByte
+      val savedOp1 = s.oplCde1
+      val savedOp2 = s.oplCde2
+      val savedOp3 = s.oplCde3
+      val savedOp4 = s.oplCde4
+      val savedOp5 = s.oplCde5
+      val savedOp6 = s.oplCde6
+      val savedOp7 = s.oplCde7
+      val savedLow = s.low
+      val savedEq = s.eq
+      val savedInh = s.inh
+      val savedMpx = s.mpx
       val savedEditSwitch = s.editSwitch
       val savedAutoOrStep = s.autoOrStep
       val savedMasterReset = s.masterReset
@@ -783,8 +819,33 @@ final class IldCcu(
       val savedQBfr2 = s.qBfr2
       val savedQBfr3 = s.qBfr3
       val savedQBfr4 = s.qBfr4
+      val savedInsnTCtrA = s.insnTCtrA
+      val savedInsnTCtrB = s.insnTCtrB
+      val savedInsnTCtrC = s.insnTCtrC
+      val savedInsnTCtrD = s.insnTCtrD
+      val savedBtCtrA = s.btCtrA
+      val savedBtCtrB = s.btCtrB
 
       // Configure 0312 display mux inputs from current displayMode and state
+      s.setMalValue(state.mal.unsigned)
+      s.setOutputByte(state.outputReg)
+      s.oplCde1 = state.opBit(1)
+      s.oplCde2 = state.opBit(2)
+      s.oplCde3 = state.opBit(3)
+      s.oplCde4 = state.opBit(4)
+      s.oplCde5 = state.opBit(5)
+      s.oplCde6 = state.opBit(6)
+      s.oplCde7 = state.opBit(7)
+      s.low = state.low
+      s.eq = state.equal
+      s.inh = state.inhibit
+      s.mpx = state.multiplex
+      s.insnTCtrA = (state.insnTimeCtr & 1) == 1
+      s.insnTCtrB = ((state.insnTimeCtr >> 1) & 1) == 1
+      s.insnTCtrC = ((state.insnTimeCtr >> 2) & 1) == 1
+      s.insnTCtrD = ((state.insnTimeCtr >> 3) & 1) == 1
+      s.btCtrA = (state.bitTimeCtr & 1) == 1
+      s.btCtrB = ((state.bitTimeCtr >> 1) & 1) == 1
       s.editSwitch = CeEditSelector.Proc
       Ild0312ConsoleLights.applyDisplayModeButtons(s, displayMode)
       s.autoOrStep = displayMode != CeDisplayMode.ClockDefault
@@ -806,6 +867,19 @@ final class IldCcu(
       val lampsLR = s.lampsLeftToRight
 
       // Restore transient mux inputs
+      s.setMalValue(savedMal)
+      s.setOutputByte(savedOut)
+      s.oplCde1 = savedOp1
+      s.oplCde2 = savedOp2
+      s.oplCde3 = savedOp3
+      s.oplCde4 = savedOp4
+      s.oplCde5 = savedOp5
+      s.oplCde6 = savedOp6
+      s.oplCde7 = savedOp7
+      s.low = savedLow
+      s.eq = savedEq
+      s.inh = savedInh
+      s.mpx = savedMpx
       s.editSwitch = savedEditSwitch
       s.autoOrStep = savedAutoOrStep
       s.masterReset = savedMasterReset
@@ -820,6 +894,12 @@ final class IldCcu(
       s.qBfr2 = savedQBfr2
       s.qBfr3 = savedQBfr3
       s.qBfr4 = savedQBfr4
+      s.insnTCtrA = savedInsnTCtrA
+      s.insnTCtrB = savedInsnTCtrB
+      s.insnTCtrC = savedInsnTCtrC
+      s.insnTCtrD = savedInsnTCtrD
+      s.btCtrA = savedBtCtrA
+      s.btCtrB = savedBtCtrB
       Ild0312ConsoleLights.evaluateCombinational(s)
 
       ConsoleLampSpec.AllLamps.zip(lampsLR).map { case (spec, on) =>

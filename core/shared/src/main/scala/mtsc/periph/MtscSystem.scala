@@ -3,7 +3,7 @@ package mtsc.periph
 import mtsc.types.*
 import mtsc.isa.{Decoder, Instruction}
 import mtsc.memory.{CoreImage, CoreMemory}
-import mtsc.cpu.{Ccu, StepResult}
+import mtsc.cpu.{Ccu, CcuEngineMode, StepResult}
 import mtsc.diag.{ContinuousComposerRoutine, DiagnosticPrograms, EscapementRoutine}
 
 /**
@@ -14,10 +14,15 @@ import mtsc.diag.{ContinuousComposerRoutine, DiagnosticPrograms, EscapementRouti
  */
 class MtscSystem(
   val memory: CoreMemory = CoreMemory.empty(),
-  val ioBus: SystemIoBus = new SystemIoBus()
+  val ioBus: SystemIoBus = new SystemIoBus(),
+  initialEngineMode: CcuEngineMode = CcuEngineMode.Default
 ) {
 
-  val cpu: Ccu = new Ccu(memory, ioBus)
+  val cpu: Ccu = new Ccu(memory, ioBus, engineMode = initialEngineMode)
+
+  def engineMode: CcuEngineMode = cpu.engineMode
+  def setEngineMode(mode: CcuEngineMode): Unit = cpu.setEngineMode(mode)
+  def toggleEngineMode(): CcuEngineMode = cpu.toggleEngineMode()
 
   def rightTape: TapeReader = ioBus.rightTape
   def leftTape: TapeReader = ioBus.leftTape
@@ -150,6 +155,9 @@ class MtscSystem(
     memory.clear()
     cpu.state.reset()
     cpu.state.mal = Address(0)
+    if (cpu.isIldMode) {
+      cpu.ild.syncSignalsFromState()
+    }
   }
 
   /**

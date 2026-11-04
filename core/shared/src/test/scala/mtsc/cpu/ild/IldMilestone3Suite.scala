@@ -384,4 +384,48 @@ class IldMilestone3Suite extends munit.FunSuite {
     assert(!ild.signals.lites, "OUT to device 0 (Translator) must reset LITES latch via DESEL OUT DEV")
     assert(ild.signals.tsltrSel, "OUT to device 0 (Translator) must set TSLTR SEL latch")
   }
+
+  test("MtscSystem and CLI Main support selectable Behavioral (--behavioral) and Gate-Level (--ild) modes") {
+    import mtsc.cli.Main
+    import mtsc.console.AnsiTerminal
+    import mtsc.cpu.{CcuEngineMode, StepResult}
+    import mtsc.diag.{DiagnosticPrograms, EscapementRoutine}
+    import mtsc.periph.MtscSystem
+
+    val sys = new MtscSystem()
+    val state = new CeConsoleState()
+    val term = new AnsiTerminal(width = 104, height = 38)
+
+    // Default engine mode for MtscSystem is Gate-Level ILD
+    assertEquals(sys.engineMode, CcuEngineMode.Ild)
+    assert(sys.cpu.isIldMode)
+
+    // CLI flag --behavioral switches to Behavioral (ISA) mode
+    Main.parseArgs(Array("--behavioral", "--max"), sys, state)
+    assertEquals(sys.engineMode, CcuEngineMode.Behavioral)
+    assert(!sys.cpu.isIldMode)
+    assert(!state.realTimePacing)
+
+    // CLI flag --ild switches back to Gate-Level ILD mode
+    Main.parseArgs(Array("--ild"), sys, state)
+    assertEquals(sys.engineMode, CcuEngineMode.Ild)
+    assert(sys.cpu.isIldMode)
+
+    // Interactive 'engine' command toggles between Ild and Behavioral
+    Main.handleCommand("engine", sys, state, term, rawMode = false)
+    assertEquals(sys.engineMode, CcuEngineMode.Behavioral)
+    Main.handleCommand("engine", sys, state, term, rawMode = false)
+    assertEquals(sys.engineMode, CcuEngineMode.Ild)
+
+    // Verify full composition demo runs identically in both MtscSystem modes
+    val sysBehavioral = new MtscSystem(initialEngineMode = CcuEngineMode.Behavioral)
+    val sysIld        = new MtscSystem(initialEngineMode = CcuEngineMode.Ild)
+    for (s <- Seq(sysBehavioral, sysIld)) {
+      val st = new CeConsoleState()
+      Main.loadProgram(DiagnosticPrograms.EndToEndCompositionDemo, s, st)
+      assertEquals(s.run(maxCycles = 5000), StepResult.Halted)
+    }
+    assertEquals(sysIld.paper.lines, sysBehavioral.paper.lines)
+    assertEquals(sysIld.memory.toCoreImage.bytes.toSeq, sysBehavioral.memory.toCoreImage.bytes.toSeq)
+  }
 }

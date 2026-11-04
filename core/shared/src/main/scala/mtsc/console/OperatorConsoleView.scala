@@ -51,7 +51,7 @@ object OperatorConsoleView {
     state: CeConsoleState,
     opPanel: OperatorPanelState
   ): Unit = {
-    val title = "IBM MAGNETIC TAPE SELECTRIC COMPOSER ─ OPERATOR CONTROL PANEL (FACEPLATE ON)"
+    val title = s"IBM MAGNETIC TAPE SELECTRIC COMPOSER ─ OPERATOR CONTROL PANEL (FACEPLATE ON) [${cpu.engineMode.shortLabel}]"
     terminal.drawBox(0, 0, terminal.width, 16, title, Some(AnsiColor.White))
 
     // 1. Left: Red 3-Position Power Rocker Switch (x = 2..12, y = 2..8)

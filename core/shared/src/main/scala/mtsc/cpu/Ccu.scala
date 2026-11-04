@@ -3,6 +3,7 @@ package mtsc.cpu
 import mtsc.types.*
 import mtsc.isa.*
 import mtsc.memory.CoreMemory
+import mtsc.cpu.ild.IldCcu
 
 sealed trait StepResult
 object StepResult {
@@ -13,26 +14,78 @@ object StepResult {
 }
 
 /**
+ * Selects between the high-level ISA behavioral engine and the gate- and latch-level
+ * Intermediate Logic Diagram (`0303`–`0312`) hardware engine.
+ */
+enum CcuEngineMode(val label: String, val shortLabel: String, val cliFlag: String) {
+  case Behavioral extends CcuEngineMode("Behavioral (ISA)", "ISA", "--behavioral")
+  case Ild        extends CcuEngineMode("Gate-Level (ILD 0303-0312)", "ILD", "--ild")
+}
+
+object CcuEngineMode {
+  /** Default execution engine for the full system simulator (CLI & Web UI). */
+  val Default: CcuEngineMode = CcuEngineMode.Ild
+
+  def fromString(raw: String): Option[CcuEngineMode] = raw.trim.toLowerCase match {
+    case "ild" | "gate" | "gate-level" | "hardware" | "--ild" | "--gate" =>
+      Some(CcuEngineMode.Ild)
+    case "behavioral" | "isa" | "high-level" | "fast" | "--behavioral" | "--isa" =>
+      Some(CcuEngineMode.Behavioral)
+    case _ =>
+      None
+  }
+}
+
+/**
  * Execution Engine for the IBM MT/SC Composer Control Unit (CCU) Model 6320.
+ *
+ * Can execute in either high-level [[CcuEngineMode.Behavioral]] mode or gate- and latch-level
+ * [[CcuEngineMode.Ild]] mode ([[IldCcu]]).
  */
 class Ccu(
   val memory: CoreMemory,
   val ioBus: IoBus,
-  val state: CcuState = new CcuState()
+  val state: CcuState = new CcuState(),
+  var engineMode: CcuEngineMode = CcuEngineMode.Behavioral
 ) {
+
+  /** Gate- and latch-level ILD (`0303`–`0312`) engine sharing `memory`, `ioBus`, and `state`. */
+  lazy val ild: IldCcu = new IldCcu(memory, ioBus, state)
+
+  def isIldMode: Boolean = engineMode == CcuEngineMode.Ild
+
+  def setEngineMode(mode: CcuEngineMode): Unit = {
+    engineMode = mode
+    if (mode == CcuEngineMode.Ild) {
+      ild.syncSignalsFromState()
+    }
+  }
+
+  def toggleEngineMode(): CcuEngineMode = {
+    val next = if (engineMode == CcuEngineMode.Ild) CcuEngineMode.Behavioral else CcuEngineMode.Ild
+    setEngineMode(next)
+    next
+  }
 
   /**
    * Resets the CCU to power-on defaults.
    */
   def reset(): Unit = {
-    memory.reset()
-    state.reset()
+    if (engineMode == CcuEngineMode.Ild) {
+      ild.reset()
+    } else {
+      memory.reset()
+      state.reset()
+    }
   }
 
   /**
    * Executes a single instruction step.
    */
   def step(): StepResult = {
+    if (engineMode == CcuEngineMode.Ild) {
+      return ild.step()
+    }
     if (state.halted)
       return StepResult.Halted
 

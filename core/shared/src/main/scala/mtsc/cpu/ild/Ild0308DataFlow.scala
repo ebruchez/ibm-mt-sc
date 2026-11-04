@@ -28,7 +28,7 @@ object Ild0308DataFlow {
 
     // [AA051] +KEYBOARD ENTRY STROBE
     val kbBitGp =
-      (s.b1_4 && !s.kbCodeC && !s.kbCodeD) ||
+      (s.b1_4 && ((!s.kbCodeC && !s.kbCodeD) || (s.kbCodeC && s.kbCodeD))) ||
       (s.b5_8 && s.kbCodeC && !s.kbCodeD) ||
       (s.b9_12 && !s.kbCodeC && s.kbCodeD)
     s.kbEntStrb = (s.kbStrb && s.kbCodeRdy && kbBitGp) || (s.kbStrb && s.b1_4 && s.lnStpLth)

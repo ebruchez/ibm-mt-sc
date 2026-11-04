@@ -60,7 +60,7 @@ object CeConsoleView {
     state: CeConsoleState
   ): Unit = {
     val title =
-      s"IBM 72 COMPOSER CONTROL UNIT (CCU) MODEL 6320 ─ CE CONSOLE [${state.stepGranularity.label}/${state.editSelector.label}]"
+      s"IBM 72 COMPOSER CONTROL UNIT (CCU) MODEL 6320 ─ CE CONSOLE [${state.stepGranularity.label}/${state.editSelector.label}│${cpu.engineMode.shortLabel}]"
     terminal.drawBox(0, 0, terminal.width, 3, title, Some(AnsiColor.Cyan))
 
     val psar = cpu.memory.psar
@@ -73,7 +73,7 @@ object CeConsoleView {
     val bwStr   = f"BW: 0x${bw.unsigned}%04X"
     val speedStr = if (!state.realTimePacing || state.pacingSpeed <= 0.0) "MAX"
                    else f"${state.pacingSpeed}%.0fx (${(14 * state.pacingSpeed).toInt} cps)"
-    val headerLine = f" $modeStr%-18s $psarStr  $awStr  $bwStr  CYC:$cycles%06d  [$speedStr]"
+    val headerLine = f" $modeStr%-18s $psarStr  $awStr  $bwStr  CYC:$cycles%06d  [$speedStr│${cpu.engineMode.shortLabel}]"
     terminal.writeText(2, 1, headerLine, Some(AnsiColor.BrightWhite), bold = true)
   }
 
