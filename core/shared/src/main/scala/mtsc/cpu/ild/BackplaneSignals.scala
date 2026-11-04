@@ -495,6 +495,10 @@ final class BackplaneSignals {
   var senseInhLineOdd3: Boolean = false
   var senseInhLineOdd4: Boolean = false
 
+  // ===============================================================================================
+  // ILD 0311: Translator Output Controls & Output Latches (AA031, AA072, AA141, AA142, AA171, AA172, AA181, AA233)
+  // ===============================================================================================
+
   /** `OUTPUT 1..8` Latches (`+OUTPUT 1..8`, AA031 / ILD 0311): 8-bit Output Register. */
   var out1: Boolean = false
   var out2: Boolean = false
@@ -505,9 +509,208 @@ final class BackplaneSignals {
   var out7: Boolean = false
   var out8: Boolean = false
 
+  /** `+LOAD OUTPUT LATCH` (`LD OUT LTH`, AA141 AQ4). */
+  var ldOutLth: Boolean = false
+
+  /** `-RESET OUTPUT LATCH` (`RES OUT LTH` in positive logic, AA142 / AA031). */
+  var resOutLth: Boolean = false
+
+  /** `-HALT` (`halt` in positive logic, AA031 7G-AT): `out1 && out2 && out3 && out4 && out5 && out6 && out7 && out8` (`0xFF`). */
+  var halt: Boolean = false
+
+  /** `+KEYBOARD SINGLE ENTRY` (`KB SNG ENT`, AA051 / 0308 / 0311). */
+  var kbSingleEntry: Boolean = false
+
+  /** Magnetic Tape & Paper Tape character readiness inputs (`AA232`, `AA233`, `AA212` / `0311`). */
+  var mtTenCount: Boolean = false
+  var mtCde: Boolean = false
+  var mtSch: Boolean = false
+  var mtRd: Boolean = false
+  var trSchSta: Boolean = false
+  var ptCharRdy: Boolean = false
+  var charRdy: Boolean = false
+
+  /** `+UPSET PREINHIBIT` (`UPSET PRE INH`, AA141): `!b && twr && b13_16 && insnT1` (`prmtTime && insnT1`). */
+  var upsetPreInh: Boolean = false
+
+  /** `+PREINHIBIT` Latch (`PRE INH`, AA142). */
+  var preInh: Boolean = false
+
+  /** `+SELECT OUTPUT DEVICE` (`SEL OUT DEV`, AA142 AN4): `cenBt && insnT2 && output && rdy && !mpx`. */
+  var selOutDev: Boolean = false
+
+  /** `+DESELECT OUTPUT DEVICE` (`DESEL OUT DEV`, AA072 AS4): `selOutDev && b`. */
+  var deselOutDev: Boolean = false
+
+  /** `+TRANSLATOR SELECT` Latch (`TSLTR SEL`, AA172). */
+  var tsltrSel: Boolean = false
+
+  /** `+BUSY` Latch (`BSY`, AA142 AC4). */
+  var busy: Boolean = false
+
+  /** `+OUTPUT INTERFACE FEEDBACK` Latch (`OUT INTF FDBK`, AA181) and `+OIF LATCH` (`OUT INTF FDBK *`, AA172). */
+  var outIntfFdbk: Boolean = false
+  var outIntfFdbkLatch: Boolean = false
+
+  /** `+FUNCTION` (`FN`, AA181), `+TAB + CRN` (`AA181`), and `+ORDINARY CHARACTER` (`ORD CHAR`, AA171). */
+  var fn: Boolean = false
+  var tabOrCrn: Boolean = false
+  var ordChar: Boolean = true
+
+  /** `+DUMMY` Latch (`AA172`), `+DUMMY FUNCTION` Latch (`DMY FN`, AA172), `+SYNC 1` (`AA171`), and `+SYNC 2` (`AA172`). */
+  var dummy: Boolean = false
+  var dmyFn: Boolean = false
+  var sync1: Boolean = false
+  var sync2: Boolean = false
+
+  /** Translator Cycle Clutch & Composer Print Feedback mechanical contacts / single-shots (`AA171`, `AA172`, `AA181`). */
+  var cycClNo: Boolean = false
+  var cycClNc: Boolean = true
+  var crnInlk: Boolean = false
+  var tabOrCrnSs: Boolean = false
+  var prFdbk: Boolean = false
+  var prFdbkDlyd: Boolean = false
+  var sync1Ss175ms: Boolean = true
+  var selMCont: Boolean = true
+
+  /** `+TRANSLATOR PRINT` (`TSLTR PR`, AA181 BQ4), `+TRANSLATOR CYCLE CLUTCH` (`TSLTR CYC CL`, AA181), and `+TRANSLATOR SELECT MAGNETS 1..8` (`AA181`). */
+  var tsltrPr: Boolean = false
+  var tsltrCycCl: Boolean = false
+  var tsltrSelMag1: Boolean = false
+  var tsltrSelMag2: Boolean = false
+  var tsltrSelMag3: Boolean = false
+  var tsltrSelMag4: Boolean = false
+  var tsltrSelMag5: Boolean = false
+  var tsltrSelMag6: Boolean = false
+  var tsltrSelMag7: Boolean = false
+  var tsltrSelMag8: Boolean = false
+
+  // ===============================================================================================
+  // ILD 0312: Edit Selector, CE Aid Controls & Lights (BC011, AA021..AA024, AA052, AA072, AA141, AA151, AA202, AA221, BC021)
+  // ===============================================================================================
+
+  /** CE Console Display pushbuttons `DISP 1..4` (`Y, O, N, A` on BC011 / 0312). */
+  var disp1Pressed: Boolean = false
+  var disp2Pressed: Boolean = false
+  var disp3Pressed: Boolean = false
+  var disp4Pressed: Boolean = false
+
+  /** `+EDIT SWITCH` contact converter output (`BC011` / `AA221 AM2`): True in `Edit`, `Addr`, `Data`, `Prog`; false in `Proc`. */
+  var editSwitchContact: Boolean = false
+
+  /** CE Aid encoding lines `AID 1..3` (`BC011` / `AA221` / `AA052`). */
+  var aid1: Boolean = false
+  var aid2: Boolean = false
+  var aid3: Boolean = false
+
+  /** CE Console Display selector lines `+DISPLAY 3` (`AA052 AD4`), `+DISPLAY 4` (`AA052 AB4`), and `-AID` (`notAid`, `AA052 AS4`). */
+  var dply3: Boolean = false
+  var dply4: Boolean = false
+  var notAid: Boolean = true
+
+  /** `+LIGHTS` Latch (`LITES`, AA072 3B-AD) and `+OUTPUT REGISTER` Display Gate (`OUT REG DPLY`, AA072 AN4). */
+  var lites: Boolean = false
+  var outRegDply: Boolean = false
+
+  /** `+ERROR LIGHT` (`ERR LT`, AA202 BA4): Magnetic Tape EOT / Unload / Parity Error indicator. */
+  var errorLite: Boolean = false
+
+  /** Customer Engineer 4-bit Test Inputs (`+CE TEST INPUT 1..4`, AA022 / AA024). */
+  var ceTestInput1: Boolean = false
+  var ceTestInput2: Boolean = false
+  var ceTestInput3: Boolean = false
+  var ceTestInput4: Boolean = false
+
+  /**
+   * Hardware Console Indicator Lamps `LITE 1..11` (`-LIGHT 1..11` in positive logic, AA021..AA024 / BC021).
+   * Note: Hardware numbers `LITE 1..11` right-to-left (`lite1` = rightmost lamp `Y1`/`O1`, `lite11` = leftmost lamp `Y11`/`Reset`).
+   */
+  var lite1: Boolean = false
+  var lite2: Boolean = false
+  var lite3: Boolean = false
+  var lite4: Boolean = false
+  var lite5: Boolean = false
+  var lite6: Boolean = false
+  var lite7: Boolean = false
+  var lite8: Boolean = false
+  var lite9: Boolean = false
+  var lite10: Boolean = false
+  var lite11: Boolean = false
+
   // ===============================================================================================
   // Convenience Inspection & Setup Helpers
   // ===============================================================================================
+
+  /** Sets `OUTPUT 1..8` (`out1..out8`) from an 8-bit integer value `0..255`. */
+  def setOutputByte(value: Int): Unit = {
+    out1 = (value & 0x01) != 0
+    out2 = (value & 0x02) != 0
+    out3 = (value & 0x04) != 0
+    out4 = (value & 0x08) != 0
+    out5 = (value & 0x10) != 0
+    out6 = (value & 0x20) != 0
+    out7 = (value & 0x40) != 0
+    out8 = (value & 0x80) != 0
+    halt = out1 && out2 && out3 && out4 && out5 && out6 && out7 && out8
+  }
+
+  /** Sets `CE TEST INPUT 1..4` from a 4-bit integer mask (`bit 0 = Test 1 .. bit 3 = Test 4`). */
+  def setCeTestInputs(mask: Int): Unit = {
+    ceTestInput1 = (mask & 0x1) != 0
+    ceTestInput2 = (mask & 0x2) != 0
+    ceTestInput3 = (mask & 0x4) != 0
+    ceTestInput4 = (mask & 0x8) != 0
+  }
+
+  /** Sets `KB CODE A..D` and `KB CODE RDY` from a 4-bit keyboard code (`bit 3=A, bit 2=B, bit 1=C, bit 0=D`). */
+  def setKeyboardCode(kbCodeABCD: Int, ready: Boolean = true, singleEntry: Boolean = true): Unit = {
+    kbCodeA = ((kbCodeABCD >> 3) & 1) != 0
+    kbCodeB = ((kbCodeABCD >> 2) & 1) != 0
+    kbCodeC = ((kbCodeABCD >> 1) & 1) != 0
+    kbCodeD = (kbCodeABCD & 1) != 0
+    kbCodeRdy = ready
+    kbSingleEntry = singleEntry
+  }
+
+  /** Clears `KB CODE A..D`, `KB CODE RDY`, and `KB SINGLE ENTRY`. */
+  def clearKeyboardCode(): Unit = {
+    kbCodeA = false
+    kbCodeB = false
+    kbCodeC = false
+    kbCodeD = false
+    kbCodeRdy = false
+    kbSingleEntry = false
+  }
+
+  /** Returns hardware `LITE i` (`1..11`, right-to-left: `1` = `lite1`, `11` = `lite11`). */
+  def hardwareLite(index: Int): Boolean = index match {
+    case 1  => lite1
+    case 2  => lite2
+    case 3  => lite3
+    case 4  => lite4
+    case 5  => lite5
+    case 6  => lite6
+    case 7  => lite7
+    case 8  => lite8
+    case 9  => lite9
+    case 10 => lite10
+    case 11 => lite11
+    case _  => false
+  }
+
+  /** Returns the 11 console lamps ordered left-to-right (`lite11` .. `lite1`), matching `ConsoleLampSpec.AllLamps`. */
+  def lampsLeftToRight: Vector[Boolean] =
+    Vector(lite11, lite10, lite9, lite8, lite7, lite6, lite5, lite4, lite3, lite2, lite1)
+
+  /** Returns the 7 Translator Select Magnet driver states (`TSLTR SEL MAG 1..7`) as a 7-bit integer (`bit 0 = Mag 1 .. bit 6 = Mag 7`). */
+  def translatorSelectMagnetsMask: Int =
+    (if (tsltrSelMag1) 0x01 else 0) |
+      (if (tsltrSelMag2) 0x02 else 0) |
+      (if (tsltrSelMag3) 0x04 else 0) |
+      (if (tsltrSelMag4) 0x08 else 0) |
+      (if (tsltrSelMag5) 0x10 else 0) |
+      (if (tsltrSelMag6) 0x20 else 0) |
+      (if (tsltrSelMag7) 0x40 else 0)
 
   /** Returns the current 11-bit Memory Address Latch value `(Y11..Y1)` in `0..2047`. */
   def malValue: Int =

@@ -35,7 +35,7 @@ object Ild0305SenseQBuffer {
     val inhRdI5Input   = !s.output && !s.athOp && s.insnT5
     val inhRdI9JmpP    = s.jmp && s.insnT9 && s.pTime
     val inhRdClrDply1  = s.dply1 && s.clrButtonPressed && s.insnT0
-    val inhRdClrDply2  = s.dply2 && s.clrButtonPressed && s.insnT1
+    val inhRdClrDply2  = !s.btCtrB && s.dply2 && s.clrButtonPressed && s.insnT1
     val inhRdI9MovP    = ((!s.btCtrB && s.transOrComp && s.oplCde3) || s.trans16) && s.insnT9 && s.pTime
     val inhRdI0B13_16  = s.insnT0 && s.b13_16
 

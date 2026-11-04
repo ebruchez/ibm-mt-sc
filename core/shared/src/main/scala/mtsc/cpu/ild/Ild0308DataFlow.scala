@@ -19,10 +19,10 @@ object Ild0308DataFlow {
     // [AA141 AW4] +INPUT STROBE = CEN BT & INSN T 5 & -INH & -KB CDE & INPUT
     s.inStrb = s.cenBt && s.insnT5 && !s.inh && !s.kbCde && s.input
 
-    // [AA141 BC4] +KEYBOARD STROBE
+    // [AA141 1M-AX, 2M-AY, 1N-AZ -> BC4] +KEYBOARD STROBE
     s.kbStrb =
       s.cenBt && (
-        (s.edit && ((!s.btCtrB && s.insnT1 && s.dply2) || (s.insnT0 && (s.autoOrStep || !s.btCtrB)))) ||
+        (s.edit && ((!s.btCtrB && s.insnT1 && s.dply2) || (s.insnT0 && s.dply1))) ||
         (!s.edit && s.input && s.kbCde && s.insnT5)
       )
 

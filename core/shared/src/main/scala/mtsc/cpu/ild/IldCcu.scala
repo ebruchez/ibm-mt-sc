@@ -1,21 +1,24 @@
 package mtsc.cpu.ild
 
+import mtsc.console.{CeDisplayMode, CeEditSelector, LampState}
 import mtsc.cpu.{CcuState, IoBus, IoResult, StepResult}
 import mtsc.isa.{Decoder, Instruction}
 import mtsc.memory.CoreMemory
+import mtsc.periph.{ConsoleKey, ConsoleLampSpec, OperatorPanelState, SystemIoBus}
 import mtsc.types.{Address, Device, Word}
 
 /**
  * Hardware-accurate gate- and latch-level execution engine for the **IBM MT/SC 6320 Composer Control Unit (CCU)**,
- * integrating Intermediate Logic Diagrams **ILDs `0303`–`0310`** and the 3D 4-plane magnetic core array
+ * integrating Intermediate Logic Diagrams **ILDs `0303`–`0312`** and the 3D 4-plane magnetic core array
  * ([[CoreMatrix3D]]).
  *
  * Unlike the behavioral [[mtsc.cpu.Ccu]], `IldCcu` executes instructions by stepping the 240 kHz oscillator
  * single-shots (`SSA` / `SSB`) through every 4-bit nibble (`B1-4`, `B5-8`, `B9-12`, `B13-16`) and every
  * Instruction Time (`I-0`–`I-9`), driving address decoding, destructive core reads, sense amplifiers,
  * `Q-Buffer`, `P-Buffer`, serial 4-bit full adder / borrow subtractor (`ACC 1..4`, `CAR 1..4`, `CAR OVER`),
- * operational code latches (`OPL CDE 1..7`), condition latches (`LOW`, `EQUAL`), permute logic, and
- * inhibit-controlled core writes.
+ * operational code latches (`OPL CDE 1..7`), condition latches (`LOW`, `EQUAL`), permute logic,
+ * inhibit-controlled core writes, Translator Output controls (`OUT 1..8`, `MPX`, `PRE INH`, `INH`, `RDY`, `BSY`),
+ * and the CE Console `Edit Memory Selector` and 11 indicator lamp multiplexers (`LITE 1..11`).
  */
 final class IldCcu(
   val memory: CoreMemory,
@@ -38,28 +41,35 @@ final class IldCcu(
   syncAllCombinational()
 
   /**
-   * Resets Core Memory, `CcuState`, and all `0303`–`0310` backplane latches to power-on defaults.
+   * Resets Core Memory, `CcuState`, and all `0303`–`0312` backplane latches to power-on defaults.
    */
   def reset(): Unit = {
     memory.reset()
     state.reset()
     signals.inh = false
+    signals.preInh = false
     signals.mpx = false
     signals.rdy = true
+    signals.busy = false
+    signals.tsltrSel = false
+    signals.lites = false
     signals.low = false
     signals.eq = false
     signals.strCarOver = false
     signals.carOver = false
     signals.setMalValue(0)
+    signals.setOutputByte(0)
     Ild0303Clock.reset(signals)
+    signals.edit = signals.editSwitch != CeEditSelector.Proc
     syncAllCombinational()
     syncStateFromSignals()
   }
 
   /**
-   * Evaluates all combinational networks across ILDs `0303`–`0310`.
+   * Evaluates all combinational networks across ILDs `0303`–`0312`.
    */
   def syncAllCombinational(): Unit = {
+    Ild0312ConsoleLights.evaluateSwitchAndDisplayDecodes(signals)
     Ild0303Clock.evaluateCombinational(signals)
     Ild0304Permute.evaluateCombinational(signals)
     Ild0306To0307Address.evaluateCombinational(signals)
@@ -67,6 +77,8 @@ final class IldCcu(
     Ild0308DataFlow.evaluateCombinational(signals)
     Ild0309OpAndBranch.evaluateCombinational(signals)
     Ild0310WriteInhibit.evaluateCombinational(signals)
+    Ild0311OutputIo.evaluateCombinational(signals)
+    Ild0312ConsoleLights.evaluateCombinational(signals)
   }
 
   /**
@@ -107,6 +119,11 @@ final class IldCcu(
       Ild0309OpAndBranch.updateOpCodeLatches(s)
       Ild0308DataFlow.updateCarryIndicator(s)
       Ild0303Clock.stepSubPhase(s, OscSubPhase.SsaOff)
+    }
+
+    // Sample EDIT switch at BEGINNING PROGRAM STEP (I-0, B1-4, P TIME, -CEN BT)
+    if (s.begPrgStp) {
+      Ild0312ConsoleLights.updateLatches(s)
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -164,9 +181,14 @@ final class IldCcu(
     Ild0305SenseQBuffer.updateQBuffer(s, 0)
     Ild0308DataFlow.updatePBuffer(s)
 
-    // SSB #2 ON/OFF (CEN BT active): load Input bits, Output latches, Y1..Y11, and OPL CDE 1..7
+    // SSB #2 ON/OFF (CEN BT active): load Input bits, Keyboard Entry Strobe, Output latches, Y1..Y11, and OPL CDE 1..7
     Ild0303Clock.stepSubPhase(s, OscSubPhase.SsbOn)
     pulses += 1
+
+    // If a Console Keyboard key or Line Stop latch is active during CEN BT, gate KB ENT STRB into P BFR 1..4
+    if (s.kbCodeRdy || s.lnStpLth) {
+      Ild0308DataFlow.updatePBuffer(s)
+    }
 
     if (s.insnT5 && s.input && !s.inh) {
       // Load input byte nibbles into P BFR 1..4 at B1-4 and B5-8 (covers both Tape IN STRB and Keyboard via IoBus)
@@ -184,8 +206,9 @@ final class IldCcu(
       Ild0308DataFlow.evaluateCombinational(s)
     }
 
-    if (s.insnT5 && s.output) {
-      // [AA031 / ILD 0311] Latch 8-bit Output Register (OUT 1..8) from P BFR 1..4 during B1-4 and B5-8
+    // [AA031 / AA141 / AA142 / ILD 0311] Update Output Register (OUT 1..8) via LD OUT LTH and RES OUT LTH
+    Ild0311OutputIo.updateOutputLatches(s)
+    if (s.insnT5 && s.output && !s.ldOutLth) {
       if (s.b1_4) {
         s.out1 = s.pBfr1
         s.out2 = s.pBfr2
@@ -197,15 +220,19 @@ final class IldCcu(
         s.out7 = s.pBfr3
         s.out8 = s.pBfr4
       }
+      Ild0311OutputIo.evaluateCombinational(s)
     }
 
     Ild0306To0307Address.updateYLatches(s)
     Ild0309OpAndBranch.updateOpCodeLatches(s)
+    Ild0312ConsoleLights.updateLatches(s)
 
     // At I-2, B9-12 of OUTPUT: capture output device (Y8..Y10) and multiplex flag (Y11)
     if (s.insnT2 && s.b9_12 && s.output && !isMultiplexInterruptCycle) {
       latchedOutputDevice = if (!s.y8 && !s.y9 && !s.y10) Device.Translator else Device.Lights
       latchedOutputMultiplex = s.y11
+      s.tsltrSel = !s.y8 && !s.y9 && !s.y10
+      s.lites = s.y8 && s.y9 && s.y10
     }
 
     Ild0303Clock.stepSubPhase(s, OscSubPhase.SsbOff)
@@ -577,6 +604,234 @@ final class IldCcu(
         if (s.oplCde6) {
           memory.writeWord(Address(savedIndirectPtrRegAddr), Word(savedIndirectPtrValue))
         }
+    }
+  }
+
+  // ===============================================================================================
+  // Milestone 3: CE Console Edit Selector, Clear, Keyboard Entry & Lamp Multiplexer (ILD 0311 & 0312)
+  // ===============================================================================================
+
+  /**
+   * Executes one complete `I-0 -> I-1 -> I-0` hardware Edit cycle (`ILD 0304`, `0305`, `0306`, `0308`, `0311`, `0312`).
+   *
+   * - At `I-0`: Reads `PSAR` (or clears it if `dply1 && clrButtonPressed`), applies any `Addr` keyboard strobe
+   *   (`dply1 && kbCodeRdy`), loads `Y1..Y11` (`MAL`), optionally bumps `PSAR` by `+1` if `advanceAddress` is true
+   *   (`!inh`), and writes back `PSAR`.
+   * - At `I-1`: Reads core byte `[MAL]` (or clears it if `dply2 && clrButtonPressed`), applies any `Data` keyboard
+   *   strobe (`dply2 && !btCtrB && kbCodeRdy`), latches the byte into `OUT 1..8` (`ldOutLth`), writes the byte back
+   *   to `[MAL]`, and permutes `I-1 -> I-0` via `prmtEditI1` (`insnT1 && edit`).
+   */
+  def stepEditCycle(advanceAddress: Boolean = false): Unit = {
+    val s = signals
+    s.edit = true
+    s.rdy = true
+    s.preInh = !advanceAddress
+    s.inh = !advanceAddress
+    syncAllCombinational()
+
+    // Step I-0 (PSAR -> MAL) and I-1 ([MAL] -> OUT 1..8 & [MAL])
+    stepWordTime() // I-0 -> I-1
+    s.preInh = true
+    s.inh = true
+    stepWordTime() // I-1 -> I-0
+
+    // If PSAR was bumped by +1 at I-0 (BMP STRB T occurs after CEN BT loads Y1..Y11),
+    // run one settle cycle so MAL (Y1..Y11) and OUT 1..8 reflect the newly incremented PSAR.
+    if (advanceAddress) {
+      stepWordTime() // I-0
+      stepWordTime() // I-1
+    }
+
+    syncAllCombinational()
+    syncStateFromSignals()
+  }
+
+  /**
+   * Sets the 5-position `EDIT MEMORY SELECTOR` switch (`Proc`, `Edit`, `Addr`, `Data`, `Prog` on `ILD 0312`)
+   * and, when entering a non-`Proc` mode, runs an `I-0 -> I-1 -> I-0` Edit cycle to recirculate `PSAR -> MAL`
+   * and `[MAL] -> OUT 1..8`.
+   */
+  def setEditSelector(selector: CeEditSelector): Unit = {
+    val s = signals
+    s.editSwitch = selector
+    Ild0312ConsoleLights.evaluateSwitchAndDisplayDecodes(s)
+    if (selector != CeEditSelector.Proc) {
+      stepEditCycle(advanceAddress = false)
+    } else {
+      s.edit = false
+      s.preInh = false
+      s.inh = false
+      state.halted = false
+      syncAllCombinational()
+      syncStateFromSignals()
+    }
+  }
+
+  /**
+   * Depresses and releases the CE Console `CLEAR` button (`+CLR` on `ILD 0305` / `0312`):
+   * - In `Addr` (`DPLY 1`) mode: `inhRdClrDply1` (`dply1 && clrButtonPressed && insnT0`) clears `PSAR` and `MAL` to `0x000`.
+   * - In `Data` (`DPLY 2`) mode: `inhRdClrDply2` (`!btCtrB && dply2 && clrButtonPressed && insnT1`) clears `[PSAR]` and `OUT 1..8` to `0x00`.
+   * - Otherwise: resets `INH`, `LOW`, `EQUAL`, and tape parity error indicators.
+   */
+  def pressCeClear(): Unit = {
+    val s = signals
+    Ild0312ConsoleLights.evaluateSwitchAndDisplayDecodes(s)
+    if (s.editSwitch == CeEditSelector.Addr || s.editSwitch == CeEditSelector.Data) {
+      s.clrButtonPressed = true
+      stepEditCycle(advanceAddress = false)
+      s.clrButtonPressed = false
+      syncAllCombinational()
+      syncStateFromSignals()
+    } else {
+      s.inh = false
+      s.preInh = false
+      s.low = false
+      s.eq = false
+      s.errorLite = false
+      ioBus match {
+        case sys: SystemIoBus =>
+          sys.rightTape.parityError = false
+          sys.leftTape.parityError = false
+        case _ => ()
+      }
+      syncAllCombinational()
+      syncStateFromSignals()
+    }
+  }
+
+  /**
+   * Depresses and releases one of the 12 Console Keyboard keys (`R, 9..0, START`) in CE `Edit`, `Addr`, or `Data` mode,
+   * driving `KB CODE A..D`, `KB CODE RDY`, `KB STRB`, and `KB ENT STRB` (`ILD 0308`, `0311`, `0312`) through an
+   * `I-0 -> I-1 -> I-0` Edit cycle.
+   */
+  def pressCeKey(key: ConsoleKey): Unit = {
+    val s = signals
+    Ild0312ConsoleLights.evaluateSwitchAndDisplayDecodes(s)
+    val isStartAdvance =
+      key == ConsoleKey.Start &&
+      (s.editSwitch == CeEditSelector.Edit || s.editSwitch == CeEditSelector.Prog)
+
+    s.setKeyboardCode(key.kbCodeABCD, ready = !isStartAdvance, singleEntry = !isStartAdvance)
+    stepEditCycle(advanceAddress = isStartAdvance)
+    if (s.editSwitch == CeEditSelector.Addr && key.addrBitIndex.isDefined) {
+      state.pBuffer = 1 << (key.addrBitIndex.get & 3)
+    } else if (s.editSwitch == CeEditSelector.Data && key.dataBitIndex.isDefined) {
+      state.pBuffer = 1 << (key.dataBitIndex.get & 3)
+    }
+    s.clearKeyboardCode()
+    syncAllCombinational()
+    syncStateFromSignals()
+  }
+
+  /**
+   * Evaluates all 11 console indicator lamps (`LITE 1..11`) via [[Ild0312ConsoleLights]] and returns
+   * their left-to-right [[LampState]] vector matching [[ConsoleLampSpec.AllLamps]].
+   */
+  def computeLamps(
+    displayMode: CeDisplayMode,
+    ceTestInputs: Int = 0,
+    faceplateInstalled: Boolean = false,
+    powerOn: Boolean = true
+  ): Vector[LampState] = {
+    val s = signals
+    val sysBusOpt = ioBus match {
+      case sys: SystemIoBus => Some(sys)
+      case _                => None
+    }
+
+    val parityErr = sysBusOpt.exists(b => b.rightTape.parityError || b.leftTape.parityError)
+    val eotActive = sysBusOpt.exists(b =>
+      (b.rightTape.isTapeLoaded && b.rightTape.isAtEnd) ||
+      (b.leftTape.isTapeLoaded && b.leftTape.isAtEnd)
+    )
+    val translatorBusy = sysBusOpt.exists(b => b.translator.busy || b.translator.cycleRemaining > 0) || s.busy
+    val readySignal = !state.inhibit && !translatorBusy && !state.halted
+
+    if (faceplateInstalled) {
+      val opPanel = sysBusOpt.map(_.operatorPanel).getOrElse(new OperatorPanelState())
+      val setupRedOn = opPanel.isSetupLampOn
+      val activeLampNum = opPanel.activeSetupParam.map(_.lampIndex)
+      val rawLights = sysBusOpt.map(_.consoleLights).getOrElse(if (s.lites) s.outputByte else 0)
+
+      ConsoleLampSpec.AllLamps.map { spec =>
+        val isOn = spec.number match {
+          case 1 => parityErr || opPanel.hyphenationPromptActive || s.masterReset
+          case 2 => eotActive || opPanel.typeInterventionActive || s.errorLite
+          case 3 => (rawLights & 0x80) != 0 || (s.lites && translatorBusy)
+          case 4 => setupRedOn || (s.lites && s.out8)
+          case n => activeLampNum.contains(n) || ((rawLights >> (11 - n)) & 1) == 1
+        }
+        val label =
+          if (spec.number == 4) "SETUP"
+          else if (setupRedOn && spec.operatorBottom.nonEmpty) spec.operatorBottom
+          else if (spec.operatorTop.nonEmpty) spec.operatorTop
+          else s"L${spec.number}"
+        LampState(spec, label, isOn && powerOn)
+      }
+    } else {
+      val savedEditSwitch = s.editSwitch
+      val savedAutoOrStep = s.autoOrStep
+      val savedMasterReset = s.masterReset
+      val savedErrorLite = s.errorLite
+      val savedBusy = s.busy
+      val savedRdy = s.rdy
+      val savedPBfr1 = s.pBfr1
+      val savedPBfr2 = s.pBfr2
+      val savedPBfr3 = s.pBfr3
+      val savedPBfr4 = s.pBfr4
+      val savedQBfr1 = s.qBfr1
+      val savedQBfr2 = s.qBfr2
+      val savedQBfr3 = s.qBfr3
+      val savedQBfr4 = s.qBfr4
+
+      // Configure 0312 display mux inputs from current displayMode and state
+      s.editSwitch = CeEditSelector.Proc
+      Ild0312ConsoleLights.applyDisplayModeButtons(s, displayMode)
+      s.autoOrStep = displayMode != CeDisplayMode.ClockDefault
+      s.setCeTestInputs(ceTestInputs)
+      s.masterReset = savedMasterReset || (displayMode == CeDisplayMode.ClockDefault && parityErr)
+      s.errorLite = savedErrorLite || eotActive
+      s.busy = translatorBusy
+      s.rdy = readySignal
+      s.pBfr1 = state.pbBit(1)
+      s.pBfr2 = state.pbBit(2)
+      s.pBfr3 = state.pbBit(3)
+      s.pBfr4 = state.pbBit(4)
+      s.qBfr1 = state.qbBit(1)
+      s.qBfr2 = state.qbBit(2)
+      s.qBfr3 = state.qbBit(3)
+      s.qBfr4 = state.qbBit(4)
+
+      Ild0312ConsoleLights.evaluateCombinational(s)
+      val lampsLR = s.lampsLeftToRight
+
+      // Restore transient mux inputs
+      s.editSwitch = savedEditSwitch
+      s.autoOrStep = savedAutoOrStep
+      s.masterReset = savedMasterReset
+      s.errorLite = savedErrorLite
+      s.busy = savedBusy
+      s.rdy = savedRdy
+      s.pBfr1 = savedPBfr1
+      s.pBfr2 = savedPBfr2
+      s.pBfr3 = savedPBfr3
+      s.pBfr4 = savedPBfr4
+      s.qBfr1 = savedQBfr1
+      s.qBfr2 = savedQBfr2
+      s.qBfr3 = savedQBfr3
+      s.qBfr4 = savedQBfr4
+      Ild0312ConsoleLights.evaluateCombinational(s)
+
+      ConsoleLampSpec.AllLamps.zip(lampsLR).map { case (spec, on) =>
+        val label = displayMode match {
+          case CeDisplayMode.Display1     => spec.ceDisplay1
+          case CeDisplayMode.Display2     => spec.ceDisplay2
+          case CeDisplayMode.Display3     => spec.ceDisplay3
+          case CeDisplayMode.Display4     => spec.ceDisplay4
+          case CeDisplayMode.ClockDefault => spec.ceTopLip
+        }
+        LampState(spec, label, on && powerOn)
+      }
     }
   }
 }

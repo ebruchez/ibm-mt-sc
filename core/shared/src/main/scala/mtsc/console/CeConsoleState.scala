@@ -2,6 +2,7 @@ package mtsc.console
 
 import mtsc.types.*
 import mtsc.cpu.Ccu
+import mtsc.cpu.ild.{BackplaneSignals, Ild0312ConsoleLights, IldCcu}
 import mtsc.memory.CoreMemory
 import mtsc.periph.{ConsoleKey, ConsoleLampSpec, OperatorPanelState, SystemIoBus}
 import scala.collection.mutable.ArrayBuffer
@@ -465,67 +466,152 @@ class CeConsoleState {
         LampState(spec, label, isOn && powerOn)
       }
     } else {
-      ConsoleLampSpec.AllLamps.map { spec =>
-        val (label, on) = displayMode match {
-          case CeDisplayMode.Display1 =>
-            val yIndex = 12 - spec.number // Lamp 1 -> Y 11, Lamp 11 -> Y 1
-            (spec.ceDisplay1, cpu.state.yBit(yIndex))
+      val s = new BackplaneSignals()
+      s.setMalValue(cpu.state.mal.unsigned)
+      s.setOutputByte(cpu.state.outputReg)
+      s.oplCde1 = cpu.state.opBit(1)
+      s.oplCde2 = cpu.state.opBit(2)
+      s.oplCde3 = cpu.state.opBit(3)
+      s.oplCde4 = cpu.state.opBit(4)
+      s.oplCde5 = cpu.state.opBit(5)
+      s.oplCde6 = cpu.state.opBit(6)
+      s.oplCde7 = cpu.state.opBit(7)
+      s.qBfr1   = cpu.state.qbBit(1)
+      s.qBfr2   = cpu.state.qbBit(2)
+      s.qBfr3   = cpu.state.qbBit(3)
+      s.qBfr4   = cpu.state.qbBit(4)
+      s.pBfr1   = cpu.state.pbBit(1)
+      s.pBfr2   = cpu.state.pbBit(2)
+      s.pBfr3   = cpu.state.pbBit(3)
+      s.pBfr4   = cpu.state.pbBit(4)
+      s.insnTCtrA = (cpu.state.insnTimeCtr & 1) == 1
+      s.insnTCtrB = ((cpu.state.insnTimeCtr >> 1) & 1) == 1
+      s.insnTCtrC = ((cpu.state.insnTimeCtr >> 2) & 1) == 1
+      s.insnTCtrD = ((cpu.state.insnTimeCtr >> 3) & 1) == 1
+      s.btCtrA    = (cpu.state.bitTimeCtr & 1) == 1
+      s.btCtrB    = ((cpu.state.bitTimeCtr >> 1) & 1) == 1
+      s.low       = cpu.state.low
+      s.eq        = cpu.state.equal
+      s.inh       = cpu.state.inhibit
+      s.mpx       = cpu.state.multiplex
+      s.rdy       = readySignal
+      s.busy      = translatorBusy
+      s.errorLite = eotActive
+      s.masterReset = displayMode == CeDisplayMode.ClockDefault && parityErr
+      s.setCeTestInputs(ceTestInputs)
+      s.editSwitch = CeEditSelector.Proc
+      Ild0312ConsoleLights.applyDisplayModeButtons(s, displayMode)
+      s.autoOrStep = displayMode != CeDisplayMode.ClockDefault
+      Ild0312ConsoleLights.evaluateCombinational(s)
 
-          case CeDisplayMode.Display2 =>
-            val isOn = spec.number match {
-              case 1 => false
-              case 2 => eotActive
-              case 3 => translatorBusy
-              case n => cpu.state.outBit(12 - n) // Lamp 4 -> O 8 .. Lamp 11 -> O 1
-            }
-            (spec.ceDisplay2, isOn)
-
-          case CeDisplayMode.Display3 =>
-            val isOn = spec.number match {
-              case 1 => false
-              case 2 => cpu.state.inhibit
-              case 3 => !cpu.state.low
-              case 4 => cpu.state.equal
-              case n => cpu.state.opBit(12 - n) // Lamp 5 -> OP 7 .. Lamp 11 -> OP 1
-            }
-            (spec.ceDisplay3, isOn)
-
-          case CeDisplayMode.Display4 =>
-            val isOn = spec.number match {
-              case 1  => false
-              case 2  => readySignal
-              case 3  => cpu.state.multiplex
-              case 4  => cpu.state.qbBit(4)
-              case 5  => cpu.state.qbBit(3)
-              case 6  => cpu.state.qbBit(2)
-              case 7  => cpu.state.qbBit(1)
-              case 8  => cpu.state.pbBit(4)
-              case 9  => cpu.state.pbBit(3)
-              case 10 => cpu.state.pbBit(2)
-              case 11 => cpu.state.pbBit(1)
-              case _  => false
-            }
-            (spec.ceDisplay4, isOn)
-
-          case CeDisplayMode.ClockDefault =>
-            val isOn = spec.number match {
-              case 1  => parityErr
-              case 2  => ((ceTestInputs >> 3) & 1) == 1
-              case 3  => ((ceTestInputs >> 2) & 1) == 1
-              case 4  => ((ceTestInputs >> 1) & 1) == 1
-              case 5  => (ceTestInputs & 1) == 1
-              case 6  => ((cpu.state.insnTimeCtr >> 3) & 1) == 1 // ID
-              case 7  => ((cpu.state.insnTimeCtr >> 2) & 1) == 1 // IC
-              case 8  => ((cpu.state.insnTimeCtr >> 1) & 1) == 1 // IB
-              case 9  => (cpu.state.insnTimeCtr & 1) == 1        // IA
-              case 10 => ((cpu.state.bitTimeCtr >> 1) & 1) == 1  // B
-              case 11 => (cpu.state.bitTimeCtr & 1) == 1         // A
-              case _  => false
-            }
-            (spec.ceTopLip, isOn)
+      ConsoleLampSpec.AllLamps.zip(s.lampsLeftToRight).map { case (spec, on) =>
+        val label = displayMode match {
+          case CeDisplayMode.Display1     => spec.ceDisplay1
+          case CeDisplayMode.Display2     => spec.ceDisplay2
+          case CeDisplayMode.Display3     => spec.ceDisplay3
+          case CeDisplayMode.Display4     => spec.ceDisplay4
+          case CeDisplayMode.ClockDefault => spec.ceTopLip
         }
         LampState(spec, label, on && powerOn)
       }
+    }
+  }
+
+  /**
+   * Computes all 11 console indicator lamps directly from the gate-level [[IldCcu]] and [[Ild0312ConsoleLights]].
+   */
+  def computeLamps(ild: IldCcu): Vector[LampState] =
+    ild.computeLamps(displayMode, ceTestInputs, faceplateInstalled, powerOn)
+
+  /**
+   * Sets the `EDIT MEMORY SELECTOR` 5-position slide switch on a gate-level [[IldCcu]],
+   * driving `AID 1..3`, `DPLY 1..4`, and the `I-0 -> I-1 -> I-0` Edit cycle.
+   */
+  def selectEditSelector(newSelector: CeEditSelector, ild: IldCcu): CeEditSelector = {
+    editSelector = newSelector
+    mode = editSelector match {
+      case CeEditSelector.Proc => CeConsoleMode.Process
+      case CeEditSelector.Addr => CeConsoleMode.EditAddress
+      case CeEditSelector.Data => CeConsoleMode.EditData
+      case _                   => CeConsoleMode.SingleStep
+    }
+    editSelector match {
+      case CeEditSelector.Addr => displayMode = CeDisplayMode.Display1
+      case CeEditSelector.Data => displayMode = CeDisplayMode.Display2
+      case CeEditSelector.Prog => displayMode = CeDisplayMode.Display3
+      case _                   => ()
+    }
+    ild.setEditSelector(newSelector)
+    editSelector
+  }
+
+  /**
+   * Presses the CE `Clear` plunger button on a gate-level [[IldCcu]].
+   */
+  def pressCeClear(ild: IldCcu): String = {
+    ild.pressCeClear()
+    val msg = editSelector match {
+      case CeEditSelector.Addr =>
+        log("CE Clear [Addr]: cleared PSAR & MAL to 0x000 (0).")
+        "Cleared PSAR & MAL to 0 (0x000)."
+      case CeEditSelector.Data =>
+        val addr = ild.memory.psar
+        log(f"CE Clear [Data]: cleared byte at ${addr.unsigned} (0x${addr.unsigned}%03X) to 0x00.")
+        f"Cleared byte at ${addr.unsigned} (0x${addr.unsigned}%03X) to 0000 0000 (0x00)."
+      case _ =>
+        log("CE Clear: reset condition and error indicators (RES INDS).")
+        "Indicators cleared."
+    }
+    statusMessage = msg
+    msg
+  }
+
+  /**
+   * Presses one of the 12 console keys on a gate-level [[IldCcu]] in CE `Addr`, `Data`, `Edit`, or `Prog` mode.
+   */
+  def pressCeKey(key: ConsoleKey, ild: IldCcu): Option[String] = {
+    if (faceplateInstalled) return None
+    editSelector match {
+      case CeEditSelector.Addr =>
+        displayMode = CeDisplayMode.Display1
+        ild.pressCeKey(key)
+        val msg = key.addrBitIndex match {
+          case Some(bit) =>
+            val updated = ild.memory.psar.unsigned
+            f"CE Edit Addr [Key ${key.topLegend} -> Y ${bit + 1} (+${1 << bit})]: PSAR = $updated (0x$updated%03X)."
+          case None =>
+            "CE Edit Addr: START has no Y-latch bit (use keys 0..9, R for Y 11..Y 1; press Clear to zero)."
+        }
+        log(msg)
+        statusMessage = msg
+        Some(msg)
+
+      case CeEditSelector.Data =>
+        displayMode = CeDisplayMode.Display2
+        ild.pressCeKey(key)
+        val msg = key.dataBitIndex match {
+          case Some(bit) =>
+            val addr = ild.memory.psar
+            val updated = ild.state.outputReg & 0xff
+            val binStr = s"${toNibbleBinary(updated >> 4)} ${toNibbleBinary(updated)}"
+            f"CE Edit Data [Key ${key.topLegend} -> O ${bit + 1}] at ${addr.unsigned} (0x${addr.unsigned}%03X): $binStr (0x$updated%02X)."
+          case None =>
+            s"CE Edit Data: Key ${key.topLegend} ignored by -BT CTR B gate (use keys 3..9, R for O 8..O 1; press Clear to zero byte)."
+        }
+        log(msg)
+        statusMessage = msg
+        Some(msg)
+
+      case CeEditSelector.Edit | CeEditSelector.Prog if key == ConsoleKey.Start =>
+        ild.pressCeKey(key)
+        val updated = ild.memory.psar.unsigned
+        val msg = f"CE Edit [${editSelector.label}]: START advanced PSAR by +1 to $updated (0x$updated%03X)."
+        log(msg)
+        statusMessage = msg
+        Some(msg)
+
+      case _ =>
+        None
     }
   }
 }
