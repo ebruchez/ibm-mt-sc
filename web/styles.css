@@ -1881,3 +1881,357 @@ button, select {
 .layout-64x32 .mo-ascii {
   display: inline-block;
 }
+
+/* ==========================================================================
+   ILD 0311 SELECTRIC COMPOSER TRANSLATOR MAGNET & CLUTCH TELEMETRY STRIP
+   ========================================================================== */
+.ild-translator-strip {
+  background: #111317;
+  border: 1px solid #2a303c;
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 0.67rem;
+}
+
+.ild-translator-strip.behavioral-dim {
+  opacity: 0.55;
+}
+
+.ild-tsltr-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.ild-tsltr-lbl {
+  color: #94a3b8;
+  font-weight: 700;
+  font-size: 0.64rem;
+  letter-spacing: 0.4px;
+  margin-right: 2px;
+}
+
+.ild-mag-pills {
+  display: flex;
+  gap: 3px;
+}
+
+.ild-byte-readout {
+  background: #1a1f29;
+  border: 1px solid #334155;
+  color: #fde047;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 700;
+  margin-left: 2px;
+}
+
+/* ==========================================================================
+   GATE-LEVEL ILD BACKPLANE, 4-BIT ALU, 3D CORE MATRIX & PROBE INSPECTOR
+   ========================================================================== */
+.ce-ild-inspector {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #2d323b;
+}
+
+.ce-ild-inspector.behavioral-dim {
+  opacity: 0.65;
+}
+
+.ce-ild-header {
+  margin-bottom: 8px;
+}
+
+.ce-ild-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ce-ild-title-row h3 {
+  font-size: 0.78rem;
+  color: #38bdf8;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin: 0;
+}
+
+.ce-ild-hint {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: #94a3b8;
+  background: #111317;
+  border: 1px solid #282c34;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.ce-ild-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 1280px) {
+  .ce-ild-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .ce-ild-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ild-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ild-card h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.ild-sheet-tag {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  background: #1e293b;
+  color: #7dd3fc;
+  border: 1px solid #0369a1;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: none;
+  letter-spacing: 0.2px;
+}
+
+.ild-sub-label {
+  font-size: 0.65rem;
+  color: #94a3b8;
+  font-family: var(--font-mono);
+  margin-top: 2px;
+}
+
+.ild-sub-label strong {
+  color: #fde047;
+}
+
+.ild-step-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  font-family: var(--font-mono);
+}
+
+.ild-step-cell {
+  background: #181b20;
+  border: 1px solid #2a303c;
+  color: #64748b;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-align: center;
+  min-width: 26px;
+  transition: all 0.1s ease;
+}
+
+.ild-step-cell.active {
+  background: #f59e0b;
+  border-color: #fbbf24;
+  color: #111827;
+  font-weight: 800;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.55);
+}
+
+.ild-step-cell.steered {
+  border-color: #38bdf8;
+  color: #bae6fd;
+}
+
+.ild-btime-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.ild-phase-pills,
+.ild-pill-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-family: var(--font-mono);
+}
+
+.ild-sig-pill {
+  background: #181b20;
+  border: 1px solid #2b313d;
+  color: #64748b;
+  padding: 1.5px 5px;
+  border-radius: 3px;
+  font-size: 0.63rem;
+  font-weight: 600;
+  line-height: 1.3;
+  user-select: none;
+  transition: all 0.1s ease;
+}
+
+.ild-sig-pill.on {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: #0284c7;
+  color: #e0f2fe;
+  box-shadow: 0 0 6px rgba(56, 189, 248, 0.3);
+}
+
+.ild-sig-pill.pill-amber.on {
+  background: rgba(245, 158, 11, 0.22);
+  border-color: #f59e0b;
+  color: #fef08a;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.35);
+}
+
+.ild-sig-pill.pill-green.on {
+  background: rgba(34, 197, 94, 0.22);
+  border-color: #22c55e;
+  color: #dcfce7;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.35);
+}
+
+.ild-sig-pill.pill-warn.on {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: #ef4444;
+  color: #fee2e2;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
+}
+
+.ild-dataflow-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+}
+
+.ild-df-row {
+  background: #181b20;
+  border: 1px solid #232832;
+  border-radius: 3px;
+  padding: 2.5px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.ild-df-name {
+  color: #94a3b8;
+  font-size: 0.63rem;
+}
+
+.ild-df-val {
+  color: #f8fafc;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ild-probe-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.ild-probe-header h3 {
+  margin-bottom: 0;
+}
+
+.ild-probe-desc {
+  font-size: 0.67rem;
+  color: #94a3b8;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.ild-probe-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.ild-probe-row {
+  display: grid;
+  grid-template-columns: 92px 1fr 22px;
+  align-items: center;
+  gap: 6px;
+  background: #181b20;
+  border: 1px solid #232832;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+}
+
+.ild-probe-lbl {
+  color: #e2e8f0;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.probe-lamp-tag {
+  color: #64748b;
+  font-weight: 400;
+  font-size: 0.6rem;
+}
+
+.ild-probe-select {
+  background: #0f1217;
+  color: #f8fafc;
+  border: 1px solid #334155;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.ild-probe-led {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 18px;
+  border-radius: 3px;
+  background: #1e242d;
+  border: 1px solid #334155;
+  color: #64748b;
+  font-weight: 800;
+  font-size: 0.64rem;
+}
+
+.ild-probe-led.on {
+  background: #f59e0b;
+  border-color: #fde047;
+  color: #111827;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.7);
+}
+

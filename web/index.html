@@ -456,6 +456,40 @@
           <button id="btn-clear-galley" class="btn-chip">Fresh Galley Sheet</button>
         </div>
 
+        <!-- ILD 0311 Selectric Composer Translator Magnet & Clutch Telemetry Strip -->
+        <div id="ild-translator-strip" class="ild-translator-strip" aria-label="ILD 0311 Translator Magnet and Clutch Telemetry">
+          <div class="ild-tsltr-group">
+            <span class="ild-tsltr-lbl" title="ILD 0311 (AA181): 7 Selectric Composer Translator Select Magnets (TSLTR SEL MAG 7..1) and Output Register byte">ILD 0311 MAGS:</span>
+            <div class="ild-mag-pills">
+              <span id="ild-mag-7" class="ild-sig-pill" title="Translator Select Magnet 7 (Bit 6 / Weight 64)">M7</span>
+              <span id="ild-mag-6" class="ild-sig-pill" title="Translator Select Magnet 6 (Bit 5 / Weight 32)">M6</span>
+              <span id="ild-mag-5" class="ild-sig-pill" title="Translator Select Magnet 5 (Bit 4 / Weight 16)">M5</span>
+              <span id="ild-mag-4" class="ild-sig-pill" title="Translator Select Magnet 4 (Bit 3 / Weight 8)">M4</span>
+              <span id="ild-mag-3" class="ild-sig-pill" title="Translator Select Magnet 3 (Bit 2 / Weight 4 - Function)">M3</span>
+              <span id="ild-mag-2" class="ild-sig-pill" title="Translator Select Magnet 2 (Bit 1 / Weight 2)">M2</span>
+              <span id="ild-mag-1" class="ild-sig-pill" title="Translator Select Magnet 1 (Bit 0 / Weight 1)">M1</span>
+            </div>
+            <span id="ild-tsltr-out-byte" class="ild-byte-readout" title="8-bit Output Register (OUT 8..1)">OUT: 0x00</span>
+          </div>
+          <div class="ild-tsltr-group">
+            <span class="ild-tsltr-lbl">DECODE:</span>
+            <span id="ild-tsltr-ord" class="ild-sig-pill" title="+ORDINARY CHARACTER (AA171)">ORD CHAR</span>
+            <span id="ild-tsltr-fn" class="ild-sig-pill" title="+FUNCTION (AA181: OUT 3 set)">FN</span>
+            <span id="ild-tsltr-tabcrn" class="ild-sig-pill" title="+TAB + CARRIAGE RETURN (AA181)">TAB+CRN</span>
+            <span id="ild-tsltr-dummy" class="ild-sig-pill" title="+DUMMY / +DMY FN (AA172)">DUMMY</span>
+            <span id="ild-tsltr-halt" class="ild-sig-pill pill-warn" title="-HALT (AA031: OUT 1..8 = 0xFF End-of-Multiplex)">HALT 0xFF</span>
+          </div>
+          <div class="ild-tsltr-group">
+            <span class="ild-tsltr-lbl">CLUTCH / IO:</span>
+            <span id="ild-tsltr-sel" class="ild-sig-pill" title="+TRANSLATOR SELECT (AA172)">TSLTR SEL</span>
+            <span id="ild-tsltr-cyccl" class="ild-sig-pill" title="+TRANSLATOR CYCLE CLUTCH (AA181)">CYC CL</span>
+            <span id="ild-tsltr-pr" class="ild-sig-pill" title="+TRANSLATOR PRINT (AA181)">PRINT</span>
+            <span id="ild-tsltr-mpx" class="ild-sig-pill" title="+MULTIPLEX (AA141)">MPX</span>
+            <span id="ild-tsltr-bsy" class="ild-sig-pill" title="+BUSY (AA142)">BSY</span>
+            <span id="ild-tsltr-rdy" class="ild-sig-pill" title="+READY (AA142)">RDY</span>
+          </div>
+        </div>
+
         <div class="galley-roller-frame">
           <div class="galley-paper-sheet">
             <div class="galley-paper-header">
@@ -475,9 +509,10 @@
     <!-- Bottom Collapsible Customer Engineer (CE) Hardware Internals Drawer -->
     <details class="ce-drawer" open>
       <summary class="ce-drawer-summary">
-        <span>Customer Engineer (CE) CCU 6320 Hardware Internals — 32 Working Registers, Live Disassembly &amp; 2,048-Byte Core Memory</span>
+        <span>Customer Engineer (CE) CCU 6320 Hardware Internals — ILD 0303–0312 Gate Backplane, 3D Core Matrix, 32 Working Registers &amp; Disassembly</span>
         <div class="ce-quick-regs">
           <span>ENGINE: <strong id="ce-reg-engine">ILD</strong></span>
+          <span>PHASE: <strong id="ce-reg-phase">I-0 • B1-4</strong></span>
           <span>PSAR: <strong id="ce-reg-psar">0x222</strong></span>
           <span>MAL: <strong id="ce-reg-mal">0x222</strong></span>
           <span>AW: <strong id="ce-reg-aw">0x0000</strong></span>
@@ -486,6 +521,170 @@
           <span>CYC: <strong id="ce-reg-cyc">0</strong></span>
         </div>
       </summary>
+
+      <!-- Gate-Level ILD 0303-0312 Backplane, 4-Bit Serial ALU, 3D Core Matrix & CE Test Probe Inspector -->
+      <div id="ce-ild-inspector" class="ce-ild-inspector">
+        <div class="ce-ild-header">
+          <div class="ce-ild-title-row">
+            <h3>Gate-Level SLD Backplane &amp; 3D Coincident-Current Core Array Telemetry (ILDs 0303–0312)</h3>
+            <span id="ce-ild-step-hint" class="ce-ild-hint">Tip: Set Left CE Slide Switch to [Bit] or [Word] and click [Step] to trace individual nibble and instruction times</span>
+          </div>
+        </div>
+
+        <div class="ce-ild-grid">
+          <!-- Card 1: Clock, Instruction Time & Permute (ILD 0303 - 0304) -->
+          <div class="ce-panel ild-card">
+            <h3>Clock, I-Time &amp; Permute <span class="ild-sheet-tag">ILD 0303–0304</span></h3>
+            <div class="ild-sub-label">Instruction Time Counter (INSN T 0..9) &amp; Next Steering: <strong id="ild-str-itime">STR → I-1</strong></div>
+            <div id="ild-itime-strip" class="ild-step-strip">
+              <span id="ild-it-0" class="ild-step-cell active">I-0</span>
+              <span id="ild-it-1" class="ild-step-cell">I-1</span>
+              <span id="ild-it-2" class="ild-step-cell">I-2</span>
+              <span id="ild-it-3" class="ild-step-cell">I-3</span>
+              <span id="ild-it-4" class="ild-step-cell">I-4</span>
+              <span id="ild-it-5" class="ild-step-cell">I-5</span>
+              <span id="ild-it-6" class="ild-step-cell">I-6</span>
+              <span id="ild-it-7" class="ild-step-cell">I-7</span>
+              <span id="ild-it-8" class="ild-step-cell">I-8</span>
+              <span id="ild-it-9" class="ild-step-cell">I-9</span>
+            </div>
+
+            <div class="ild-sub-label">Bit Time Counter (B1-4 .. B13-16) &amp; Cycle Phase</div>
+            <div class="ild-btime-row">
+              <div id="ild-btime-strip" class="ild-step-strip">
+                <span id="ild-bt-0" class="ild-step-cell active">B1-4</span>
+                <span id="ild-bt-1" class="ild-step-cell">B5-8</span>
+                <span id="ild-bt-2" class="ild-step-cell">B9-12</span>
+                <span id="ild-bt-3" class="ild-step-cell">B13-16</span>
+              </div>
+              <div class="ild-phase-pills">
+                <span id="ild-sig-ponly" class="ild-sig-pill" title="+P ONLY (33.3 µs P-Only vs 50.0 µs P&Q Bit Time)">P-ONLY</span>
+                <span id="ild-sig-ptime" class="ild-sig-pill" title="+P TIME Latch">P-TIME</span>
+                <span id="ild-sig-cenbt" class="ild-sig-pill" title="+CENTRAL BIT TIME Latch">CEN BT</span>
+                <span id="ild-sig-twr" class="ild-sig-pill" title="+TIME WRITE Latch">TWR</span>
+              </div>
+            </div>
+
+            <div class="ild-sub-label">Opcode Class &amp; Permute Matrix (OPL CDE 1..7)</div>
+            <div class="ild-pill-wrap">
+              <span id="ild-sig-ath" class="ild-sig-pill" title="+ARITHMETIC OPERATION (OPL 1 + OPL 2)">ATH OP</span>
+              <span id="ild-sig-imm" class="ild-sig-pill" title="+IMMEDIATE (OPL 1 & OPL 2)">IMM</span>
+              <span id="ild-sig-jmp" class="ild-sig-pill" title="+JUMP">JMP</span>
+              <span id="ild-sig-prgctl" class="ild-sig-pill" title="+PROGRAM CONTROL (SBP / RBP / TBP)">PRG CTL</span>
+              <span id="ild-sig-in" class="ild-sig-pill" title="+INPUT">INPUT</span>
+              <span id="ild-sig-out" class="ild-sig-pill" title="+OUTPUT">OUTPUT</span>
+              <span id="ild-sig-prmt" class="ild-sig-pill pill-amber" title="+PERMUTE (Non-sequential I-Time transition)">PERMUTE</span>
+              <span id="ild-sig-set9" class="ild-sig-pill pill-amber" title="+SET 9 (Jump I-Time Counter to I-9)">SET 9</span>
+              <span id="ild-sig-tkn" class="ild-sig-pill pill-amber" title="+TAKEN (Branch / Incr Jump Taken)">TAKEN</span>
+              <span id="ild-sig-edit" class="ild-sig-pill" title="+EDIT Mode Latch">EDIT</span>
+            </div>
+          </div>
+
+          <!-- Card 2: 4-Bit Serial Dataflow, Sense Amps & ALU (ILD 0305, 0308 - 0310) -->
+          <div class="ce-panel ild-card">
+            <h3>4-Bit Serial Dataflow &amp; ALU <span class="ild-sheet-tag">ILD 0305, 0308–0310</span></h3>
+            <div class="ild-dataflow-rows">
+              <div class="ild-df-row">
+                <span class="ild-df-name">P-BUFFER (PB 4..1)</span>
+                <span id="ild-df-pbfr" class="ild-df-val">0000 (0x0)</span>
+              </div>
+              <div class="ild-df-row">
+                <span class="ild-df-name">Q-BUFFER (QB 4..1)</span>
+                <span id="ild-df-qbfr" class="ild-df-val">0000 (0x0)</span>
+              </div>
+              <div class="ild-df-row">
+                <span class="ild-df-name">ACCUMULATOR (ACC 4..1)</span>
+                <span id="ild-df-acc" class="ild-df-val">0000 (0x0)</span>
+              </div>
+              <div class="ild-df-row">
+                <span class="ild-df-name">RIPPLE CARRY (CAR 4..1)</span>
+                <span id="ild-df-car" class="ild-df-val">0000 • OVR: 0</span>
+              </div>
+              <div class="ild-df-row">
+                <span class="ild-df-name">SENSE INHIBIT (4..1)</span>
+                <span id="ild-df-inh-lines" class="ild-df-val">EV: 0000 • ODD: 0000</span>
+              </div>
+            </div>
+
+            <div class="ild-sub-label">ALU, Bit Sampling &amp; Core Write Gates</div>
+            <div class="ild-pill-wrap">
+              <span id="ild-sig-add" class="ild-sig-pill" title="+ADD (True = Add, False = Complement Subtract)">+ADD</span>
+              <span id="ild-sig-sub" class="ild-sig-pill pill-amber" title="-ADD (1's Complement Borrow Subtractor active at I-9)">-ADD (SUB)</span>
+              <span id="ild-sig-carover" class="ild-sig-pill" title="+CARRY OVER Latch">CAR OVER</span>
+              <span id="ild-sig-acceqz" class="ild-sig-pill" title="+ACCUMULATOR EQUAL ZERO">ACC = 0</span>
+              <span id="ild-sig-inhrd" class="ild-sig-pill" title="+INHIBIT READ (Clear destructive read)">INH RD</span>
+              <span id="ild-sig-sambt" class="ild-sig-pill" title="+SAMPLED BIT TIME (Y11,Y10 = BT B,A)">SAM BT</span>
+              <span id="ild-sig-sambpos" class="ild-sig-pill" title="+SAMPLED BIT POSITION">SAM B POS</span>
+              <span id="ild-sig-wrpbfr" class="ild-sig-pill pill-green" title="+WRITE P BUFFER to Core Planes">WR P BFR</span>
+              <span id="ild-sig-wracc" class="ild-sig-pill pill-green" title="+WRITE ACCUMULATOR to Core Planes">WR ACC</span>
+            </div>
+          </div>
+
+          <!-- Card 3: 3D 4-Plane Coincident-Current Core Matrix (ILD 0306 - 0307) -->
+          <div class="ce-panel ild-card">
+            <h3>3D 4-Plane Core Matrix <span class="ild-sheet-tag">ILD 0306–0307</span></h3>
+            <div class="ild-sub-label">Active Core Address Selection</div>
+            <div class="ild-pill-wrap">
+              <span id="ild-sig-selpsar" class="ild-sig-pill" title="+SELECT PROGRAM STEP ADDRESS (Special Y-Drv 8)">SEL PSAR</span>
+              <span id="ild-sig-selawd" class="ild-sig-pill" title="+SELECT A WORD (Special Y-Drv 7)">SEL A-WD</span>
+              <span id="ild-sig-selbwd" class="ild-sig-pill" title="+SELECT B WORD (Special Y-Drv 6)">SEL B-WD</span>
+              <span id="ild-sig-selmemup" class="ild-sig-pill" title="+SELECT MEMORY UPPER (Full 11-bit Y1..Y11 vs Regs Y2..Y6)">SEL MEM UP</span>
+              <span id="ild-sig-rewo" class="ild-sig-pill" title="REWO: Read Even (Bits 1..4) / Write Odd">REWO (EV)</span>
+              <span id="ild-sig-rowe" class="ild-sig-pill" title="ROWE: Read Odd (Bits 5..8) / Write Even">ROWE (ODD)</span>
+            </div>
+
+            <div class="ild-dataflow-rows">
+              <div class="ild-df-row">
+                <span class="ild-df-name">X COINCIDENT LINE</span>
+                <span id="ild-core-x" class="ild-df-val">X-DRV 8 × X-SW 8 (X: 63)</span>
+              </div>
+              <div class="ild-df-row">
+                <span class="ild-df-name">Y COINCIDENT LINE</span>
+                <span id="ild-core-y" class="ild-df-val">Y-DRV 8 × Y-SW 3 (Y: 30)</span>
+              </div>
+              <div class="ild-df-row">
+                <span class="ild-df-name">TARGET CORE LOC</span>
+                <span id="ild-core-target" class="ild-df-val">SPEC: PSAR Low • Byte: 0x00</span>
+              </div>
+              <div class="ild-df-row">
+                <span class="ild-df-name">4 CORE PLANES (P4..P1)</span>
+                <span id="ild-core-planes" class="ild-df-val">EV: 0000 • ODD: 0000</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 4: CE Test 4..1 Backplane Logic Probe Patch Bay (ILD 0312) -->
+          <div class="ce-panel ild-card">
+            <div class="ild-probe-header">
+              <h3>CE Test 4..1 Logic Probes <span class="ild-sheet-tag">ILD 0312</span></h3>
+              <button id="btn-probe-view-clock" type="button" class="btn-chip" title="Expose CE Chassis and switch top display row to [Clock] (Display 0) so Lamps 2..5 show Test 4..1">Show on Lamps [Clock]</button>
+            </div>
+            <p class="ild-probe-desc">Assign any internal backplane signal to <strong>Test 4..1</strong> (Lamps 2–5 in <em>Clock</em> mode):</p>
+            <div class="ild-probe-list">
+              <div class="ild-probe-row">
+                <label for="ce-probe-select-4" class="ild-probe-lbl">Test 4 <span class="probe-lamp-tag">(Lamp 2)</span></label>
+                <select id="ce-probe-select-4" class="ild-probe-select"></select>
+                <span id="ce-probe-led-4" class="ild-probe-led" title="Live Test 4 signal level">0</span>
+              </div>
+              <div class="ild-probe-row">
+                <label for="ce-probe-select-3" class="ild-probe-lbl">Test 3 <span class="probe-lamp-tag">(Lamp 3)</span></label>
+                <select id="ce-probe-select-3" class="ild-probe-select"></select>
+                <span id="ce-probe-led-3" class="ild-probe-led" title="Live Test 3 signal level">0</span>
+              </div>
+              <div class="ild-probe-row">
+                <label for="ce-probe-select-2" class="ild-probe-lbl">Test 2 <span class="probe-lamp-tag">(Lamp 4)</span></label>
+                <select id="ce-probe-select-2" class="ild-probe-select"></select>
+                <span id="ce-probe-led-2" class="ild-probe-led" title="Live Test 2 signal level">0</span>
+              </div>
+              <div class="ild-probe-row">
+                <label for="ce-probe-select-1" class="ild-probe-lbl">Test 1 <span class="probe-lamp-tag">(Lamp 5)</span></label>
+                <select id="ce-probe-select-1" class="ild-probe-select"></select>
+                <span id="ce-probe-led-1" class="ild-probe-led" title="Live Test 1 signal level">0</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div class="ce-drawer-grid">
         <!-- 32 Working Registers -->

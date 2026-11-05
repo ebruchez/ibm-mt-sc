@@ -428,4 +428,81 @@ class IldMilestone3Suite extends munit.FunSuite {
     assertEquals(sysIld.paper.lines, sysBehavioral.paper.lines)
     assertEquals(sysIld.memory.toCoreImage.bytes.toSeq, sysBehavioral.memory.toCoreImage.bytes.toSeq)
   }
+
+  test("Sub-instruction stepping (Bit, Word, P.S., Jump) and CeTestProbe logic probes on IldCcu") {
+    import mtsc.asm.Assembler
+    import mtsc.console.{CeConsoleState, CeStepGranularity, CeTestProbe}
+    import mtsc.periph.MtscSystem
+    import mtsc.types.RegId
+
+    val sys = new MtscSystem()
+    val state = new CeConsoleState()
+    state.faceplateInstalled = false
+    state.selectDisplayMode(CeDisplayMode.ClockDefault)
+
+    // Assemble a small program at 0x222:
+    // 0x222: MOVI R2, 5
+    // 0x224: ADDI R2, 3
+    // 0x226: JMP 0x22A (unconditional branch)
+    // 0x228: MOVI R2, 99 (skipped)
+    // 0x22A: JMP 0x22A (self-loop halt)
+    val src =
+      """        .org 0x222
+        |        MOVI R2, 5
+        |        ADDI R2, 3
+        |        JMP done
+        |        MOVI R2, 99
+        |done:   JMP done
+        |""".stripMargin
+    val Right(img) = Assembler.assemble(src): @unchecked
+    sys.loadProgram(img)
+
+    // 1. Step 4 Bit Times through I-0 (B1-4 -> B5-8 -> B9-12 -> B13-16 -> I-1, B1-4)
+    assertEquals(sys.cpu.ild.signals.insnTime, 0)
+    assertEquals(sys.cpu.ild.signals.bitTimeIndex, 0)
+
+    sys.stepByGranularity(CeStepGranularity.Bit)
+    assert(sys.cpu.ild.isMidInstruction)
+    assertEquals(sys.cpu.ild.signals.insnTime, 0)
+    assertEquals(sys.cpu.ild.signals.bitTimeIndex, 1) // B5-8
+
+    sys.stepByGranularity(CeStepGranularity.Bit)
+    assertEquals(sys.cpu.ild.signals.bitTimeIndex, 2) // B9-12
+
+    sys.stepByGranularity(CeStepGranularity.Bit)
+    assertEquals(sys.cpu.ild.signals.bitTimeIndex, 3) // B13-16
+
+    // Connect Test 4 to +P ONLY and Test 3 to +PERMUTE and check ClockDefault lamps
+    state.setTestProbe(4, CeTestProbe.POnly)
+    state.setTestProbe(3, CeTestProbe.Prmt)
+    val lampsAtI0B13_16 = state.computeLamps(sys.cpu)
+    // Lamp 2 (index 1) is Test 4 (+P ONLY is true at I-0)
+    assert(lampsAtI0B13_16(1).isOn)
+    // Lamps 10, 11 (indices 9, 10) are Bit Ctr B, A = 1, 1 (B13-16)
+    assert(lampsAtI0B13_16(9).isOn)
+    assert(lampsAtI0B13_16(10).isOn)
+
+    sys.stepByGranularity(CeStepGranularity.Bit)
+    assertEquals(sys.cpu.ild.signals.insnTime, 1)
+    assertEquals(sys.cpu.ild.signals.bitTimeIndex, 0) // I-1, B1-4
+
+    // 2. Step by Word Time through I-1 -> I-6 (MOVI is an Immediate op, so I-1 permutes to I-6!)
+    sys.stepByGranularity(CeStepGranularity.Word)
+    assert(sys.cpu.ild.signals.immediate)
+    assertEquals(sys.cpu.ild.signals.insnTime, 6)
+    assertEquals(sys.cpu.ild.signals.bitTimeIndex, 0)
+
+    // Finish the rest of MOVI R2, 5 via ProgramStep
+    sys.stepByGranularity(CeStepGranularity.ProgramStep)
+    assert(!sys.cpu.ild.isMidInstruction)
+    assertEquals(sys.cpu.ild.signals.insnTime, 0)
+    assertEquals(sys.cpu.ild.signals.bitTimeIndex, 0)
+    assertEquals(sys.memory.readReg(RegId(2)), Word(5))
+    assertEquals(sys.memory.psar, Address(0x224))
+
+    // 3. Step by Jump: executes ADDI R2, 3 (at 0x224) and B done (at 0x226), stopping at 0x22A
+    sys.stepByGranularity(CeStepGranularity.Jump)
+    assertEquals(sys.memory.readReg(RegId(2)), Word(8))
+    assertEquals(sys.memory.psar, Address(0x22a))
+  }
 }

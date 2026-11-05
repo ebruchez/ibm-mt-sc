@@ -1,6 +1,7 @@
 package mtsc.periph
 
 import mtsc.types.*
+import mtsc.console.CeStepGranularity
 import mtsc.isa.{Decoder, Instruction}
 import mtsc.memory.{CoreImage, CoreMemory}
 import mtsc.cpu.{Ccu, CcuEngineMode, StepResult}
@@ -196,6 +197,113 @@ class MtscSystem(
       StepResult.Error(s"Boot loader exceeded max cycles ($maxCycles)")
     } else {
       result
+    }
+  }
+
+  /**
+   * Completes any partially stepped instruction in `ILD` mode so the CCU is aligned at `I-0, B1-4`.
+   */
+  def finishCurrentInstruction(): StepResult = {
+    if (cpu.isIldMode && cpu.ild.isMidInstruction) {
+      val res = cpu.ild.finishCurrentInstruction()
+      ioBus.stepCycle()
+      res
+    } else {
+      StepResult.Normal
+    }
+  }
+
+  /**
+   * Steps the system according to the Left CE Slide Switch (`[Bit]`, `[Word]`, `[P.S.]`, `[Jump]`, `[Auto]`).
+   * In `ILD` mode, executes genuine sub-instruction Bit-Time and Word-Time hardware steps on `IldCcu`.
+   */
+  def stepByGranularity(granularity: CeStepGranularity, maxJumpSteps: Int = 512): StepResult = {
+    if (cpu.isIldMode) {
+      granularity match {
+        case CeStepGranularity.Bit | CeStepGranularity.Word =>
+          val res = cpu.ild.stepByGranularity(granularity, maxJumpSteps)
+          if (!cpu.ild.isMidInstruction) {
+            ioBus.stepCycle()
+          }
+          res
+
+        case CeStepGranularity.ProgramStep | CeStepGranularity.Auto =>
+          if (cpu.ild.isMidInstruction) finishCurrentInstruction() else step()
+
+        case CeStepGranularity.Jump =>
+          var steps = 0
+          var result: StepResult = StepResult.Normal
+          var stoppedOnJump = false
+
+          if (cpu.ild.isMidInstruction) {
+            val prevPsar = memory.psar
+            result = finishCurrentInstruction()
+            steps += 1
+            val s = cpu.ild.signals
+            if ((s.jmp && s.tkn) || (!cpu.state.inhibit && memory.psar != prevPsar + 2)) {
+              stoppedOnJump = true
+            }
+          }
+
+          while (!stoppedOnJump && !cpu.state.halted && result == StepResult.Normal && steps < maxJumpSteps) {
+            val prevPsar = memory.psar
+            result = step()
+            steps += 1
+            val s = cpu.ild.signals
+            if ((s.jmp && s.tkn) || (!cpu.state.inhibit && memory.psar != prevPsar + 2)) {
+              stoppedOnJump = true
+            } else if (!cpu.state.multiplex && memory.psar == prevPsar && !cpu.state.inhibit) {
+              cpu.state.halted = true
+              result = StepResult.Halted
+            }
+          }
+          result
+      }
+    } else {
+      granularity match {
+        case CeStepGranularity.Bit =>
+          cpu.state.bitTimeCtr = (cpu.state.bitTimeCtr + 1) & 0x3
+          if (cpu.state.bitTimeCtr == 0) {
+            cpu.state.insnTimeCtr = (cpu.state.insnTimeCtr + 1) % 6
+            if (cpu.state.insnTimeCtr == 0) step() else StepResult.Normal
+          } else {
+            StepResult.Normal
+          }
+
+        case CeStepGranularity.Word =>
+          cpu.state.bitTimeCtr = 0
+          cpu.state.insnTimeCtr = (cpu.state.insnTimeCtr + 1) % 6
+          if (cpu.state.insnTimeCtr == 0) step() else StepResult.Normal
+
+        case CeStepGranularity.Jump =>
+          cpu.state.bitTimeCtr = 0
+          cpu.state.insnTimeCtr = 0
+          var steps = 0
+          var result: StepResult = StepResult.Normal
+          var stoppedOnJump = false
+          while (!stoppedOnJump && !cpu.state.halted && result == StepResult.Normal && steps < maxJumpSteps) {
+            val prevPsar = memory.psar
+            result = step()
+            steps += 1
+            cpu.state.lastInsn match {
+              case Some(_: Instruction.Branch) =>
+                stoppedOnJump = true
+              case _ if memory.psar != prevPsar + 2 =>
+                stoppedOnJump = true
+              case _ =>
+                if (!cpu.state.multiplex && memory.psar == prevPsar && !cpu.state.inhibit) {
+                  cpu.state.halted = true
+                  result = StepResult.Halted
+                }
+            }
+          }
+          result
+
+        case CeStepGranularity.ProgramStep | CeStepGranularity.Auto =>
+          cpu.state.bitTimeCtr = 0
+          cpu.state.insnTimeCtr = 0
+          step()
+      }
     }
   }
 

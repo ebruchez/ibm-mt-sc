@@ -1,6 +1,6 @@
 package mtsc.cpu.ild
 
-import mtsc.console.{CeDisplayMode, CeEditSelector, LampState}
+import mtsc.console.{CeDisplayMode, CeEditSelector, CeStepGranularity, LampState}
 import mtsc.cpu.{CcuState, IoBus, IoResult, StepResult}
 import mtsc.isa.{Decoder, Instruction}
 import mtsc.memory.CoreMemory
@@ -36,6 +36,17 @@ final class IldCcu(
   private var savedIndirectPtrRegAddr: Int = 0
   private var savedIndirectPtrValue: Int = 0
 
+  /** Sub-instruction (`Bit` / `Word`) stepping state across `I-0 .. I-9`. */
+  private var inProgressInstruction: Boolean = false
+  private var midInstructionFetchAddr: Address = Address(0)
+  private var midInstructionRawWord: Word = Word.Zero
+  private var midInstructionPBfrAtI1B1_4: Int = 0
+  private var midInstructionQBfrAtI1B5_8: Int = 0
+
+  /** True when the CCU is halted mid-instruction (`I-1..I-9` or `B5-8..B13-16`) via `Bit` or `Word` stepping. */
+  def isMidInstruction: Boolean =
+    inProgressInstruction || signals.insnTime != 0 || signals.bitTimeIndex != 0
+
   // Initialize clock and backplane signals to power-on reset state (I-0, B1-4)
   Ild0303Clock.reset(signals)
   syncAllCombinational()
@@ -59,6 +70,11 @@ final class IldCcu(
     signals.carOver = false
     signals.setMalValue(0)
     signals.setOutputByte(0)
+    inProgressInstruction = false
+    midInstructionFetchAddr = Address(0)
+    midInstructionRawWord = Word.Zero
+    midInstructionPBfrAtI1B1_4 = 0
+    midInstructionQBfrAtI1B5_8 = 0
     Ild0303Clock.reset(signals)
     signals.edit = signals.editSwitch != CeEditSelector.Proc
     syncAllCombinational()
@@ -132,6 +148,10 @@ final class IldCcu(
   def stepBitTime(): Int = {
     val s = signals
     var pulses = 0
+    val savedClockSwitch = s.clockSwitch
+    s.clockSwitch = CeStepGranularity.Auto
+    s.stpClk1 = false
+    s.stpClk2 = false
 
     // Ensure we are past SSA #1 of the current Bit Time
     if (s.a && s.b && s.pTime && !s.cenBt) {
@@ -142,9 +162,19 @@ final class IldCcu(
       Ild0303Clock.stepSubPhase(s, OscSubPhase.SsaOff)
     }
 
-    // Sample EDIT switch at BEGINNING PROGRAM STEP (I-0, B1-4, P TIME, -CEN BT)
+    // Sample EDIT switch and clear OPL CDE 1..7 at BEGINNING PROGRAM STEP (I-0, B1-4, P TIME, -CEN BT)
     if (s.begPrgStp) {
       Ild0312ConsoleLights.updateLatches(s)
+    }
+    if (s.insnT0 && s.b1_4) {
+      s.oplCde1 = false
+      s.oplCde2 = false
+      s.oplCde3 = false
+      s.oplCde4 = false
+      s.oplCde5 = false
+      s.oplCde6 = false
+      s.oplCde7 = false
+      Ild0304Permute.evaluateCombinational(s)
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -374,10 +404,13 @@ final class IldCcu(
     // Fire SSA #1 of the next Bit Time (RES INDS / LD INDS)
     Ild0303Clock.stepSubPhase(s, OscSubPhase.SsaOn)
     pulses += 1
-    Ild0309OpAndBranch.updateOpCodeLatches(s)
+    if (!(s.insnT0 && s.b1_4)) {
+      Ild0309OpAndBranch.updateOpCodeLatches(s)
+    }
     Ild0308DataFlow.updateCarryIndicator(s)
     Ild0303Clock.stepSubPhase(s, OscSubPhase.SsaOff)
 
+    s.clockSwitch = savedClockSwitch
     syncAllCombinational()
     syncStateFromSignals()
     pulses
@@ -398,9 +431,201 @@ final class IldCcu(
   }
 
   /**
+   * Prepares the start of a new Program Step at `I-0, B1-4` (including any pending Multiplex Interrupt
+   * cycle and instruction decode).
+   */
+  private def beginProgramStepIfNeeded(): Option[StepResult] = {
+    if (state.halted) {
+      return Some(StepResult.Halted)
+    }
+    if (!inProgressInstruction && signals.insnTime == 0 && signals.bitTimeIndex == 0) {
+      val s = signals
+      s.mpx = state.multiplex
+      s.low = state.low
+      s.eq = state.equal
+
+      if (s.mpx && ioBus.isTranslatorReady) {
+        executeMultiplexInterruptCycle()
+      }
+
+      midInstructionFetchAddr = memory.psar
+      midInstructionRawWord = memory.readWord(midInstructionFetchAddr)
+      Decoder.decode(midInstructionRawWord) match {
+        case Left(err) =>
+          return Some(StepResult.Error(s"Decode error at $midInstructionFetchAddr: $err (word: $midInstructionRawWord)"))
+        case Right(insn) =>
+          state.lastInsn = Some(insn)
+      }
+
+      s.inh = false
+      s.rdy = !s.mpx
+      midInstructionPBfrAtI1B1_4 = 0
+      midInstructionQBfrAtI1B5_8 = 0
+      inProgressInstruction = true
+      syncAllCombinational()
+    }
+    None
+  }
+
+  /**
+   * Finalizes a Program Step once the clock returns to `I-0, B1-4`.
+   */
+  private def finalizeProgramStep(useSummaryBuffers: Boolean): StepResult = {
+    val s = signals
+    memory.aWord = midInstructionRawWord
+    val result = if (s.inh) {
+      memory.psar = midInstructionFetchAddr
+      StepResult.Stalled
+    } else {
+      StepResult.Normal
+    }
+    syncStateFromSignals()
+    if (useSummaryBuffers) {
+      state.pBuffer = if (s.output) (s.outputByte & 0x0f) else midInstructionPBfrAtI1B1_4
+      state.qBuffer = midInstructionQBfrAtI1B5_8
+    }
+    state.cycleCount += 1
+    inProgressInstruction = false
+    result
+  }
+
+  /**
+   * Executes a single hardware Bit Time (`B1-4`, `B5-8`, `B9-12`, or `B13-16`) as part of the
+   * current Program Step (`CeStepGranularity.Bit` on `ILD 0303`).
+   */
+  def stepSingleBitTime(): StepResult = {
+    beginProgramStepIfNeeded() match {
+      case Some(earlyResult) => return earlyResult
+      case None              => ()
+    }
+
+    val s = signals
+    val curInsnTime = s.insnTime
+    val curBitTime = s.bitTimeIndex
+    stepBitTime()
+
+    if (curInsnTime == 1 && curBitTime == 0) {
+      midInstructionPBfrAtI1B1_4 = midInstructionRawWord.unsigned & 0x0f
+    } else if (curInsnTime == 1 && curBitTime == 1) {
+      midInstructionQBfrAtI1B5_8 = (midInstructionRawWord.unsigned >> 4) & 0x0f
+    }
+
+    if (s.insnTime == 0 && s.bitTimeIndex == 0) {
+      finalizeProgramStep(useSummaryBuffers = false)
+    } else {
+      StepResult.Normal
+    }
+  }
+
+  /**
+   * Executes one hardware Instruction Time (`I-0 -> I-1 -> ... -> I-9`) as part of the current
+   * Program Step (`CeStepGranularity.Word` on `ILD 0303`). If currently mid-Word-Time (`B5-8..B13-16`),
+   * completes the remaining Bit Times of the current Instruction Time so the clock halts at `B1-4`.
+   */
+  def stepSingleWordTime(): StepResult = {
+    beginProgramStepIfNeeded() match {
+      case Some(earlyResult) => return earlyResult
+      case None              => ()
+    }
+
+    val s = signals
+    val bitsToStep = if (s.bitTimeIndex == 0) 4 else (4 - s.bitTimeIndex)
+    var i = 0
+    var result: StepResult = StepResult.Normal
+    while (i < bitsToStep && result == StepResult.Normal) {
+      result = stepSingleBitTime()
+      i += 1
+      if (s.insnTime == 0 && s.bitTimeIndex == 0) {
+        i = bitsToStep
+      }
+    }
+    result
+  }
+
+  /**
+   * Completes any partially stepped instruction so the CCU is aligned at `I-0, B1-4`.
+   */
+  def finishCurrentInstruction(): StepResult = {
+    if (!isMidInstruction) {
+      return StepResult.Normal
+    }
+    var guard = 0
+    var result: StepResult = StepResult.Normal
+    while (isMidInstruction && guard < 64) {
+      val s = signals
+      val curInsnTime = s.insnTime
+      val curBitTime = s.bitTimeIndex
+      stepBitTime()
+      if (curInsnTime == 1 && curBitTime == 0) {
+        midInstructionPBfrAtI1B1_4 = midInstructionRawWord.unsigned & 0x0f
+      } else if (curInsnTime == 1 && curBitTime == 1) {
+        midInstructionQBfrAtI1B5_8 = (midInstructionRawWord.unsigned >> 4) & 0x0f
+      }
+      guard += 1
+      if (s.insnTime == 0 && s.bitTimeIndex == 0) {
+        result = finalizeProgramStep(useSummaryBuffers = true)
+      }
+    }
+    result
+  }
+
+  /**
+   * Steps the CCU according to the 5-position Left CE Slide Switch (`CeStepGranularity` on `ILD 0303`):
+   * - `Bit`: Advances 1 Bit Time (`B1-4 -> B5-8 -> B9-12 -> B13-16`)
+   * - `Word`: Advances 1 Instruction Time (`I-0 -> I-1 -> ... -> I-9`)
+   * - `ProgramStep` / `Auto`: Completes the current or next full Program Step (`I-0 -> I-0`)
+   * - `Jump`: Advances until a taken Branch or Incremental Jump instruction completes (`stopJmp` on `ILD 0303`)
+   */
+  def stepByGranularity(granularity: CeStepGranularity, maxJumpSteps: Int = 512): StepResult = {
+    signals.clockSwitch = granularity
+    granularity match {
+      case CeStepGranularity.Bit =>
+        stepSingleBitTime()
+
+      case CeStepGranularity.Word =>
+        stepSingleWordTime()
+
+      case CeStepGranularity.ProgramStep | CeStepGranularity.Auto =>
+        if (isMidInstruction) finishCurrentInstruction() else step()
+
+      case CeStepGranularity.Jump =>
+        var steps = 0
+        var result: StepResult = StepResult.Normal
+        var stoppedOnJump = false
+
+        if (isMidInstruction) {
+          val prevPsar = midInstructionFetchAddr
+          result = finishCurrentInstruction()
+          steps += 1
+          val s = signals
+          if ((s.jmp && s.tkn) || (!state.inhibit && memory.psar != prevPsar + 2)) {
+            stoppedOnJump = true
+          }
+        }
+
+        while (!stoppedOnJump && !state.halted && result == StepResult.Normal && steps < maxJumpSteps) {
+          val prevPsar = memory.psar
+          result = step()
+          steps += 1
+          val s = signals
+          if ((s.jmp && s.tkn) || (!state.inhibit && memory.psar != prevPsar + 2)) {
+            stoppedOnJump = true
+          } else if (!state.multiplex && memory.psar == prevPsar && !state.inhibit) {
+            state.halted = true
+            result = StepResult.Halted
+          }
+        }
+        result
+    }
+  }
+
+  /**
    * Executes one complete Program Step (`I-0` -> `I-1` -> ... -> `I-0`), matching [[mtsc.cpu.Ccu.step]].
    */
   def step(): StepResult = {
+    if (isMidInstruction) {
+      return finishCurrentInstruction()
+    }
     if (state.halted) {
       return StepResult.Halted
     }
@@ -598,18 +823,24 @@ final class IldCcu(
     val byte = s.outputByte
 
     if (isMultiplexInterruptCycle) {
+      s.tsltrSel = true
+      s.lites = false
       if (byte == 0xff) {
         s.mpx = false
         state.multiplex = false
+        s.busy = false
       } else {
         ioBus.write(Device.Translator, byte, multiplex = true)
+        s.busy = true
       }
+      Ild0311OutputIo.evaluateCombinational(s)
       return
     }
 
     if (byte == 0xff) {
       s.mpx = false
       state.multiplex = false
+      s.busy = false
     } else if (latchedOutputMultiplex) {
       s.mpx = true
       state.multiplex = true
@@ -619,6 +850,12 @@ final class IldCcu(
       case IoResult.Ready(_) =>
         s.inh = false
         s.rdy = true
+        if (latchedOutputDevice == Device.Translator && byte != 0xff) {
+          s.tsltrSel = true
+          s.lites = false
+          s.busy = true
+        }
+        Ild0311OutputIo.evaluateCombinational(s)
 
       case IoResult.Busy =>
         s.inh = true
@@ -627,6 +864,7 @@ final class IldCcu(
         if (s.oplCde6) {
           memory.writeWord(Address(savedIndirectPtrRegAddr), Word(savedIndirectPtrValue))
         }
+        Ild0311OutputIo.evaluateCombinational(s)
     }
   }
 

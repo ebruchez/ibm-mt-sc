@@ -127,6 +127,47 @@ final case class LampState(
 )
 
 /**
+ * Customer Engineer selectable backplane test points for the 4 CE Test Inputs (`Test 4 .. Test 1`
+ * on `ILD 0312` / `AA022`, `AA024`), which drive Lamps 2..5 in `Clock / Test` (`Display 0`) mode.
+ */
+enum CeTestProbe(
+  val id: String,
+  val label: String,
+  val sheet: String,
+  val evaluate: BackplaneSignals => Boolean
+) {
+  case Off         extends CeTestProbe("off",         "Unconnected (Manual)",   "0312", _ => false)
+  case PTime       extends CeTestProbe("p_time",      "+P TIME",                "0303", _.pTime)
+  case CenBt       extends CeTestProbe("cen_bt",      "+CENTRAL BIT TIME",      "0303", _.cenBt)
+  case Twr         extends CeTestProbe("twr",         "+TIME WRITE (TWR)",      "0303", _.twr)
+  case POnly       extends CeTestProbe("p_only",      "+P ONLY",                "0304", _.pOnly)
+  case Prmt        extends CeTestProbe("prmt",        "+PERMUTE",               "0304", _.prmt)
+  case Set9        extends CeTestProbe("set_9",       "+SET 9",                 "0304", _.set9)
+  case Taken       extends CeTestProbe("taken",       "+TAKEN (TKN)",           "0304", _.tkn)
+  case InhRd       extends CeTestProbe("inh_rd",      "+INHIBIT READ",          "0305", _.inhRd)
+  case ReadGate    extends CeTestProbe("read_gate",   "+READ GATE",             "0305", _.readGate)
+  case SelProgStep extends CeTestProbe("sel_psar",    "+SEL PROG STEP ADDR",    "0306", _.selProgStepAddr)
+  case SelAWd      extends CeTestProbe("sel_a_wd",    "+SELECT A WORD",         "0306", _.selAWd)
+  case SelBWd      extends CeTestProbe("sel_b_wd",    "+SELECT B WORD",         "0306", _.selBWd)
+  case SelMemUp    extends CeTestProbe("sel_mem_up",  "+SELECT MEMORY UP",      "0306", _.selMemUp)
+  case Add         extends CeTestProbe("add",         "+ADD",                   "0308", _.add)
+  case CarOver     extends CeTestProbe("car_over",    "+CARRY OVER",            "0308", _.carOver)
+  case Car4        extends CeTestProbe("car_4",       "+CARRY 4",               "0308", _.car4)
+  case AccEqZero   extends CeTestProbe("acc_eq_0",    "+ACC EQUAL ZERO",        "0308", _.accEqualZero)
+  case SamBt       extends CeTestProbe("sam_bt",      "+SAMPLED BIT TIME",      "0309", _.samBt)
+  case SamBPos     extends CeTestProbe("sam_b_pos",   "+SAMPLED BIT POS",       "0309", _.samBPos)
+  case WrPBfr      extends CeTestProbe("wr_p_bfr",    "+WRITE P BUFFER",        "0310", _.wrPBfr)
+  case WrAcc       extends CeTestProbe("wr_acc",      "+WRITE ACCUMULATOR",     "0310", _.wrAcc)
+  case TsltrSel    extends CeTestProbe("tsltr_sel",   "+TRANSLATOR SELECT",     "0311", _.tsltrSel)
+  case Lites       extends CeTestProbe("lites",       "+LIGHTS SELECT",         "0312", _.lites)
+}
+
+object CeTestProbe {
+  def fromId(id: String): Option[CeTestProbe] =
+    values.find(_.id == id)
+}
+
+/**
  * State of the Customer Engineer console, physical switches, and interactive debugger.
  */
 class CeConsoleState {
@@ -139,6 +180,33 @@ class CeConsoleState {
   var stepGranularity: CeStepGranularity = CeStepGranularity.Auto
   var editSelector: CeEditSelector = CeEditSelector.Proc
   var ceTestInputs: Int = 0 // 4-bit test input mask (Test 1..4)
+
+  // 4 assignable backplane logic probes for Test 1..4 (indexed 0..3 for Test 1..Test 4)
+  val testProbes: Array[CeTestProbe] = Array(
+    CeTestProbe.Off,
+    CeTestProbe.Off,
+    CeTestProbe.Off,
+    CeTestProbe.Off
+  )
+
+  def getTestProbe(testNumber: Int): CeTestProbe =
+    if (testNumber >= 1 && testNumber <= 4) testProbes(testNumber - 1) else CeTestProbe.Off
+
+  def setTestProbe(testNumber: Int, probe: CeTestProbe): Unit = {
+    if (testNumber >= 1 && testNumber <= 4) {
+      testProbes(testNumber - 1) = probe
+      log(s"CE Test $testNumber probe attached to ${probe.label} (ILD ${probe.sheet})")
+      statusMessage = s"CE Test $testNumber probe -> ${probe.label} (ILD ${probe.sheet}). Select [Clock] (Display 0) to view on Lamp ${6 - testNumber}."
+    }
+  }
+
+  def computeTestProbeMask(s: BackplaneSignals): Int = {
+    val b1 = if (testProbes(0).evaluate(s)) 0x1 else 0
+    val b2 = if (testProbes(1).evaluate(s)) 0x2 else 0
+    val b3 = if (testProbes(2).evaluate(s)) 0x4 else 0
+    val b4 = if (testProbes(3).evaluate(s)) 0x8 else 0
+    b1 | b2 | b3 | b4
+  }
 
   // Legacy mode property synchronized with slide switches
   var mode: CeConsoleMode = CeConsoleMode.Process
@@ -549,8 +617,10 @@ class CeConsoleState {
   /**
    * Computes all 11 console indicator lamps directly from the gate-level [[IldCcu]] and [[Ild0312ConsoleLights]].
    */
-  def computeLamps(ild: IldCcu): Vector[LampState] =
-    ild.computeLamps(displayMode, ceTestInputs, faceplateInstalled, powerOn)
+  def computeLamps(ild: IldCcu): Vector[LampState] = {
+    val probeMask = computeTestProbeMask(ild.signals)
+    ild.computeLamps(displayMode, ceTestInputs | probeMask, faceplateInstalled, powerOn)
+  }
 
   /**
    * Sets the `EDIT MEMORY SELECTOR` 5-position slide switch on a gate-level [[IldCcu]],

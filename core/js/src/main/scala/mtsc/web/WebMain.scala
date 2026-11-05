@@ -61,9 +61,40 @@ object WebMain {
     consoleState.faceplateInstalled = true
     consoleState.viewGalley = true
 
+    // Default CE Test 4..1 Logic Probes to useful backplane signals
+    consoleState.testProbes(3) = CeTestProbe.Prmt
+    consoleState.testProbes(2) = CeTestProbe.Taken
+    consoleState.testProbes(1) = CeTestProbe.CarOver
+    consoleState.testProbes(0) = CeTestProbe.WrAcc
+
     loadProgram(0)
+    populateTestProbeSelects(doc)
     bindEvents(doc)
     renderAll(doc)
+  }
+
+  private def populateTestProbeSelects(doc: js.Dynamic): Unit = {
+    for (testNum <- 1 to 4) {
+      val sel = doc.getElementById(s"ce-probe-select-$testNum")
+      if (sel != null && !js.isUndefined(sel)) {
+        val sb = new StringBuilder()
+        val currentProbe = consoleState.getTestProbe(testNum)
+        for (p <- CeTestProbe.values) {
+          val selectedAttr = if (p == currentProbe) " selected" else ""
+          val escLabel = escapeHtml(s"${p.label} [ILD ${p.sheet}]")
+          sb.append(s"""<option value="${p.id}"$selectedAttr>$escLabel</option>""")
+        }
+        sel.innerHTML = sb.toString()
+        sel.addEventListener("change", (_: js.Dynamic) => {
+          val chosenId = sel.value.toString
+          CeTestProbe.fromId(chosenId).foreach { probe =>
+            consoleState.setTestProbe(testNum, probe)
+          }
+          playClickSound(400)
+          renderAll(doc)
+        })
+      }
+    }
   }
 
   private def loadProgram(idx: Int): Unit = {
@@ -204,6 +235,9 @@ object WebMain {
       InitialLoaderTable.loadIntoMemory(system.memory, paperTape = false, leftStation = false)
       system.cpu.state.mal = Address(42)
       system.cpu.state.halted = false
+      if (system.cpu.isIldMode) {
+        system.cpu.ild.syncSignalsFromState()
+      }
       consoleState.memoryInspectionAddress = Address(32)
       consoleState.log("Keyed 8-byte INITIAL LOADER for Right Station into Core Memory (bytes 40..47, PSAR=42).")
       consoleState.statusMessage = "INITIAL LOADER (Right Station, m=0) loaded into Core Memory (PSAR = 42 / 0x02A)."
@@ -214,6 +248,9 @@ object WebMain {
       InitialLoaderTable.loadIntoMemory(system.memory, paperTape = false, leftStation = true)
       system.cpu.state.mal = Address(42)
       system.cpu.state.halted = false
+      if (system.cpu.isIldMode) {
+        system.cpu.ild.syncSignalsFromState()
+      }
       consoleState.memoryInspectionAddress = Address(32)
       consoleState.log("Keyed 8-byte INITIAL LOADER for Left Station (m=1) into Core Memory (bytes 40..47, PSAR=42).")
       consoleState.statusMessage = "INITIAL LOADER (Left Station, m=1) loaded into Core Memory (PSAR = 42 / 0x02A)."
@@ -276,11 +313,32 @@ object WebMain {
       onClick(s"slider-left-${g.ordinal}", () => {
         consoleState.stepGranularity = g
         consoleState.singleStepMode = g != CeStepGranularity.Auto
+        if (system.cpu.isIldMode) {
+          system.cpu.ild.signals.clockSwitch = g
+        }
         consoleState.log(s"Left CE slide switch set to [${g.label}]")
-        consoleState.statusMessage = s"Step granularity switch set to ${g.label}."
+        consoleState.statusMessage = g match {
+          case CeStepGranularity.Bit =>
+            "Step granularity [Bit]: click [Step] to advance 1 hardware Bit Time (B1-4 -> B5-8 -> B9-12 -> B13-16)."
+          case CeStepGranularity.Word =>
+            "Step granularity [Word]: click [Step] to advance 1 hardware Instruction Time (I-0 -> I-1 -> ... -> I-9)."
+          case CeStepGranularity.ProgramStep =>
+            "Step granularity [P.S.]: click [Step] to execute 1 full Program Step (I-0 -> I-0)."
+          case CeStepGranularity.Jump =>
+            "Step granularity [Jump]: click [Step] to run until the next taken Branch / Incremental Jump instruction."
+          case CeStepGranularity.Auto =>
+            "Step granularity [Auto]: continuous clock enabled."
+        }
         playClickSound(340)
       })
     }
+    onClick("btn-probe-view-clock", () => {
+      consoleState.faceplateInstalled = false
+      consoleState.selectDisplayMode(CeDisplayMode.ClockDefault)
+      consoleState.statusMessage =
+        "CE Chassis exposed in [Clock / Test] mode (Display 0): Lamps 2..5 now display Test 4..1 logic probes."
+      playClickSound(460)
+    })
     for (e <- CeEditSelector.values) {
       onClick(s"slider-right-${e.ordinal}", () => {
         stopContinuousRun()
@@ -678,22 +736,29 @@ object WebMain {
     }
   }
 
+  private def bitTimeLabel(idx: Int): String = idx match {
+    case 0 => "B1-4"
+    case 1 => "B5-8"
+    case 2 => "B9-12"
+    case _ => "B13-16"
+  }
+
+  private def toNibbleBin(n: Int): String = {
+    val v = n & 0xf
+    s"${(v >> 3) & 1}${(v >> 2) & 1}${(v >> 1) & 1}${v & 1}"
+  }
+
   private def stepOnce(doc: js.Dynamic): StepResult = {
     if (!consoleState.powerOn) {
       consoleState.statusMessage = "System Power is OFF. Switch Power to ON."
       return StepResult.Halted
     }
 
-    // Advance Bit / I-Time counters for CE ClockDefault display
-    system.cpu.state.bitTimeCtr = (system.cpu.state.bitTimeCtr + 1) & 0x3
-    if (system.cpu.state.bitTimeCtr == 0) {
-      system.cpu.state.insnTimeCtr = (system.cpu.state.insnTimeCtr + 1) % 10
-    }
-
     val prevPrintCount = system.translator.printCount
     val prevLines = system.paper.lines.length
     val prevAddr = system.memory.psar
-    val res = system.step()
+    val gran = consoleState.stepGranularity
+    val res = system.stepByGranularity(gran)
 
     if (system.translator.printCount > prevPrintCount) {
       if (system.paper.lines.length > prevLines) {
@@ -711,7 +776,23 @@ object WebMain {
       case StepResult.Error(err) =>
         consoleState.statusMessage = s"Execution Error: $err"
       case StepResult.Normal =>
-        consoleState.statusMessage = f"Stepped 0x${prevAddr.unsigned}%03X -> 0x${system.memory.psar.unsigned}%03X."
+        if (system.cpu.isIldMode) {
+          val s = system.cpu.ild.signals
+          val btLbl = bitTimeLabel(s.bitTimeIndex)
+          gran match {
+            case CeStepGranularity.Bit | CeStepGranularity.Word if system.cpu.ild.isMidInstruction =>
+              consoleState.statusMessage =
+                f"[${gran.label}] I-${s.insnTime} • $btLbl | PSAR: 0x${system.memory.psar.unsigned}%03X | MAL: 0x${s.malValue}%03X | PB: 0x${s.pBufferNibble}%X QB: 0x${s.qBufferNibble}%X ACC: 0x${s.accNibble}%X"
+            case CeStepGranularity.Jump =>
+              consoleState.statusMessage =
+                f"[Jump] Taken branch reached: 0x${prevAddr.unsigned}%03X -> 0x${system.memory.psar.unsigned}%03X."
+            case _ =>
+              consoleState.statusMessage =
+                f"Stepped 0x${prevAddr.unsigned}%03X -> 0x${system.memory.psar.unsigned}%03X (I-${s.insnTime}, $btLbl)."
+          }
+        } else {
+          consoleState.statusMessage = f"Stepped 0x${prevAddr.unsigned}%03X -> 0x${system.memory.psar.unsigned}%03X."
+        }
     }
     res
   }
@@ -725,6 +806,7 @@ object WebMain {
     if (consoleState.editSelector != CeEditSelector.Proc) {
       consoleState.selectEditSelector(CeEditSelector.Proc, Some(system.cpu))
     }
+    system.finishCurrentInstruction()
     if (system.cpu.state.halted) {
       if (system.memory.readWord(Address.PowerOn) != Word.Zero) {
         system.cpu.state.halted = false
@@ -780,9 +862,11 @@ object WebMain {
         val res = system.step()
         stepsThisTick += 1
 
-        // Update simulated clock counters for CE lamps
-        system.cpu.state.insnTimeCtr = (stepsThisTick % 6)
-        system.cpu.state.bitTimeCtr = (stepsThisTick & 3)
+        // Update simulated clock counters for CE lamps when in Behavioral mode
+        if (!system.cpu.isIldMode) {
+          system.cpu.state.insnTimeCtr = (stepsThisTick % 6)
+          system.cpu.state.bitTimeCtr = (stepsThisTick & 3)
+        }
 
         if (bootingFromLoader && (system.memory.psar.unsigned < 42 || system.memory.psar.unsigned > 47)) {
           // Step past page-0 trampoline `JMP entryPoint` if present so PSAR lands directly on `0x222`
@@ -1116,6 +1200,8 @@ object WebMain {
     setText("ce-reg-out",  f"0x$out%02X")
     setText("ce-reg-cyc",  f"${system.cpu.state.cycleCount}")
 
+    renderIldTelemetry(doc)
+
     // 32 Working Registers
     val regsEl = doc.getElementById("ce-registers-grid")
     if (regsEl != null && !js.isUndefined(regsEl)) {
@@ -1178,6 +1264,172 @@ object WebMain {
         renderMemoryOverlay(doc, psar, mal)
       }
     }
+  }
+
+  private def renderIldTelemetry(doc: js.Dynamic): Unit = {
+    def setText(id: String, text: String): Unit = {
+      val el = doc.getElementById(id)
+      if (el != null && !js.isUndefined(el)) el.textContent = text
+    }
+
+    def setClassFlag(id: String, cls: String, active: Boolean): Unit = {
+      val el = doc.getElementById(id)
+      if (el != null && !js.isUndefined(el)) {
+        if (active) el.classList.add(cls) else el.classList.remove(cls)
+      }
+    }
+
+    val isIld = system.cpu.isIldMode
+    setClassFlag("ild-translator-strip", "behavioral-dim", !isIld)
+    setClassFlag("ce-ild-inspector",     "behavioral-dim", !isIld)
+
+    val s = system.cpu.ild.signals
+    val curInsnTime = if (isIld) s.insnTime else system.cpu.state.insnTimeCtr
+    val curBitTime  = if (isIld) s.bitTimeIndex else system.cpu.state.bitTimeCtr
+    val strInsnTime = if (isIld) s.steeringInsnTime else ((curInsnTime + 1) % 10)
+    val btLbl       = bitTimeLabel(curBitTime)
+    val phaseTag    = if (s.pOnly) "P-Only" else "P&Q"
+
+    setText("ce-reg-phase", s"I-$curInsnTime • $btLbl ($phaseTag)")
+    setText("ild-str-itime", s"STR → I-$strInsnTime")
+
+    // 1. Instruction Time Strip (I-0..I-9) and Bit Time Strip (B1-4..B13-16)
+    for (i <- 0 to 9) {
+      setClassFlag(s"ild-it-$i", "active",  curInsnTime == i)
+      setClassFlag(s"ild-it-$i", "steered", strInsnTime == i && curInsnTime != i)
+    }
+    for (b <- 0 to 3) {
+      setClassFlag(s"ild-bt-$b", "active", curBitTime == b)
+    }
+
+    // 2. Clock, Phase, Opcode Class & Permute Signals (ILD 0303-0304)
+    setClassFlag("ild-sig-ponly",  "on", s.pOnly)
+    setClassFlag("ild-sig-ptime",  "on", s.pTime)
+    setClassFlag("ild-sig-cenbt",  "on", s.cenBt)
+    setClassFlag("ild-sig-twr",    "on", s.twr)
+    setClassFlag("ild-sig-ath",    "on", s.athOp)
+    setClassFlag("ild-sig-imm",    "on", s.immediate)
+    setClassFlag("ild-sig-jmp",    "on", s.jmp)
+    setClassFlag("ild-sig-prgctl", "on", s.prgCtl)
+    setClassFlag("ild-sig-in",     "on", s.input)
+    setClassFlag("ild-sig-out",    "on", s.output)
+    setClassFlag("ild-sig-prmt",   "on", s.prmt)
+    setClassFlag("ild-sig-set9",   "on", s.set9)
+    setClassFlag("ild-sig-tkn",    "on", s.tkn)
+    setClassFlag("ild-sig-edit",   "on", s.edit)
+
+    // 3. 4-Bit Serial Dataflow, Sense Amps & ALU (ILD 0305, 0308-0310)
+    val pbNib  = if (isIld) s.pBufferNibble else (system.cpu.state.pBuffer & 0xf)
+    val qbNib  = if (isIld) s.qBufferNibble else (system.cpu.state.qBuffer & 0xf)
+    val accNib = s.accNibble
+    val carNib =
+      (if (s.car1) 1 else 0) |
+      (if (s.car2) 2 else 0) |
+      (if (s.car3) 4 else 0) |
+      (if (s.car4) 8 else 0)
+    val inhEvNib =
+      (if (s.senseInhLineEv1) 1 else 0) |
+      (if (s.senseInhLineEv2) 2 else 0) |
+      (if (s.senseInhLineEv3) 4 else 0) |
+      (if (s.senseInhLineEv4) 8 else 0)
+    val inhOddNib =
+      (if (s.senseInhLineOdd1) 1 else 0) |
+      (if (s.senseInhLineOdd2) 2 else 0) |
+      (if (s.senseInhLineOdd3) 4 else 0) |
+      (if (s.senseInhLineOdd4) 8 else 0)
+
+    setText("ild-df-pbfr",      f"${toNibbleBin(pbNib)} (0x$pbNib%X)")
+    setText("ild-df-qbfr",      f"${toNibbleBin(qbNib)} (0x$qbNib%X)")
+    setText("ild-df-acc",       f"${toNibbleBin(accNib)} (0x$accNib%X)")
+    setText("ild-df-car",       f"${toNibbleBin(carNib)} • OVR: ${if (s.carOver) 1 else 0}")
+    setText("ild-df-inh-lines", s"EV: ${toNibbleBin(inhEvNib)} • ODD: ${toNibbleBin(inhOddNib)}")
+
+    setClassFlag("ild-sig-add",     "on", s.add)
+    setClassFlag("ild-sig-sub",     "on", s.notAdd)
+    setClassFlag("ild-sig-carover", "on", s.carOver)
+    setClassFlag("ild-sig-acceqz",  "on", s.accEqualZero)
+    setClassFlag("ild-sig-inhrd",   "on", s.inhRd)
+    setClassFlag("ild-sig-sambt",   "on", s.samBt)
+    setClassFlag("ild-sig-sambpos", "on", s.samBPos)
+    setClassFlag("ild-sig-wrpbfr",  "on", s.wrPBfr)
+    setClassFlag("ild-sig-wracc",   "on", s.wrAcc)
+
+    // 4. 3D 4-Plane Coincident-Current Core Matrix (ILD 0306-0307)
+    setClassFlag("ild-sig-selpsar",  "on", s.selProgStepAddr)
+    setClassFlag("ild-sig-selawd",   "on", s.selAWd)
+    setClassFlag("ild-sig-selbwd",   "on", s.selBWd)
+    setClassFlag("ild-sig-selmemup", "on", s.selMemUp)
+    setClassFlag("ild-sig-rewo",     "on", !s.btCtrA)
+    setClassFlag("ild-sig-rowe",     "on", s.btCtrA)
+
+    val xLine = (s.activeXDriver * 8) + s.activeXSwitch
+    val yLine = (s.activeYDriver * 4) + s.activeYSwitch
+    setText("ild-core-x", s"X-DRV ${s.activeXDriver + 1} × X-SW ${s.activeXSwitch + 1} (X: $xLine)")
+    setText("ild-core-y", s"Y-DRV ${s.activeYDriver + 1} × Y-SW ${s.activeYSwitch + 1} (Y: $yLine)")
+
+    val coreByte = system.cpu.ild.coreMatrix.peekSelectedByte(s)
+    val hiLoLbl = if ((s.activeYSwitch & 1) != 0) "Hi" else "Lo"
+    val targetDesc = if (s.selMemSpec) {
+      val specName = s.activeYDriver match {
+        case 7 => s"SPEC: PSAR $hiLoLbl"
+        case 6 => s"SPEC: A-Word $hiLoLbl"
+        case 5 => s"SPEC: B-Word $hiLoLbl"
+        case d => s"SPEC: Y-Drv ${d + 1} $hiLoLbl"
+      }
+      f"$specName • Byte: 0x$coreByte%02X"
+    } else {
+      val byteAddr = system.cpu.ild.coreMatrix.decodedByteAddress(
+        s.activeXDriver,
+        s.activeXSwitch,
+        s.activeYDriver,
+        s.activeYSwitch
+      )
+      val regTag = if (byteAddr < 64) f" (R${byteAddr / 2}%02d)" else ""
+      f"MEM 0x$byteAddr%03X$regTag • Byte: 0x$coreByte%02X"
+    }
+    setText("ild-core-target", targetDesc)
+    setText(
+      "ild-core-planes",
+      s"EV: ${toNibbleBin(coreByte & 0xf)} • ODD: ${toNibbleBin((coreByte >> 4) & 0xf)}"
+    )
+
+    // 5. CE Test 4..1 Logic Probe LEDs (ILD 0312)
+    for (testNum <- 1 to 4) {
+      val probe = consoleState.getTestProbe(testNum)
+      val level = probe.evaluate(s)
+      setClassFlag(s"ce-probe-led-$testNum", "on", level)
+      setText(s"ce-probe-led-$testNum", if (level) "1" else "0")
+    }
+
+    // 6. Selectric Composer Translator Magnet & Clutch Telemetry Strip (ILD 0311)
+    val outByte = if (isIld) s.outputByte else (system.cpu.state.outputReg & 0xff)
+    val magActive = s.tsltrPr || (s.tsltrSel && outByte != 0 && outByte != 0xff)
+    val magBits = if (s.tsltrPr) s.translatorSelectMagnetsMask else (if (magActive) (outByte & 0x7f) else 0)
+    for (m <- 1 to 7) {
+      val on = ((magBits >> (m - 1)) & 1) == 1
+      setClassFlag(s"ild-mag-$m", "on", on)
+      setClassFlag(s"ild-mag-$m", "pill-amber", on)
+    }
+    setText("ild-tsltr-out-byte", f"OUT: 0x$outByte%02X")
+
+    val isHaltByte = outByte == 0xff
+    val isFnByte   = !isHaltByte && ((outByte & 0x04) != 0 || s.fn)
+    val isTabCrn   = !isHaltByte && s.tabOrCrn
+    val isOrdChar  = !isHaltByte && !isFnByte && !isTabCrn && outByte != 0
+    val translatorBusy = system.translator.busy || system.translator.cycleRemaining > 0 || s.busy
+    val readyLine = !system.cpu.state.inhibit && !translatorBusy && !system.cpu.state.halted
+
+    setClassFlag("ild-tsltr-ord",    "on", isOrdChar)
+    setClassFlag("ild-tsltr-fn",     "on", isFnByte)
+    setClassFlag("ild-tsltr-tabcrn", "on", isTabCrn)
+    setClassFlag("ild-tsltr-dummy",  "on", s.dummy || s.dmyFn)
+    setClassFlag("ild-tsltr-halt",   "on", isHaltByte)
+    setClassFlag("ild-tsltr-sel",    "on", s.tsltrSel)
+    setClassFlag("ild-tsltr-cyccl",  "on", s.tsltrCycCl || (s.tsltrSel && translatorBusy))
+    setClassFlag("ild-tsltr-pr",     "on", s.tsltrPr || (s.tsltrSel && translatorBusy && !s.dummy))
+    setClassFlag("ild-tsltr-mpx",    "on", system.cpu.state.multiplex || s.mpx)
+    setClassFlag("ild-tsltr-bsy",    "on", translatorBusy)
+    setClassFlag("ild-tsltr-rdy",    "on", readyLine)
   }
 
   private def renderMemoryOverlay(doc: js.Dynamic, psar: Int, mal: Int): Unit = {
