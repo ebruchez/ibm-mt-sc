@@ -15,9 +15,10 @@ A technical summary of the hardware, logic packaging, timing, memory, instructio
 |---|---|---|
 | **Logic Technology** | **Low-Speed SLD** | Higher-density packaging of IBM **SLT** (*Solid Logic Technology*) |
 | **Average Gate Delay** | **~450 ns** | Chosen for minimum cost, noise immunity, and convection cooling |
-| **Total Logic Circuits (Gates)** | **~1,000 circuits** | **1,208** ALD circuit blocks on the 34 base cards (**1,247** with Paper Tape; **1,310** with memory cable cards) |
 | **Logic Cards in CCU (`Board B1`)** | **34 SLT/SLD cards** | **35** with Paper Tape option (`+1` card); **37** including 2 memory cable cards (`A5`, `A6`); **+3** for Search SER |
 | **Distinct Card Types (`Board B1`)** | **24 logic card types** | **25** with Paper Tape option; **27** total part numbers in `LR010` Plug List |
+| **SLD/SLT Modules** | **~500–580 modules** | **~17 modules per card** (avg.); each 0.45" square metal-capped module ("can") houses **~3 circuits** |
+| **Total Logic Circuits (Gates)** | **~1,000 active gates** | **1,208** total ALD blocks on the 34 base cards (**1,247** with Paper Tape; **1,310** with memory cable cards) |
 | **Master Clock Frequency** | **240 kHz** | Crystal oscillator driving alternating `SSA` / `SSB` **2.4 µs** single-shots (`8.33 µs` cycle) |
 | **Core Memory Capacity** | **2,048 bytes** | **1,024 16-bit words** (**16,384** general ferrite cores + **48** special-register cores) |
 | **Core Memory Cycle Time** | **25 µs** | **33.3 µs** per `RWW` (P-only) nibble; **50 µs** per `RRWW` (P+Q) nibble (~8 µs intrinsic core speed) |
@@ -38,13 +39,26 @@ The Composer Control Unit (**CCU**, IBM Model 6320) is built on a single logic b
 |---|---|---|
 | **Circuit Family** | **Low-Speed SLD** | Hybrid ceramic modules with discrete flip-chip silicon transistors/diodes and thick-film resistors |
 | **Average Propagation Delay** | **~450 ns** | Per logic circuit |
-| **Modules per Card** | **~17 modules** (avg.) | Functionally packaged; limited primarily by card edge pins |
-| **Circuits per Module** | **~3 circuits** (avg.) | ~50 circuits per double-height card |
+| **Modules per Card** | **~17 modules** (avg.) | Functionally packaged (~500–580 physical modules total); limited by the 44 signal pins per card |
+| **Circuits (Gates) per Module** | **~3 circuits** (avg.) | SLD double-deck ceramic substrates pack ~3 individual gates/inverters inside one 0.45" metal-capped module |
 | **Signal Pins per Card Socket** | **44 pins** | **88 pins** per double-height card |
-| **Distinct Module Schematics** | **69 circuit types** | Documented on ALD Card Circuits sheets `1401`–`1404` (`V` and `S` circuit families) |
+| **Distinct Circuit Schematics** | **69 circuit types** | Documented on ALD Card Circuits sheets `1401`–`1404` (`V` and `S` elementary circuit schematics) |
 | **Backplane Grid (`Board B1`)** | **7 rows × 13 columns** | Rows `1`–`7`, Columns `A`–`N` (skipping `I`) = **91 grid positions** (`65` card sockets used, `11` cable connectors, `15` unused sockets) |
 | **Named Backplane Signals** | **~320 nets** | Indexed across the 8-page ALD Net Listing (`0501`–`0508`) |
 | **Logic Diagram Sheets** | **13 ILDs / 56 ALDs** | Intermediate Logic Diagrams `0301`–`0313`; Automated Logic Diagrams `AA011`–`CC011` |
+
+### Cards vs. SLD Modules ("Cans") vs. ALD Circuit Blocks (Gates)
+
+In IBM SLT/SLD documentation, there are three distinct packaging levels:
+
+1. **Cards (`34` base / `35` with Paper Tape / `37` total on `Board B1`)**:
+   Plug-in printed circuit boards (7 single-height + 27 or 28 double-height logic cards, plus 2 single-height memory cable resistor/jumper cards).
+2. **Physical SLD/SLT Modules (`~17 per card`, or `~500–580 modules` total)**:
+   The 0.45" × 0.45" square aluminum-capped ceramic hybrid packages soldered onto the cards (colloquially referred to as **"cans"**, though IBM officially called the complete package a **module** and the aluminum shell a **cap** or **can**). In **SLD** (*Solid Logic Dense*), two ceramic substrates are stacked inside a single module, allowing an average of **~3 elementary logic circuits (gates)** to share one physical module.
+3. **ALD Circuit Blocks (`~1,000 active gates` / `1,208`–`1,310` total ALD blocks)**:
+   Each rectangular box on the Automated Logic Diagrams (`AA011`–`AA275`) and each 2-character entry (`01`, `02`, ..., `84`) in the `LR010` Socket Listing represents **one elementary circuit** (e.g., a single 3-input diode AND gate `V03CG`, a single transistor inverter `V05AT`, a wired-OR `DOT` junction, or a discrete pull-up resistor `561NF` / decoupling capacitor `561DG`)—**not** a physical module.
+   - For example, the `CLOCK` double card (`5806458` at `G5/6`) has **81 ALD circuit blocks** in the Socket Listing, which physically reside inside **~20–24 modules** on that card (~3–4 circuits per module).
+   - Across the 34 base cards, the **1,208 ALD blocks** comprise the **~1,000 active logic circuits (gates)** cited in the 1968 *IBM Journal of Research and Development* paper plus ~200 wired-OR `DOT` blocks, decoupling capacitors, and discrete resistor networks.
 
 ### Complete `Board B1` Card Inventory (`LR010` Socket Listing & Diagram `1201`)
 
