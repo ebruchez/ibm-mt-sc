@@ -29,6 +29,12 @@ final class IldCcu(
 
   val coreMatrix: CoreMatrix3D = new CoreMatrix3D(memory)
 
+  /** Sub-bit-time (`240 kHz` `SSA`/`SSB`) oscilloscope waveform trace buffer (`MDM Pages 0601 & 0602`). */
+  val timingTrace: IldTimingTraceBuffer = new IldTimingTraceBuffer(192)
+
+  /** Optional evaluator for the 4 CE Test Probe channels (`Test 1..4`) during sub-phase trace recording. */
+  var probeMaskEvaluator: BackplaneSignals => Int = _ => 0
+
   /** Latched output device and multiplex flag captured at `I-2` of `OUTPUT` before `I-4` reloads `Y1..Y11`. */
   private var latchedOutputDevice: Device = Device.Translator
   private var latchedOutputMultiplex: Boolean = false
@@ -81,6 +87,7 @@ final class IldCcu(
     midInstructionQBfrAtI1B5_8 = 0
     Ild0303Clock.reset(signals)
     signals.edit = signals.editSwitch != CeEditSelector.Proc
+    timingTrace.clear()
     ioBus match {
       case sysBus: SystemIoBus => Ild0301To0302MagneticTape.syncStationSensors(signals, sysBus)
       case _                   => ()
@@ -146,6 +153,29 @@ final class IldCcu(
   }
 
   /**
+   * Non-destructively populates [[timingTrace]] with a 2-Word-Time (`I-0` Fetch + `I-1` Decode/Execute)
+   * preview waveform from the current `PSAR` if [[timingTrace]] is empty, without mutating
+   * `memory`, `state`, or `signals`. Automatically cleared on the first live step.
+   */
+  def seedPreviewTraceIfEmpty(): Unit = {
+    if (timingTrace.size > 0) return
+    val scratchMem = CoreMemory.empty()
+    var a = 0
+    while (a < 2048) {
+      scratchMem.writeByte(Address(a), memory.readByte(Address(a)))
+      a += 1
+    }
+    scratchMem.psar = memory.psar
+    scratchMem.aWord = memory.aWord
+    scratchMem.bWord = memory.bWord
+    val scratchIld = new IldCcu(scratchMem, new mtsc.cpu.MockIoBus())
+    scratchIld.probeMaskEvaluator = this.probeMaskEvaluator
+    scratchIld.stepSingleWordTime()
+    scratchIld.stepSingleWordTime()
+    timingTrace.seedPreview(scratchIld.timingTrace.recentSamples(192))
+  }
+
+  /**
    * Advances the CCU by one complete Bit Time (`B1-4`, `B5-8`, `B9-12`, or `B13-16`),
    * executing all sub-phase clock transitions (`Indicator Load`, `Read P`, `BMP STRB T`,
    * optional `Read Q`, `Write Q`, `Write P`, and `Post-Write Transition`) across `0303`–`0310`
@@ -162,13 +192,31 @@ final class IldCcu(
     s.stpClk1 = false
     s.stpClk2 = false
 
+    val curInsnTime = s.insnTime
+    val curBitTime = s.bitTimeIndex
+    inline def rec(pulse: Int, phase: OscSubPhase, coreOp: String = ""): Unit =
+      if (timingTrace.enabled) {
+        timingTrace.record(s, curInsnTime, curBitTime, pulse, phase, coreOp, probeMaskEvaluator)
+      }
+
     // Ensure we are past SSA #1 of the current Bit Time
     if (s.a && s.b && s.pTime && !s.cenBt) {
       Ild0303Clock.stepSubPhase(s, OscSubPhase.SsaOn)
       pulses += 1
       Ild0309OpAndBranch.updateOpCodeLatches(s)
       Ild0308DataFlow.updateCarryIndicator(s)
+      rec(1, OscSubPhase.SsaOn)
       Ild0303Clock.stepSubPhase(s, OscSubPhase.SsaOff)
+      rec(1, OscSubPhase.SsaOff)
+    } else if (timingTrace.enabled) {
+      s.ssa = true
+      s.resInds = true
+      rec(1, OscSubPhase.SsaOn)
+      s.ssa = false
+      s.resInds = false
+      s.ldInds = true
+      rec(1, OscSubPhase.SsaOff)
+      s.ldInds = false
     }
 
     // Sample EDIT switch and clear OPL CDE 1..7 at BEGINNING PROGRAM STEP (I-0, B1-4, P TIME, -CEN BT)
@@ -191,11 +239,13 @@ final class IldCcu(
     // ---------------------------------------------------------------------------------------------
     Ild0303Clock.stepSubPhase(s, OscSubPhase.SsbOn)
     pulses += 1
+    rec(2, OscSubPhase.SsbOn)
     Ild0303Clock.stepSubPhase(s, OscSubPhase.SsbOff)
 
     Ild0305SenseQBuffer.updateQBuffer(s, 0)
     Ild0308DataFlow.updatePBuffer(s)
     Ild0306To0307Address.updateYLatches(s)
+    rec(2, OscSubPhase.SsbOff)
 
     // At I-5, B1-4 of INPUT: poll the addressed input device on IoBus before Read P / CEN BT
     if (s.insnT5 && s.b1_4 && s.input) {
@@ -235,11 +285,15 @@ final class IldCcu(
     val pRawSense = coreMatrix.destructiveReadNibble(s)
     Ild0305SenseQBuffer.updateQBuffer(s, pRawSense)
     Ild0308DataFlow.updatePBuffer(s)
+    rec(3, OscSubPhase.SsaOn, if (s.csYLog) "R-P" else "")
 
     // SSA #2 OFF: RES BFR resets Q BFR 1..4 while P BFR 1..4 retains the P-nibble
+    s.csYLog = false
+    s.readGate = false
     Ild0303Clock.stepSubPhase(s, OscSubPhase.SsaOff)
     Ild0305SenseQBuffer.updateQBuffer(s, 0)
     Ild0308DataFlow.updatePBuffer(s)
+    rec(3, OscSubPhase.SsaOff)
 
     // SSB #2 ON/OFF (CEN BT active): load Input bits, Keyboard Entry Strobe, Output latches, Y1..Y11, and OPL CDE 1..7
     Ild0303Clock.stepSubPhase(s, OscSubPhase.SsbOn)
@@ -295,22 +349,30 @@ final class IldCcu(
       s.lites = s.y8 && s.y9 && s.y10
     }
 
+    rec(4, OscSubPhase.SsbOn)
     Ild0303Clock.stepSubPhase(s, OscSubPhase.SsbOff)
+    rec(4, OscSubPhase.SsbOff)
+
+    val isPOnlyBitTime = s.pOnly
 
     // ---------------------------------------------------------------------------------------------
     // 3. Optional P & Q Cycles: Cycle 3 (BMP STRB T) and Cycle 4 (Read Q-Time) when !pOnly
     // ---------------------------------------------------------------------------------------------
-    if (!s.pOnly) {
+    if (!isPOnlyBitTime) {
       // Cycle 3: BMP STRB T (-A & +B & +CEN BT -> resets P TIME)
       Ild0303Clock.stepSubPhase(s, OscSubPhase.SsaOn)
       pulses += 1
       Ild0305SenseQBuffer.updateQBuffer(s, 0)
       Ild0308DataFlow.evaluateCombinational(s)
+      rec(5, OscSubPhase.SsaOn)
       Ild0303Clock.stepSubPhase(s, OscSubPhase.SsaOff)
+      rec(5, OscSubPhase.SsaOff)
 
       Ild0303Clock.stepSubPhase(s, OscSubPhase.SsbOn)
       pulses += 1
+      rec(6, OscSubPhase.SsbOn)
       Ild0303Clock.stepSubPhase(s, OscSubPhase.SsbOff)
+      rec(6, OscSubPhase.SsbOff)
 
       // Cycle 4: Read Q-Time (+A & -B -> +A & +B, -P TIME, -CEN BT, -TWR)
       Ild0303Clock.stepSubPhase(s, OscSubPhase.SsaOn)
@@ -325,12 +387,20 @@ final class IldCcu(
       val qRawSense = coreMatrix.destructiveReadNibble(s)
       Ild0305SenseQBuffer.updateQBuffer(s, qRawSense)
       Ild0308DataFlow.evaluateCombinational(s)
+      rec(7, OscSubPhase.SsaOn, if (s.csYLog) "R-Q" else "")
 
+      s.csYLog = false
+      s.readGate = false
       Ild0303Clock.stepSubPhase(s, OscSubPhase.SsaOff)
+      rec(7, OscSubPhase.SsaOff)
       Ild0303Clock.stepSubPhase(s, OscSubPhase.SsbOn)
       pulses += 1
+      rec(8, OscSubPhase.SsbOn)
       Ild0303Clock.stepSubPhase(s, OscSubPhase.SsbOff)
+      rec(8, OscSubPhase.SsbOff)
     }
+
+    val wrPulseBase = if (isPOnlyBitTime) 5 else 9
 
     // ---------------------------------------------------------------------------------------------
     // 4. Write Cycle (TWR = true): Write Q (-P TIME) followed by Write P (+P TIME & STR LTH STROBE)
@@ -341,7 +411,9 @@ final class IldCcu(
       Ild0305SenseQBuffer.updateQBuffer(s, 0)
       Ild0308DataFlow.evaluateCombinational(s)
     }
+    rec(wrPulseBase, OscSubPhase.SsaOn)
     Ild0303Clock.stepSubPhase(s, OscSubPhase.SsaOff)
+    rec(wrPulseBase, OscSubPhase.SsaOff)
 
     // Enter SSB ON of Write Cycle (-A & -B & +TWR -> STR LTH STROBE = true)
     s.oscTrigger = false
@@ -365,10 +437,11 @@ final class IldCcu(
       !s.killCsYUpperByte &&
       !preserveAWordDuringMpxI1 &&
       (!s.pOnly || s.selAWd || s.selBWd)
+    s.csYLog = writeQActive
     if (writeQActive) {
-      s.csYLog = true
       coreMatrix.writeInhibitedNibble(s)
     }
+    rec(wrPulseBase + 1, OscSubPhase.SsbOn, if (writeQActive) "W-Q" else "")
 
     // --- 4b. Write P (+P TIME & +TWR & STR LTH STROBE) ---
     s.pTime = true
@@ -377,7 +450,8 @@ final class IldCcu(
     Ild0308DataFlow.evaluateCombinational(s)
     Ild0310WriteInhibit.evaluateCombinational(s)
 
-    s.csYLog = !s.inhibitMemory && !s.killCsYUpperByte && !suppressStalledInputClear
+    val writePActive = !s.inhibitMemory && !s.killCsYUpperByte && !suppressStalledInputClear
+    s.csYLog = writePActive
     coreMatrix.writeInhibitedNibble(s)
 
     // Update LOW / EQUAL condition latches (and 0304 TAKEN / SET 9) at STR LTH STROBE
@@ -397,13 +471,15 @@ final class IldCcu(
       commitOutputDeviceAtI5()
     }
 
-    s.pTime = false
-
     // Update Instruction Time (0304) and Bit Time (0303) steering latches
     Ild0304Permute.updateSteeringLatches(s)
     Ild0303Clock.updateBitSteeringLatches(s)
     Ild0303Clock.evaluateCombinational(s)
+    s.csYLog = writePActive
+    rec(wrPulseBase + 1, OscSubPhase.SsbOff, if (writePActive) "W-P" else "")
 
+    s.csYLog = false
+    s.pTime = false
     Ild0303Clock.stepSubPhase(s, OscSubPhase.SsbOff)
 
     // ---------------------------------------------------------------------------------------------
@@ -411,11 +487,15 @@ final class IldCcu(
     // ---------------------------------------------------------------------------------------------
     Ild0303Clock.stepSubPhase(s, OscSubPhase.SsaOn)
     pulses += 1
+    rec(wrPulseBase + 2, OscSubPhase.SsaOn)
     Ild0303Clock.stepSubPhase(s, OscSubPhase.SsaOff)
+    rec(wrPulseBase + 2, OscSubPhase.SsaOff)
 
     Ild0303Clock.stepSubPhase(s, OscSubPhase.SsbOn)
     pulses += 1
+    rec(wrPulseBase + 3, OscSubPhase.SsbOn)
     Ild0303Clock.stepSubPhase(s, OscSubPhase.SsbOff)
+    rec(wrPulseBase + 3, OscSubPhase.SsbOff)
 
     // Fire SSA #1 of the next Bit Time (RES INDS / LD INDS)
     Ild0303Clock.stepSubPhase(s, OscSubPhase.SsaOn)

@@ -5,6 +5,7 @@ import scala.scalajs.js.annotation.*
 import mtsc.types.*
 import mtsc.isa.{Decoder, Instruction}
 import mtsc.cpu.{CcuEngineMode, StepResult}
+import mtsc.cpu.ild.{IldScopeChannel, IldTimingSample, OscSubPhase}
 import mtsc.asm.Disassembler
 import mtsc.diag.{DiagnosticPrograms, EscapementRoutine}
 import mtsc.periph.*
@@ -39,6 +40,8 @@ object WebMain {
   private var memoryOverlayLayout: String = "2x1k"
   private var showAsciiInOverlay: Boolean = false
   private var selectedTapeTarget: Device = Device.RightTape
+  private var scopePreset: String = "0601"
+  private var scopeSpan: Int = 96
 
   def main(args: Array[String]): Unit = {
     if (js.typeOf(js.Dynamic.global.document) == "undefined") return
@@ -66,6 +69,7 @@ object WebMain {
     consoleState.testProbes(2) = CeTestProbe.Taken
     consoleState.testProbes(1) = CeTestProbe.CarOver
     consoleState.testProbes(0) = CeTestProbe.WrAcc
+    system.cpu.ild.probeMaskEvaluator = s => consoleState.computeTestProbeMask(s)
 
     loadProgram(0)
     populateTestProbeSelects(doc)
@@ -89,6 +93,10 @@ object WebMain {
           val chosenId = sel.value.toString
           CeTestProbe.fromId(chosenId).foreach { probe =>
             consoleState.setTestProbe(testNum, probe)
+          }
+          if (system.cpu.ild.timingTrace.isPreview) {
+            system.cpu.ild.timingTrace.clear()
+            system.cpu.ild.seedPreviewTraceIfEmpty()
           }
           playClickSound(400)
           renderAll(doc)
@@ -144,6 +152,9 @@ object WebMain {
       system.memory.writeByte(Address(316 + sample.length), 0)
     }
 
+    system.cpu.ild.timingTrace.clear()
+    system.cpu.ild.seedPreviewTraceIfEmpty()
+
     consoleState.log(f"Loaded '${prog.name}' at PSAR 0x${system.memory.psar.unsigned}%03X.")
     consoleState.statusMessage = s"Loaded ${prog.name}. Press Run or START to begin composition."
   }
@@ -170,6 +181,7 @@ object WebMain {
       stopContinuousRun()
       system.operatorPanel.powerSwitch = PowerSwitchPosition.Reset
       system.reset()
+      system.cpu.ild.seedPreviewTraceIfEmpty()
       system.operatorPanel.powerSwitch = PowerSwitchPosition.On
       consoleState.powerOn = true
       consoleState.log("Power Rocker momentary RESET: Master Reset (PSAR = 0x222).")
@@ -636,6 +648,55 @@ object WebMain {
         }
       })
     }
+
+    // 240 kHz Single-Shot (SSA/SSB) Oscilloscope / Timing Diagram Controls
+    val scopePresetEl = doc.getElementById("ild-scope-preset")
+    if (scopePresetEl != null && !js.isUndefined(scopePresetEl)) {
+      scopePresetEl.addEventListener("change", (ev: js.Dynamic) => {
+        scopePreset = ev.target.value.toString
+        playClickSound(420)
+        renderIldOscilloscope(doc)
+      })
+    }
+
+    val scopeSpanEl = doc.getElementById("ild-scope-span")
+    if (scopeSpanEl != null && !js.isUndefined(scopeSpanEl)) {
+      scopeSpanEl.addEventListener("change", (ev: js.Dynamic) => {
+        scopeSpan = ev.target.value.toString.toIntOption.getOrElse(96)
+        playClickSound(420)
+        renderIldOscilloscope(doc)
+      })
+    }
+
+    onClick("btn-scope-step-bit", () => {
+      stopContinuousRun()
+      if (!system.cpu.isIldMode) {
+        system.setEngineMode(CcuEngineMode.Ild)
+      }
+      val _ = system.stepByGranularity(CeStepGranularity.Bit)
+      val s = system.cpu.ild.signals
+      consoleState.statusMessage =
+        f"[Scope +1 Bit Time] I-${s.insnTime} • ${bitTimeLabel(s.bitTimeIndex)} | PSAR: 0x${system.memory.psar.unsigned}%03X | MAL: 0x${s.malValue}%03X | PB: 0x${s.pBufferNibble}%X QB: 0x${s.qBufferNibble}%X ACC: 0x${s.accNibble}%X"
+      playClickSound(540)
+    })
+
+    onClick("btn-scope-step-word", () => {
+      stopContinuousRun()
+      if (!system.cpu.isIldMode) {
+        system.setEngineMode(CcuEngineMode.Ild)
+      }
+      val _ = system.stepByGranularity(CeStepGranularity.Word)
+      val s = system.cpu.ild.signals
+      consoleState.statusMessage =
+        f"[Scope +1 Word Time] I-${s.insnTime} • ${bitTimeLabel(s.bitTimeIndex)} | PSAR: 0x${system.memory.psar.unsigned}%03X | MAL: 0x${s.malValue}%03X | PB: 0x${s.pBufferNibble}%X QB: 0x${s.qBufferNibble}%X ACC: 0x${s.accNibble}%X"
+      playClickSound(500)
+    })
+
+    onClick("btn-scope-clear", () => {
+      system.cpu.ild.timingTrace.clear()
+      consoleState.statusMessage = "Oscilloscope trace buffer cleared. Step by Bit or Word to capture 240 kHz SSA/SSB waveforms."
+      playClickSound(380)
+    })
 
     // Keyboard shortcuts
     js.Dynamic.global.window.addEventListener("keydown", (ev: js.Dynamic) => {
@@ -1283,6 +1344,7 @@ object WebMain {
     setClassFlag("ild-mt-strip",         "behavioral-dim", !isIld)
     setClassFlag("ild-translator-strip", "behavioral-dim", !isIld)
     setClassFlag("ce-ild-inspector",     "behavioral-dim", !isIld)
+    setClassFlag("ce-ild-scope-panel",   "behavioral-dim", !isIld)
 
     val s = system.cpu.ild.signals
     val curInsnTime = if (isIld) s.insnTime else system.cpu.state.insnTimeCtr
@@ -1474,6 +1536,307 @@ object WebMain {
     setClassFlag("ild-mt-sch",      "on", s.mtSch || s.trSchSta)
     setClassFlag("ild-mt-setlo",    "on", s.setLo)
     setClassFlag("ild-mt-err",      "on", s.errorLite)
+
+    // 8. 240 kHz Single-Shot (SSA/SSB) Oscilloscope / Timing Diagram (MDM 0601–0602)
+    renderIldOscilloscope(doc)
+  }
+
+  private final case class ScopeRowSpec(
+    label: String,
+    pin: String,
+    color: String,
+    eval: IldTimingSample => Boolean
+  )
+
+  private def channelColor(ch: IldScopeChannel): String = ch match {
+    case IldScopeChannel.Ssa | IldScopeChannel.Ssb =>
+      "#5ce1e6" // Cyan oscillator single-shot trace
+    case IldScopeChannel.CsXLog | IldScopeChannel.CsYLog | IldScopeChannel.WrPBfr |
+         IldScopeChannel.WrAccum | IldScopeChannel.InhRead | IldScopeChannel.ResBfr =>
+      "#ffb443" // Amber core read/write current & buffer trace
+    case IldScopeChannel.POnly | IldScopeChannel.SelPsar | IldScopeChannel.SelAWd |
+         IldScopeChannel.SelBWd | IldScopeChannel.SelMemSpec | IldScopeChannel.LoadY |
+         IldScopeChannel.Rewo | IldScopeChannel.Rowe | IldScopeChannel.CarOver =>
+      "#68b5ff" // Sky-blue memory allocation & address decode trace
+    case _ =>
+      "#3ddc84" // P31 phosphor green clock & strobe trace
+  }
+
+  private def renderIldOscilloscope(doc: js.Dynamic): Unit = {
+    val vp = doc.getElementById("ild-scope-viewport")
+    if (vp == null || !(!js.isUndefined(vp))) return
+
+    val cursorEl = doc.getElementById("ild-scope-cursor-info")
+    def setCursorText(txt: String): Unit = {
+      if (cursorEl != null && !js.isUndefined(cursorEl)) {
+        cursorEl.textContent = txt
+      }
+    }
+
+    val trace = system.cpu.ild.timingTrace
+    val samples = trace.recentSamples(scopeSpan)
+
+    if (samples.isEmpty) {
+      vp.innerHTML =
+        """<div style="padding: 18px; color: #7ca392; font-family: var(--font-mono); font-size: 11px; text-align: center;">Oscilloscope trace buffer is empty. Click <strong>+1 Bit Time</strong>, <strong>+1 Word Time</strong>, or <strong>Step</strong> to capture 240 kHz SSA/SSB sub-phase waveforms.</div>"""
+      setCursorText("Trace empty — click [+1 Bit Time] or [+1 Word Time] to capture 240 kHz SSA/SSB waveforms.")
+      return
+    }
+
+    val baseChannels: Vector[IldScopeChannel] = scopePreset match {
+      case "0602"   => IldScopeChannel.Preset0602MemoryLogic
+      case "probes" => IldScopeChannel.PresetClockReference
+      case _        => IldScopeChannel.Preset0601BasicClock
+    }
+
+    val baseRows: Vector[ScopeRowSpec] = baseChannels.map { ch =>
+      ScopeRowSpec(ch.label, ch.pin, channelColor(ch), smp => smp.channel(ch))
+    }
+
+    val rows: Vector[ScopeRowSpec] =
+      if (scopePreset == "probes") {
+        val probeRows = Vector(4, 3, 2, 1).map { tNum =>
+          val p = consoleState.getTestProbe(tNum)
+          val bitIdx = tNum - 1
+          ScopeRowSpec(
+            s"TEST $tNum: ${p.label}",
+            s"ILD ${p.sheet}",
+            "#e08aff",
+            smp => ((smp.probeMask >> bitIdx) & 1) != 0
+          )
+        }
+        baseRows ++ probeRows
+      } else {
+        baseRows
+      }
+
+    val n = samples.length
+    val sampleW: Int = if (scopeSpan <= 24) 28 else if (scopeSpan <= 96) 10 else 6
+    val labelColW = 152
+    val headerH = 38
+    val rowH = 22
+    val footerH = 34
+    val totalW = labelColW + n * sampleW + 10
+    val totalH = headerH + rows.length * rowH + footerH
+
+    // Compute Bit Time contiguous spans: (startIdx, endIdx)
+    val bitSpans = scala.collection.mutable.ArrayBuffer[(Int, Int)]()
+    var spanStart = 0
+    var i = 1
+    while (i < n) {
+      val prev = samples(i - 1)
+      val cur  = samples(i)
+      val isNewBit =
+        cur.insnTime != prev.insnTime ||
+        cur.bitTimeIndex != prev.bitTimeIndex ||
+        (cur.pulseInBitTime == 1 && cur.subPhase == OscSubPhase.SsaOn)
+      if (isNewBit) {
+        bitSpans += ((spanStart, i - 1))
+        spanStart = i
+      }
+      i += 1
+    }
+    bitSpans += ((spanStart, n - 1))
+
+    val sb = new StringBuilder(32768)
+    sb.append(
+      s"""<svg id="ild-scope-svg" class="ild-scope-svg" width="$totalW" height="$totalH" viewBox="0 0 $totalW $totalH" xmlns="http://www.w3.org/2000/svg" style="cursor: crosshair; user-select: none;">"""
+    )
+
+    // 1. Background & Left Label Column Backing
+    sb.append(s"""<rect x="0" y="0" width="$totalW" height="$totalH" fill="#060d0b"/>""")
+    sb.append(s"""<rect x="0" y="0" width="$labelColW" height="$totalH" fill="#091411"/>""")
+    sb.append(s"""<rect x="0" y="0" width="$totalW" height="$headerH" fill="#0b1814"/>""")
+    sb.append(s"""<line x1="$labelColW" y1="0" x2="$labelColW" y2="$totalH" stroke="#234237" stroke-width="1"/>""")
+    sb.append(s"""<line x1="0" y1="$headerH" x2="$totalW" y2="$headerH" stroke="#234237" stroke-width="1"/>""")
+
+    // Header Left Labels
+    sb.append(s"""<text x="8" y="13" fill="#88b8a5" font-family="IBM Plex Mono, monospace" font-size="9.5" font-weight="700">SIGNAL / B1 PIN</text>""")
+    sb.append(s"""<text x="8" y="31" fill="#638c7c" font-family="IBM Plex Mono, monospace" font-size="8.5">240 kHz PULSE • CORE OP</text>""")
+
+    // 2. Bit-Time Alternating Tints, Header Banners, and Bottom Bus Readouts
+    val busY = headerH + rows.length * rowH
+    sb.append(s"""<rect x="0" y="$busY" width="$totalW" height="$footerH" fill="#091310"/>""")
+    sb.append(s"""<line x1="0" y1="$busY" x2="$totalW" y2="$busY" stroke="#234237" stroke-width="1"/>""")
+    sb.append(s"""<text x="8" y="${busY + 14}" fill="#ffb443" font-family="IBM Plex Mono, monospace" font-size="9" font-weight="600">P-BFR / Q-BFR</text>""")
+    sb.append(s"""<text x="8" y="${busY + 27}" fill="#3ddc84" font-family="IBM Plex Mono, monospace" font-size="9" font-weight="600">ACCUMULATOR (4b)</text>""")
+
+    for (spanIdx <- bitSpans.indices) {
+      val (sIdx, eIdx) = bitSpans(spanIdx)
+      val firstSmp = samples(sIdx)
+      val lastSmp  = samples(eIdx)
+      val x0 = labelColW + sIdx * sampleW
+      val w  = (eIdx - sIdx + 1) * sampleW
+      val isPOnly = firstSmp.channel(IldScopeChannel.POnly)
+      val isWordBoundary = firstSmp.bitTimeIndex == 0 && firstSmp.pulseInBitTime == 1 && firstSmp.subPhase == OscSubPhase.SsaOn
+
+      // Alternating Bit-Time column tint
+      if (spanIdx % 2 == 1) {
+        sb.append(s"""<rect x="$x0" y="$headerH" width="$w" height="${rows.length * rowH}" fill="rgba(28, 66, 52, 0.14)"/>""")
+      }
+
+      // Top Bit-Time Banner Box
+      val bannerFill = if (isPOnly) "#10241d" else "#1c2212"
+      val bannerTextCol = if (isPOnly) "#7be0b5" else "#ffd275"
+      sb.append(s"""<rect x="$x0" y="0" width="$w" height="18" fill="$bannerFill" stroke="#234237" stroke-width="0.6"/>""")
+      if (w >= 46) {
+        val modeTag = if (isPOnly) "P" else "P&amp;Q"
+        val lbl = if (w >= 96) s"I-${firstSmp.insnTime} • ${firstSmp.bitTimeLabel} ($modeTag)" else s"I-${firstSmp.insnTime} ${firstSmp.bitTimeLabel}"
+        sb.append(s"""<text x="${x0 + w / 2}" y="12.5" fill="$bannerTextCol" font-family="IBM Plex Mono, monospace" font-size="9.5" font-weight="700" text-anchor="middle">$lbl</text>""")
+      }
+
+      // Vertical boundary line
+      val lineCol = if (isWordBoundary) "#4ca687" else "#1f3d32"
+      val lineW   = if (isWordBoundary) "1.4" else "0.9"
+      sb.append(s"""<line x1="$x0" y1="0" x2="$x0" y2="$totalH" stroke="$lineCol" stroke-width="$lineW"/>""")
+
+      // Bottom Nibble Bus Readout Box
+      if (w >= 38) {
+        val pbHex  = f"0x${lastSmp.pBufferNibble}%X"
+        val qbHex  = f"0x${lastSmp.qBufferNibble}%X"
+        val accHex = f"0x${lastSmp.accNibble}%X"
+        val pqTxt = if (w >= 72) s"PB:$pbHex QB:$qbHex" else s"P:${pbHex.drop(2)} Q:${qbHex.drop(2)}"
+        val accTxt = if (w >= 72) s"ACC:$accHex (${toNibbleBin(lastSmp.accNibble)})" else s"ACC:$accHex"
+        sb.append(s"""<text x="${x0 + w / 2}" y="${busY + 13}" fill="#ffca7a" font-family="IBM Plex Mono, monospace" font-size="8.8" text-anchor="middle">$pqTxt</text>""")
+        sb.append(s"""<text x="${x0 + w / 2}" y="${busY + 26}" fill="#65e8a3" font-family="IBM Plex Mono, monospace" font-size="8.8" text-anchor="middle">$accTxt</text>""")
+      }
+    }
+
+    // 3. Single-Shot Pulse Grid Lines & Core Op Badges (R-P, R-Q, W-Q, W-P)
+    var k = 0
+    while (k < n) {
+      val smp = samples(k)
+      val x = labelColW + k * sampleW
+
+      // Vertical grid line at the start of each single-shot pulse (SsaOn or SsbOn)
+      if (smp.subPhase == OscSubPhase.SsaOn || smp.subPhase == OscSubPhase.SsbOn) {
+        sb.append(s"""<line x1="$x" y1="18" x2="$x" y2="$busY" stroke="#11241d" stroke-width="0.6"/>""")
+        if (sampleW >= 10 && (smp.pulseInBitTime % 2 == 1 || sampleW >= 20)) {
+          sb.append(s"""<text x="${x + sampleW}" y="31" fill="#4f7567" font-family="IBM Plex Mono, monospace" font-size="8" text-anchor="middle">${smp.pulseInBitTime}</text>""")
+        }
+      }
+
+      // Core Read/Write Operation Badge in Header Row 2
+      if (smp.coreOp.nonEmpty) {
+        val isRead = smp.coreOp.startsWith("R")
+        val badgeFill = if (isRead) "rgba(92, 225, 230, 0.22)" else "rgba(255, 180, 67, 0.25)"
+        val badgeStroke = if (isRead) "#5ce1e6" else "#ffb443"
+        val badgeText = if (isRead) "#8ef2f5" else "#ffd085"
+        val bw = math.max(sampleW, 18)
+        val bx = x + (sampleW - bw) / 2.0
+        sb.append(s"""<rect x="$bx" y="19.5" width="$bw" height="15" rx="2.5" fill="$badgeFill" stroke="$badgeStroke" stroke-width="0.7"/>""")
+        sb.append(s"""<text x="${x + sampleW / 2.0}" y="29.5" fill="$badgeText" font-family="IBM Plex Mono, monospace" font-size="8" font-weight="700" text-anchor="middle">${smp.coreOp}</text>""")
+      }
+      k += 1
+    }
+
+    // 4. Channel Rows & Square-Wave Paths
+    for (rIdx <- rows.indices) {
+      val row = rows(rIdx)
+      val yTop = headerH + rIdx * rowH
+      val yHigh = yTop + 5.0
+      val yLow  = yTop + rowH - 4.0
+
+      // Row divider & baseline
+      sb.append(s"""<line x1="0" y1="${yTop + rowH}" x2="$totalW" y2="${yTop + rowH}" stroke="#12241d" stroke-width="0.7"/>""")
+      sb.append(s"""<line x1="$labelColW" y1="$yLow" x2="${labelColW + n * sampleW}" y2="$yLow" stroke="#162b23" stroke-width="0.6" stroke-dasharray="2,2"/>""")
+
+      // Left channel label & B1 backplane pin
+      val escLbl = escapeHtml(row.label)
+      val escPin = escapeHtml(row.pin)
+      sb.append(s"""<text x="8" y="${yTop + 14.5}" fill="${row.color}" font-family="IBM Plex Mono, monospace" font-size="9.5" font-weight="600">$escLbl</text>""")
+      sb.append(s"""<text x="${labelColW - 6}" y="${yTop + 14.5}" fill="#598273" font-family="IBM Plex Mono, monospace" font-size="8.5" text-anchor="end">$escPin</text>""")
+
+      // Build square wave path and high-level fill rects
+      val pathSb = new StringBuilder(512)
+      var prevLevel = false
+      var sIdx = 0
+      while (sIdx < n) {
+        val level = row.eval(samples(sIdx))
+        val x0 = labelColW + sIdx * sampleW
+        val x1 = x0 + sampleW
+        val y  = if (level) yHigh else yLow
+
+        if (level) {
+          sb.append(s"""<rect x="$x0" y="$yHigh" width="$sampleW" height="${yLow - yHigh}" fill="${row.color}" fill-opacity="0.13"/>""")
+        }
+
+        if (sIdx == 0) {
+          pathSb.append(s"M $x0 $y L $x1 $y")
+        } else {
+          if (level != prevLevel) {
+            pathSb.append(s" L $x0 $y")
+          }
+          pathSb.append(s" L $x1 $y")
+        }
+        prevLevel = level
+        sIdx += 1
+      }
+
+      sb.append(s"""<path d="$pathSb" fill="none" stroke="${row.color}" stroke-width="1.5" stroke-linejoin="miter"/>""")
+    }
+
+    // 5. Interactive Hover Crosshair Line
+    sb.append(
+      s"""<line id="ild-scope-crosshair" x1="-10" y1="0" x2="-10" y2="$totalH" stroke="#ffffff" stroke-width="1" stroke-dasharray="3,2" opacity="0.0" pointer-events="none"/>"""
+    )
+
+    sb.append("</svg>")
+    vp.innerHTML = sb.toString()
+
+    // Set default status summary on cursor bar
+    val first = samples.head
+    val last  = samples.last
+    val spanUs = n * 2.0833333
+    val previewBadge = if (trace.isPreview) "[INITIAL PREVIEW @ PSAR] " else "[LIVE CAPTURE] "
+    val defaultSummary =
+      f"$previewBadge$n sub-phases (${spanUs}%.1f µs @ 240 kHz) • I-${first.insnTime} ${first.bitTimeLabel} → I-${last.insnTime} ${last.bitTimeLabel} • Hover waveform to inspect sub-bit timing"
+    setCursorText(defaultSummary)
+
+    // Attach mousemove / mouseleave listener to the SVG for interactive sub-phase inspection
+    val svgEl = doc.getElementById("ild-scope-svg")
+    val crossEl = doc.getElementById("ild-scope-crosshair")
+    if (svgEl != null && !js.isUndefined(svgEl)) {
+      svgEl.addEventListener("mousemove", (ev: js.Dynamic) => {
+        val rect = svgEl.getBoundingClientRect()
+        val relX = ev.clientX.asInstanceOf[Double] - rect.left.asInstanceOf[Double]
+        val idx = math.floor((relX - labelColW) / sampleW).toInt
+        if (idx >= 0 && idx < n) {
+          val smp = samples(idx)
+          if (crossEl != null && !js.isUndefined(crossEl)) {
+            val cx = labelColW + idx * sampleW + sampleW / 2.0
+            crossEl.setAttribute("x1", cx.toString)
+            crossEl.setAttribute("x2", cx.toString)
+            crossEl.setAttribute("opacity", "0.75")
+          }
+          val timeUs = smp.sampleIndex * 2.0833333
+          val phaseName = smp.subPhase match {
+            case OscSubPhase.SsaOn  => "SSA ON (2.4µs)"
+            case OscSubPhase.SsaOff => "SSA OFF (1.8µs)"
+            case OscSubPhase.SsbOn  => "SSB ON (2.4µs)"
+            case OscSubPhase.SsbOff => "SSB OFF (1.8µs)"
+          }
+          val maxPulses = if (smp.channel(IldScopeChannel.POnly)) 8 else 12
+          val coreTag = if (smp.coreOp.nonEmpty) s" • Core: [${smp.coreOp}]" else ""
+          val modeTag = if (smp.channel(IldScopeChannel.POnly)) "P-Only" else "P&Q"
+          setCursorText(
+            f"t = $timeUs%.1f µs (#${smp.sampleIndex}) • I-${smp.insnTime} ${smp.bitTimeLabel} ($modeTag) • Pulse ${smp.pulseInBitTime}/$maxPulses [$phaseName]$coreTag • PB:0x${smp.pBufferNibble}%X QB:0x${smp.qBufferNibble}%X ACC:0x${smp.accNibble}%X"
+          )
+        } else {
+          if (crossEl != null && !js.isUndefined(crossEl)) {
+            crossEl.setAttribute("opacity", "0.0")
+          }
+          setCursorText(defaultSummary)
+        }
+      })
+
+      svgEl.addEventListener("mouseleave", (_: js.Dynamic) => {
+        if (crossEl != null && !js.isUndefined(crossEl)) {
+          crossEl.setAttribute("opacity", "0.0")
+        }
+        setCursorText(defaultSummary)
+      })
+    }
   }
 
   private def renderMemoryOverlay(doc: js.Dynamic, psar: Int, mal: Int): Unit = {

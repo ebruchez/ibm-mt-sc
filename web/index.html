@@ -728,6 +728,36 @@
             </div>
           </div>
         </div>
+
+        <!-- Sub-Bit-Time (240 kHz Single-Shot SSA/SSB) Oscilloscope & Timing Diagram (MDM 0601–0602) -->
+        <div id="ce-ild-scope-panel" class="ce-panel ild-card ild-scope-card">
+          <div class="ild-scope-toolbar">
+            <div class="ild-scope-title-group">
+              <h3>240 kHz Single-Shot (SSA/SSB) Timing Diagram &amp; Oscilloscope <span class="ild-sheet-tag">MDM 0601–0602</span></h3>
+              <span id="ild-scope-cursor-info" class="ild-scope-cursor-readout">Hover any waveform column to inspect sub-bit-time (2.08 µs) state</span>
+            </div>
+            <div class="ild-scope-controls">
+              <label class="ild-scope-ctl-lbl">Channels:
+                <select id="ild-scope-preset" class="ild-probe-select ild-scope-select">
+                  <option value="0601" selected>MDM 0601: Basic Clock &amp; Timing (15 ch)</option>
+                  <option value="0602">MDM 0602: Core Memory &amp; Write Gates (15 ch)</option>
+                  <option value="probes">Clock Ref + CE Test 4..1 Probes (13 ch)</option>
+                </select>
+              </label>
+              <label class="ild-scope-ctl-lbl">Span:
+                <select id="ild-scope-span" class="ild-probe-select ild-scope-select">
+                  <option value="24">1 Bit Time (16–24 sub-phases • 33–50 µs)</option>
+                  <option value="96" selected>1 Word Time / 4 Bit Times (64–96 sub-phases)</option>
+                  <option value="192">2 Word Times / 8 Bit Times (128–192 sub-phases)</option>
+                </select>
+              </label>
+              <button id="btn-scope-step-bit" type="button" class="btn-chip" title="Step 1 Bit Time (8 P-Only or 12 P&amp;Q single-shot pulses) and capture trace">+1 Bit Time</button>
+              <button id="btn-scope-step-word" type="button" class="btn-chip" title="Step 1 Word Time (4 Bit Times: B1-4..B13-16) and capture trace">+1 Word Time</button>
+              <button id="btn-scope-clear" type="button" class="btn-chip" title="Clear recorded oscilloscope trace buffer">Clear Trace</button>
+            </div>
+          </div>
+          <div id="ild-scope-viewport" class="ild-scope-viewport" aria-label="240 kHz SSA/SSB Timing Diagram"></div>
+        </div>
       </div>
 
       <div class="ce-drawer-grid">

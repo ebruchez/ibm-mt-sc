@@ -505,4 +505,71 @@ class IldMilestone3Suite extends munit.FunSuite {
     assertEquals(sys.memory.readReg(RegId(2)), Word(8))
     assertEquals(sys.memory.psar, Address(0x22a))
   }
+
+  test("MDM 0601–0602 Sub-Bit-Time (240 kHz SSA/SSB) Oscilloscope Trace records P-Only (16) and P&Q (24) sub-phases") {
+    import mtsc.asm.Assembler
+    import mtsc.console.{CeConsoleState, CeStepGranularity, CeTestProbe}
+    import mtsc.periph.MtscSystem
+
+    val sys = new MtscSystem()
+    val state = new CeConsoleState()
+    state.setTestProbe(4, CeTestProbe.POnly)
+    state.setTestProbe(3, CeTestProbe.PTime)
+    sys.cpu.ild.probeMaskEvaluator = s => state.computeTestProbeMask(s)
+
+    val Right(img) = Assembler.assemble(
+      """        .org 0x222
+        |        MOVI R2, 5
+        |""".stripMargin
+    ): @unchecked
+    sys.loadProgram(img)
+    sys.cpu.ild.timingTrace.clear()
+    assertEquals(sys.cpu.ild.timingTrace.size, 0)
+
+    // 1. Seed non-destructive preview trace and verify it leaves PSAR & state untouched
+    sys.cpu.ild.seedPreviewTraceIfEmpty()
+    assert(sys.cpu.ild.timingTrace.isPreview)
+    assertEquals(sys.cpu.ild.timingTrace.size, 160) // 4 P-Only Bit Times (64) + 4 P&Q Bit Times (96) = 160 sub-phases
+    assertEquals(sys.memory.psar, Address(0x222))
+    assert(!sys.cpu.ild.isMidInstruction)
+
+    // 2. Step 1 live P-Only Bit Time (I-0, B1-4): automatically replaces preview with 16 live sub-phases (8 pulses)
+    sys.stepByGranularity(CeStepGranularity.Bit)
+    assert(!sys.cpu.ild.timingTrace.isPreview)
+    assertEquals(sys.cpu.ild.timingTrace.size, 16)
+
+    val i0b1Samples = sys.cpu.ild.timingTrace.recentSamples(16)
+    assertEquals(i0b1Samples.map(_.pulseInBitTime).distinct, Vector(1, 2, 3, 4, 5, 6, 7, 8))
+    assert(i0b1Samples.forall(smp => smp.insnTime == 0 && smp.bitTimeIndex == 0))
+    assert(i0b1Samples.forall(_.channel(IldScopeChannel.POnly)))
+    assert(i0b1Samples.forall(_.channel(IldScopeChannel.SelPsar)))
+
+    // Pulse 3 SsaOn (index 4) performs Core Read P ("R-P") and Pulse 6 SsbOff (index 11) performs Core Write P ("W-P")
+    assertEquals(i0b1Samples(4).coreOp, "R-P")
+    assert(i0b1Samples(4).channel(IldScopeChannel.CsYLog))
+    assertEquals(i0b1Samples(11).coreOp, "W-P")
+    assert(i0b1Samples(11).channel(IldScopeChannel.StrLthStrb))
+
+    // Verify custom CE Test Probe 4 (+P ONLY -> bit 3 of probeMask) is captured in sub-phase samples
+    assert(i0b1Samples.forall(smp => ((smp.probeMask >> 3) & 1) == 1))
+
+    // 3. Step the remaining 3 Bit Times of I-0 (B5-8, B9-12, B13-16 -> 48 more samples = 64 total)
+    sys.stepByGranularity(CeStepGranularity.Bit)
+    sys.stepByGranularity(CeStepGranularity.Bit)
+    sys.stepByGranularity(CeStepGranularity.Bit)
+    assertEquals(sys.cpu.ild.timingTrace.size, 64)
+    assertEquals(sys.cpu.ild.signals.insnTime, 1)
+    assertEquals(sys.cpu.ild.signals.bitTimeIndex, 0)
+
+    // 4. Step 1 P & Q Bit Time (I-1, B1-4): records 24 sub-phase samples (12 single-shot pulses)
+    sys.stepByGranularity(CeStepGranularity.Bit)
+    assertEquals(sys.cpu.ild.timingTrace.size, 88) // 64 + 24 = 88
+    val i1b1Samples = sys.cpu.ild.timingTrace.recentSamples(24)
+    assertEquals(i1b1Samples.map(_.pulseInBitTime).distinct, (1 to 12).toVector)
+    assert(i1b1Samples.forall(smp => smp.insnTime == 1 && smp.bitTimeIndex == 0))
+    assert(i1b1Samples.forall(smp => !smp.channel(IldScopeChannel.POnly)))
+
+    // Verify all 4 Core operations in a P & Q Bit Time: R-P (Pulse 3), R-Q (Pulse 7), W-Q (Pulse 10 SsbOn), W-P (Pulse 10 SsbOff)
+    assertEquals(i1b1Samples.filter(_.coreOp.nonEmpty).map(_.coreOp), Vector("R-P", "R-Q", "W-Q", "W-P"))
+  }
 }
