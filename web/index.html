@@ -758,6 +758,35 @@
           </div>
           <div id="ild-scope-viewport" class="ild-scope-viewport" aria-label="240 kHz SSA/SSB Timing Diagram"></div>
         </div>
+
+        <!-- Physical Backplane Card Cage: Electronic Gate BOARD A1 (Core Memory) & BOARD B1 (SLD Card Cage) (MDM 1201 & LR010) -->
+        <div id="ce-ild-cage-panel" class="ce-panel ild-card ild-cage-card">
+          <div class="ild-scope-toolbar">
+            <div class="ild-scope-title-group">
+              <h3>Electronic Gate Swing-Out Frame: BOARD A1 (Core Memory &amp; Diode Board) &amp; BOARD B1 (SLD Card Cage) <span class="ild-sheet-tag">MDM 1201 • LR010</span></h3>
+              <span class="ild-scope-cursor-readout">Click any SLD card, GMS driver, or ribbon cable in BOARD B1 (Cols A..N × Rows 1..7) to inspect live pins &amp; attach CE Test Probes</span>
+            </div>
+            <div class="ild-scope-controls">
+              <label class="ild-scope-ctl-lbl">Highlight Subsystem:
+                <select id="ild-cage-filter" class="ild-probe-select ild-scope-select">
+                  <option value="all" selected>All Subsystems (29 Cards + 8 Cables)</option>
+                  <option value="clock">Clock, Osc &amp; I-Time (0303–0304)</option>
+                  <option value="core">Core Array &amp; X/Y Drivers (0306–0307)</option>
+                  <option value="sense">Sense Amps, Inhibit &amp; Protect (0305, 0310)</option>
+                  <option value="alu">4-Bit Serial Data Flow &amp; ALU (0308–0309)</option>
+                  <option value="mt">Magnetic Tape Reader Logic (0301–0302)</option>
+                  <option value="io">Console, Lights &amp; Translator I/O (0311–0312)</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <!-- 2-Bay Cast-Aluminum Swing-Out Gate Frame (BOARD A1 Left + BOARD B1 Right) -->
+          <div id="ild-cage-viewport" class="ild-cage-viewport"></div>
+
+          <!-- Selected SLD Card & Backplane Pin Inspector -->
+          <div id="ild-card-inspector" class="ild-card-inspector"></div>
+        </div>
       </div>
 
       <div class="ce-drawer-grid">

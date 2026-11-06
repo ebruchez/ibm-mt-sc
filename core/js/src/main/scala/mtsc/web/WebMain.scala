@@ -5,7 +5,7 @@ import scala.scalajs.js.annotation.*
 import mtsc.types.*
 import mtsc.isa.{Decoder, Instruction}
 import mtsc.cpu.{CcuEngineMode, StepResult}
-import mtsc.cpu.ild.{IldScopeChannel, IldTimingSample, OscSubPhase}
+import mtsc.cpu.ild.{BackplaneCardCage, BackplaneCardSpec, CardPinSignal, IldScopeChannel, IldTimingSample, OscSubPhase}
 import mtsc.asm.Disassembler
 import mtsc.diag.{DiagnosticPrograms, EscapementRoutine}
 import mtsc.periph.*
@@ -42,6 +42,8 @@ object WebMain {
   private var selectedTapeTarget: Device = Device.RightTape
   private var scopePreset: String = "0601"
   private var scopeSpan: Int = 96
+  private var selectedCageSlot: String = "G5/6"
+  private var cageCategoryFilter: String = "all"
 
   def main(args: Array[String]): Unit = {
     if (js.typeOf(js.Dynamic.global.document) == "undefined") return
@@ -698,6 +700,61 @@ object WebMain {
       playClickSound(380)
     })
 
+    // Physical Backplane Card Cage (BOARD A1 & BOARD B1) Filter & Click Delegation
+    val cageFilterEl = doc.getElementById("ild-cage-filter")
+    if (cageFilterEl != null && !js.isUndefined(cageFilterEl)) {
+      cageFilterEl.addEventListener("change", (ev: js.Dynamic) => {
+        cageCategoryFilter = ev.target.value.toString
+        playClickSound(400)
+        renderBackplaneCardCage(doc)
+      })
+    }
+
+    val cageVpEl = doc.getElementById("ild-cage-viewport")
+    if (cageVpEl != null && !js.isUndefined(cageVpEl)) {
+      cageVpEl.addEventListener("click", (ev: js.Dynamic) => {
+        val target = ev.target
+        if (target != null && !js.isUndefined(target) && !js.isUndefined(target.closest)) {
+          val slotEl = target.closest("[data-slot]")
+          if (slotEl != null && !js.isUndefined(slotEl)) {
+            val slotId = slotEl.getAttribute("data-slot").toString
+            if (slotId.nonEmpty) {
+              selectedCageSlot = slotId
+              playClickSound(460)
+              renderBackplaneCardCage(doc)
+            }
+          }
+        }
+      })
+    }
+
+    val cardInspEl = doc.getElementById("ild-card-inspector")
+    if (cardInspEl != null && !js.isUndefined(cardInspEl)) {
+      cardInspEl.addEventListener("click", (ev: js.Dynamic) => {
+        val target = ev.target
+        if (target != null && !js.isUndefined(target) && !js.isUndefined(target.closest)) {
+          val probeBtn = target.closest("[data-probe-num]")
+          if (probeBtn != null && !js.isUndefined(probeBtn)) {
+            val testNum = probeBtn.getAttribute("data-probe-num").toString.toIntOption.getOrElse(0)
+            val probeId = probeBtn.getAttribute("data-probe-id").toString
+            CeTestProbe.fromId(probeId).foreach { probe =>
+              consoleState.setTestProbe(testNum, probe)
+              val selEl = doc.getElementById(s"ce-probe-select-$testNum")
+              if (selEl != null && !js.isUndefined(selEl)) {
+                selEl.value = probe.id
+              }
+              if (system.cpu.ild.timingTrace.isPreview) {
+                system.cpu.ild.timingTrace.clear()
+                system.cpu.ild.seedPreviewTraceIfEmpty()
+              }
+              playClickSound(520)
+              renderAll(doc)
+            }
+          }
+        }
+      })
+    }
+
     // Keyboard shortcuts
     js.Dynamic.global.window.addEventListener("keydown", (ev: js.Dynamic) => {
       val tag = if (!js.isUndefined(ev.target) && ev.target != null && !js.isUndefined(ev.target.tagName))
@@ -1345,6 +1402,7 @@ object WebMain {
     setClassFlag("ild-translator-strip", "behavioral-dim", !isIld)
     setClassFlag("ce-ild-inspector",     "behavioral-dim", !isIld)
     setClassFlag("ce-ild-scope-panel",   "behavioral-dim", !isIld)
+    setClassFlag("ce-ild-cage-panel",    "behavioral-dim", !isIld)
 
     val s = system.cpu.ild.signals
     val curInsnTime = if (isIld) s.insnTime else system.cpu.state.insnTimeCtr
@@ -1539,6 +1597,9 @@ object WebMain {
 
     // 8. 240 kHz Single-Shot (SSA/SSB) Oscilloscope / Timing Diagram (MDM 0601–0602)
     renderIldOscilloscope(doc)
+
+    // 9. Electronic Gate Swing-Out Frame: BOARD A1 (Core & Diode Board) & BOARD B1 (SLD Card Cage)
+    renderBackplaneCardCage(doc)
   }
 
   private final case class ScopeRowSpec(
@@ -1837,6 +1898,221 @@ object WebMain {
         setCursorText(defaultSummary)
       })
     }
+  }
+
+  private def renderBackplaneCardCage(doc: js.Dynamic): Unit = {
+    val cageVp = doc.getElementById("ild-cage-viewport")
+    val inspEl = doc.getElementById("ild-card-inspector")
+    if (cageVp == null || js.isUndefined(cageVp)) return
+
+    val s = system.cpu.ild.signals
+    val coreByte = system.cpu.ild.coreMatrix.peekSelectedByte(s)
+    val xLine = (s.activeXDriver * 8) + s.activeXSwitch
+    val yLine = (s.activeYDriver * 4) + s.activeYSwitch
+
+    val sb = new StringBuilder(16384)
+    sb.append("""<div class="gate-frame-grid">""")
+
+    // =============================================================================================
+    // LEFT BAY: BOARD A1 (Upper Frame Bay + Lower 3D Core Memory Array & Green Diode Board)
+    // =============================================================================================
+    val a1SelectedCls = if (selectedCageSlot == "A1") " selected" else ""
+    sb.append("""<div class="gate-bay-a1">""")
+    sb.append("""<div class="gate-bay-a1-upper">""")
+    sb.append("""<div class="gate-bay-a1-title"><span>BOARD A1 (01A-A1)</span><span>BA011 • MDM 1201</span></div>""")
+    sb.append(
+      s"""<div>3D 4-Plane Coincident-Current Core Stack<br>Array 1 (Upper) &amp; Array 2 (Lower) • 16,384 Cores</div>"""
+    )
+    sb.append(
+      f"""<div style="color:#7dd3fc;">Selected X:$xLine%02d (Drv ${s.activeXDriver + 1}×Sw ${s.activeXSwitch + 1}) • Y:$yLine%02d (Drv ${s.activeYDriver + 1}×Sw ${s.activeYSwitch + 1}) • Byte:0x$coreByte%02X</div>"""
+    )
+    sb.append("</div>")
+
+    // Green Fiberglass Diode Board (MDM 1301) with 8x8 Steering Diode Matrix + Yellow Ribbon Cables
+    sb.append(s"""<div class="gate-diode-board$a1SelectedCls" data-slot="A1" title="Click to inspect BOARD A1 Core Memory Array &amp; Diode Steering Board (MDM 1301)">""")
+    sb.append("""<div class="diode-board-header"><span>DIODE BOARD (MDM 1301)</span><span>P/N 1202425</span></div>""")
+    sb.append("""<div class="diode-board-body">""")
+    sb.append("""<div class="diode-matrix-grid">""")
+    var dr = 0
+    while (dr < 8) {
+      var dc = 0
+      while (dc < 8) {
+        val isXActive = (dr == s.activeXDriver) && (dc == s.activeXSwitch)
+        val isYActive = (dr == s.activeYDriver) && (dc == (s.activeYSwitch * 2))
+        val cellCls =
+          if (isXActive) "diode-cell active-x"
+          else if (isYActive) "diode-cell active-y"
+          else "diode-cell"
+        sb.append(s"""<div class="$cellCls"></div>""")
+        dc += 1
+      }
+      dr += 1
+    }
+    sb.append("</div>")
+    sb.append("""<div class="diode-ribbon-stack">""")
+    sb.append("""<div class="yellow-ribbon-cable" title="Upper Yellow Ribbon Cable to Socket A5 (5805049)">A5 CABLE ▶</div>""")
+    sb.append("""<div class="yellow-ribbon-cable" title="Lower Yellow Ribbon Cable to Socket A6 (5805050)">A6 CABLE ▶</div>""")
+    sb.append("</div>")
+    sb.append("</div>")
+    sb.append("</div>")
+
+    sb.append("""<div class="gate-paper-tag"><span>CORE STACK 1202492</span><span>OK • 240 kHz</span></div>""")
+    sb.append("</div>")
+
+    // =============================================================================================
+    // RIGHT BAY: BOARD B1 (13-Column A..N × 7-Row SLD Logic Card Cage with Horizontal Rib Bars)
+    // =============================================================================================
+    sb.append("""<div class="gate-bay-b1">""")
+    sb.append("""<div class="b1-col-header-row">""")
+    sb.append("""<div class="b1-col-lbl" style="background:#1e293b;color:#7dd3fc;">B1</div>""")
+    for (col <- BackplaneCardCage.Columns) {
+      sb.append(s"""<div class="b1-col-lbl">$col</div>""")
+    }
+    sb.append("</div>")
+
+    sb.append("""<div class="b1-cage-matrix">""")
+    for (row <- BackplaneCardCage.Rows) {
+      sb.append(s"""<div class="b1-row-lbl" style="grid-column: 1; grid-row: $row;">$row</div>""")
+    }
+
+    for ((col, colIdx) <- BackplaneCardCage.Columns.zipWithIndex) {
+      val gridCol = colIdx + 2
+      for (row <- BackplaneCardCage.Rows) {
+        BackplaneCardCage.cardAt(col, row) match {
+          case Some((card, true)) =>
+            val active = card.installed && card.isActive(s)
+            val isSelected = selectedCageSlot == card.slotId
+            val matchesFilter =
+              cageCategoryFilter == "all" || card.category.id == cageCategoryFilter
+            val clsBuilder = new StringBuilder(s"b1-card-slot cat-${card.category.id}")
+            if (active) clsBuilder.append(" card-active")
+            if (isSelected) clsBuilder.append(" selected")
+            if (!matchesFilter) clsBuilder.append(" filtered-dim")
+
+            val aldTag = card.aldSheets.headOption.getOrElse("")
+            val tip =
+              s"Slot 01A-B1 ${card.slotId}: ${card.title} (${card.fullPartNumber} • EC ${card.ecNumber}) | ALD: ${card.aldSheets.mkString(",")} | ILD: ${card.ildSheets.mkString(",")}"
+            sb.append(
+              s"""<div class="$clsBuilder" data-slot="${card.slotId}" style="grid-column: $gridCol; grid-row: ${card.rowStart} / span ${card.rowSpan};" title="${escapeHtml(tip)}">"""
+            )
+            sb.append(
+              s"""<div class="b1-card-top"><span class="b1-slot-code">${card.slotId}</span><span class="b1-activity-dot"></span></div>"""
+            )
+            sb.append(s"""<div class="b1-card-title">${escapeHtml(card.title)}</div>""")
+            sb.append(
+              s"""<div class="b1-card-part"><span>${card.cardNumber}</span><span class="b1-ald-tag">$aldTag</span></div>"""
+            )
+            sb.append("</div>")
+
+          case Some((_, false)) =>
+            // Bottom half of a 2-high double card — already spanned by rowStart
+            ()
+
+          case None =>
+            sb.append(
+              s"""<div class="b1-empty-slot" style="grid-column: $gridCol; grid-row: $row;" title="Unpopulated socket $col$row"></div>"""
+            )
+        }
+      }
+    }
+    sb.append("</div>")
+    sb.append("</div>")
+    sb.append("</div>")
+
+    cageVp.innerHTML = sb.toString()
+
+    // =============================================================================================
+    // SELECTED CARD & BACKPLANE PIN INSPECTOR (#ild-card-inspector)
+    // =============================================================================================
+    if (inspEl == null || js.isUndefined(inspEl)) return
+
+    if (selectedCageSlot == "A1") {
+      val isb = new StringBuilder(4096)
+      isb.append("""<div class="card-insp-header">""")
+      isb.append(
+        """<div class="card-insp-title"><span>01A-A1 — 3D CORE MEMORY ARRAY &amp; DIODE STEERING BOARD</span></div>"""
+      )
+      isb.append("""<div class="card-insp-meta">""")
+      isb.append("""<span class="card-meta-badge">Diode Board: 1202425 (MDM 1301)</span>""")
+      isb.append("""<span class="card-meta-badge">Core Array: 1202492 (BA011)</span>""")
+      isb.append("""<span class="card-meta-badge">Cables: A2 (Sense), A5 (5805049), A6 (5805050)</span>""")
+      isb.append("""<span class="card-meta-badge">ILD: 0305, 0306, 0307, 0310</span>""")
+      isb.append("</div></div>")
+      isb.append(
+        """<div class="card-insp-desc">Two stacked 4-plane ferrite core arrays (Array 1 Upper &amp; Array 2 Lower = 2,048 bytes / 16,384 cores) behind the front green fiberglass Diode Steering Board. Driven via yellow flat ribbon cables A5 and A6 from Column A of BOARD B1.</div>"""
+      )
+      isb.append("""<div class="card-pins-grid">""")
+      val a1Signals: Seq[(String, String, Boolean)] = Seq(
+        ("A1-XDRV", s"ACTIVE X-DRIVER (${s.activeXDriver + 1} of 8)", s.csXLog || s.csYLog),
+        ("A1-XSW",  s"ACTIVE X-SWITCH (${s.activeXSwitch + 1} of 8)", s.csXLog || s.csYLog),
+        ("A1-YDRV", s"ACTIVE Y-DRIVER (${s.activeYDriver + 1} of 8)", s.csYLog),
+        ("A1-YSW",  s"ACTIVE Y-SWITCH (${s.activeYSwitch + 1} of 4)", s.csYLog),
+        ("A2-EV1",  "SENSE/INH PLANE 1 EVEN", s.senseInhLineEv1),
+        ("A2-OD1",  "SENSE/INH PLANE 1 ODD",  s.senseInhLineOdd1),
+        ("A2-EV2",  "SENSE/INH PLANE 2 EVEN", s.senseInhLineEv2),
+        ("A2-OD2",  "SENSE/INH PLANE 2 ODD",  s.senseInhLineOdd2)
+      )
+      for ((pin, name, high) <- a1Signals) {
+        val highCls = if (high) " pin-high" else ""
+        val pillCls = if (high) "ild-pill on" else "ild-pill"
+        isb.append(s"""<div class="card-pin-item$highCls">""")
+        isb.append(s"""<span class="card-pin-coord">$pin</span>""")
+        isb.append(s"""<span class="card-pin-name">${escapeHtml(name)}</span>""")
+        isb.append(s"""<span class="$pillCls">${if (high) "1" else "0"}</span>""")
+        isb.append("</div>")
+      }
+      isb.append("</div>")
+      inspEl.innerHTML = isb.toString()
+      return
+    }
+
+    val card = BackplaneCardCage
+      .findBySlot(selectedCageSlot)
+      .orElse(BackplaneCardCage.findBySlot("G5/6"))
+      .getOrElse(BackplaneCardCage.AllCards.head)
+
+    val isb = new StringBuilder(4096)
+    isb.append("""<div class="card-insp-header">""")
+    val statusBadge =
+      if (!card.installed) """<span class="ild-pill">UNPOPULATED OPTION</span>"""
+      else if (card.isActive(s)) """<span class="ild-pill on">ACTIVE</span>"""
+      else """<span class="ild-pill">IDLE</span>"""
+    isb.append(
+      s"""<div class="card-insp-title"><span>01A-B1 ${card.slotId} — ${escapeHtml(card.title)}</span>$statusBadge</div>"""
+    )
+    isb.append("""<div class="card-insp-meta">""")
+    isb.append(s"""<span class="card-meta-badge">ASM: ${card.fullPartNumber}</span>""")
+    isb.append(s"""<span class="card-meta-badge">EC: ${card.ecNumber}</span>""")
+    isb.append(s"""<span class="card-meta-badge">ALD: ${card.aldSheets.mkString(", ")}</span>""")
+    isb.append(s"""<span class="card-meta-badge">ILD: ${card.ildSheets.mkString(", ")}</span>""")
+    isb.append(s"""<span class="card-meta-badge">${escapeHtml(card.category.label)}</span>""")
+    isb.append("</div></div>")
+
+    isb.append(s"""<div class="card-insp-desc">${escapeHtml(card.description)}</div>""")
+
+    isb.append("""<div class="card-pins-grid">""")
+    for (p <- card.pins) {
+      val level = p.evaluate(s)
+      val highCls = if (level) " pin-high" else ""
+      val pillCls = if (level) "ild-pill on" else "ild-pill"
+      isb.append(s"""<div class="card-pin-item$highCls">""")
+      isb.append(s"""<span class="card-pin-coord">${escapeHtml(p.pin)}</span>""")
+      isb.append(s"""<span class="card-pin-name" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</span>""")
+      p.testProbe.foreach { probe =>
+        isb.append("""<span class="card-pin-probe-btns">""")
+        for (tNum <- 4 to 1 by -1) {
+          isb.append(
+            s"""<button type="button" class="btn-pin-probe" data-probe-num="$tNum" data-probe-id="${probe.id}" title="Attach ${escapeHtml(p.name)} (${p.pin}) to CE Test $tNum">T$tNum</button>"""
+          )
+        }
+        isb.append("</span>")
+      }
+      isb.append(s"""<span class="$pillCls">${if (level) "1" else "0"}</span>""")
+      isb.append("</div>")
+    }
+    isb.append("</div>")
+
+    inspEl.innerHTML = isb.toString()
   }
 
   private def renderMemoryOverlay(doc: js.Dynamic, psar: Int, mal: Int): Unit = {

@@ -572,4 +572,53 @@ class IldMilestone3Suite extends munit.FunSuite {
     // Verify all 4 Core operations in a P & Q Bit Time: R-P (Pulse 3), R-Q (Pulse 7), W-Q (Pulse 10 SsbOn), W-P (Pulse 10 SsbOff)
     assertEquals(i1b1Samples.filter(_.coreOp.nonEmpty).map(_.coreOp), Vector("R-P", "R-Q", "W-Q", "W-P"))
   }
+
+  test("MDM 1201 & LR010 BackplaneCardCage models BOARD B1 (Cols A..N x Rows 1..7) without slot overlaps") {
+    assertEquals(
+      BackplaneCardCage.Columns,
+      Vector("A", "B", "C", "D", "E", "F", "G", "H", "J", "K", "L", "M", "N")
+    )
+    assertEquals(BackplaneCardCage.Rows, (1 to 7).toVector)
+
+    // Verify no overlapping (col, row) coordinates across all cards and cable sockets
+    val occupiedCells = scala.collection.mutable.Set[(String, Int)]()
+    for (card <- BackplaneCardCage.AllCards) {
+      assert(BackplaneCardCage.Columns.contains(card.col), s"Invalid column ${card.col} for ${card.slotId}")
+      assert(card.rowStart >= 1 && card.rowStart + card.rowSpan - 1 <= 7, s"Invalid row span for ${card.slotId}")
+      for (r <- card.rowStart until (card.rowStart + card.rowSpan)) {
+        val cell = (card.col, r)
+        assert(!occupiedCells.contains(cell), s"Duplicate card cage cell $cell on ${card.slotId}")
+        occupiedCells += cell
+      }
+    }
+
+    // Verify key cards from MDM Page 1201 and Socket Listing LR010
+    val clockCard = BackplaneCardCage.findBySlot("G5/6").get
+    assertEquals(clockCard.title, "CLOCK")
+    assertEquals(clockCard.fullPartNumber, "5806458")
+    assertEquals(clockCard.aldSheets, Vector("AA081", "AA082", "AA083"))
+
+    val oscCard = BackplaneCardCage.findBySlot("K5/6").get
+    assertEquals(oscCard.title, "OSC")
+    assertEquals(oscCard.fullPartNumber, "5806463")
+
+    val mtCtrCard = BackplaneCardCage.findBySlot("F1/2").get
+    assertEquals(mtCtrCard.title, "MT CTR")
+    assertEquals(mtCtrCard.fullPartNumber, "5806469")
+
+    val ptOptionCard = BackplaneCardCage.findBySlot("M5/6").get
+    assert(!ptOptionCard.installed)
+    assertEquals(ptOptionCard.fullPartNumber, "5806679")
+
+    // Verify all pins across all cards evaluate cleanly against a live BackplaneSignals state
+    val s = new BackplaneSignals()
+    Ild0303Clock.reset(s)
+    for (card <- BackplaneCardCage.AllCards) {
+      val _ = card.isActive(s)
+      assert(card.pins.nonEmpty, s"Card ${card.slotId} must expose at least 1 pin")
+      for (pin <- card.pins) {
+        val _ = pin.evaluate(s)
+      }
+    }
+  }
 }
