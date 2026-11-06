@@ -1,6 +1,6 @@
 ### 1. The IBM Engineering Rationale: "No Special Program-Loading Hardware"
 
-The *IBM Journal of Research and Development* (Vol. 12, No. 5, September 1968, pp. 8–9, [*Development of the Magnetic Tape SELECTRIC Composer*](file:///Users/ebruchez/Projects/ibm-mt-sc/docs/ibmrd1205F%20-%20Development%20of%20the%20Magnetic%20Tape%20Selectric%20Composer.pdf#page=8)) directly explains why this routine is designed this way:
+The *IBM Journal of Research and Development* (Vol. 12, No. 5, September 1968, pp. 8–9, *"Development of the Magnetic Tape SELECTRIC Composer"*) directly explains why this routine is designed this way:
 
 > *"No hardware is provided specifically for loading the program. A short (3-step) routine capable of loading a program can be manually entered at the control panel by service personnel.*
 >
