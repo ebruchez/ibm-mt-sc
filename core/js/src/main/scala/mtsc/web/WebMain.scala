@@ -1280,6 +1280,7 @@ object WebMain {
     }
 
     val isIld = system.cpu.isIldMode
+    setClassFlag("ild-mt-strip",         "behavioral-dim", !isIld)
     setClassFlag("ild-translator-strip", "behavioral-dim", !isIld)
     setClassFlag("ce-ild-inspector",     "behavioral-dim", !isIld)
 
@@ -1430,6 +1431,49 @@ object WebMain {
     setClassFlag("ild-tsltr-mpx",    "on", system.cpu.state.multiplex || s.mpx)
     setClassFlag("ild-tsltr-bsy",    "on", translatorBusy)
     setClassFlag("ild-tsltr-rdy",    "on", readyLine)
+
+    // 7. Magnetic Tape Counter, Data Latches, 3-Group Parity & Deck Logic Strip (ILD 0301–0302)
+    setClassFlag("ild-mt-ctr-a", "on", s.mtCtrA)
+    setClassFlag("ild-mt-ctr-b", "on", s.mtCtrB)
+    setClassFlag("ild-mt-ctr-c", "on", s.mtCtrC)
+    setClassFlag("ild-mt-ctr-d", "on", s.mtCtrD)
+    setClassFlag("ild-mt-ctr-e", "on", s.mtCtrE)
+
+    val ctrBin =
+      s"${if (s.mtCtrA) 1 else 0}${if (s.mtCtrB) 1 else 0}${if (s.mtCtrC) 1 else 0}${if (s.mtCtrD) 1 else 0}${if (s.mtCtrE) 1 else 0}"
+    val ctrName = s.mtCounterNumber match {
+      case 13 => "CT 13 UNLD"
+      case 14 => "CT 14 SCH"
+      case 15 => "CT 15 LOAD"
+      case n if n >= 0 => s"CT $n"
+      case _ => "CT ?"
+    }
+    setText("ild-mt-ctr-dec", s"$ctrName ($ctrBin)")
+
+    val dlBits = Array(
+      s.mtData1, s.mtData2, s.mtData3, s.mtData4, s.mtData5,
+      s.mtData6, s.mtData7, s.mtData8, s.mtData9
+    )
+    for (dl <- 1 to 9) {
+      val on = dlBits(dl - 1)
+      setClassFlag(s"ild-mt-dl-$dl", "on", on)
+      setClassFlag(s"ild-mt-dl-$dl", "pill-amber", on && dl == 9)
+    }
+    val mtByte = s.mtDecodedByte
+    setText("ild-mt-byte", f"MT: 0x$mtByte%02X")
+
+    setClassFlag("ild-mt-prty-x",   "on", s.mtXParity)
+    setClassFlag("ild-mt-prty-y",   "on", s.mtYParity)
+    setClassFlag("ild-mt-prty-z",   "on", s.mtZParity)
+    setClassFlag("ild-mt-odd",      "on", s.mtOddParity)
+    setClassFlag("ild-mt-char-rdy", "on", s.charRdy)
+    setClassFlag("ild-mt-sta",      "on", s.mtStaRight || s.mtStaLeft)
+    setText("ild-mt-sta", if (s.mtStaLeft) "STA LF" else "STA RT")
+    setClassFlag("ild-mt-incr",     "on", s.mtIncr)
+    setClassFlag("ild-mt-rd",       "on", s.mtRd)
+    setClassFlag("ild-mt-sch",      "on", s.mtSch || s.trSchSta)
+    setClassFlag("ild-mt-setlo",    "on", s.setLo)
+    setClassFlag("ild-mt-err",      "on", s.errorLite)
   }
 
   private def renderMemoryOverlay(doc: js.Dynamic, psar: Int, mal: Int): Unit = {

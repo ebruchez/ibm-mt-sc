@@ -425,6 +425,50 @@
           </div>
         </div>
 
+        <!-- ILD 0301–0302 Magnetic Tape Counter, Data Latches, 3-Group Parity & Solenoid Strip -->
+        <div id="ild-mt-strip" class="ild-translator-strip" aria-label="ILD 0301-0302 Magnetic Tape Hardware Telemetry">
+          <div class="ild-tsltr-group">
+            <span class="ild-tsltr-lbl" title="ILD 0302 (AA191/AA192): 5-Bit Magnetic Tape Counter (MT CTR A..E) driven by MPS A &amp; MPS B">ILD 0302 CTR:</span>
+            <div class="ild-mag-pills">
+              <span id="ild-mt-ctr-a" class="ild-sig-pill" title="MT Counter A (AA192)">A</span>
+              <span id="ild-mt-ctr-b" class="ild-sig-pill" title="MT Counter B (AA192)">B</span>
+              <span id="ild-mt-ctr-c" class="ild-sig-pill" title="MT Counter C (AA192)">C</span>
+              <span id="ild-mt-ctr-d" class="ild-sig-pill" title="MT Counter D (AA192)">D</span>
+              <span id="ild-mt-ctr-e" class="ild-sig-pill" title="MT Counter E (AA191)">E</span>
+            </div>
+            <span id="ild-mt-ctr-dec" class="ild-byte-readout" title="Decoded MT Counter State (Count 0..10, 13 Unload, 14 Search, 15 Load)">CT 0 (00010)</span>
+          </div>
+          <div class="ild-tsltr-group">
+            <span class="ild-tsltr-lbl" title="ILD 0302 (AA211): 9-Bit Magnetic Tape Data Latches (DL 9..1)">DATA LTH 9..1:</span>
+            <div class="ild-mag-pills">
+              <span id="ild-mt-dl-9" class="ild-sig-pill" title="Data Latch 9 (Count 8: Track CK / Parity Check Only)">9:CK</span>
+              <span id="ild-mt-dl-8" class="ild-sig-pill" title="Data Latch 8 (Count 5: Track SCH -> MT BIT 8)">8:SCH</span>
+              <span id="ild-mt-dl-7" class="ild-sig-pill" title="Data Latch 7 (Count 9: Track SHIFT -> MT BIT 7)">7:SH</span>
+              <span id="ild-mt-dl-6" class="ild-sig-pill" title="Data Latch 6 (Count 7: Track T2 -> MT BIT 4)">6:T2</span>
+              <span id="ild-mt-dl-5" class="ild-sig-pill" title="Data Latch 5 (Count 6: Track T1 -> MT BIT 3)">5:T1</span>
+              <span id="ild-mt-dl-4" class="ild-sig-pill" title="Data Latch 4 (Count 4: Track R5 -> MT BIT 1)">4:R5</span>
+              <span id="ild-mt-dl-3" class="ild-sig-pill" title="Data Latch 3 (Count 3: Track R2A -> MT BIT 6)">3:R2A</span>
+              <span id="ild-mt-dl-2" class="ild-sig-pill" title="Data Latch 2 (Count 2: Track R2 -> MT BIT 2)">2:R2</span>
+              <span id="ild-mt-dl-1" class="ild-sig-pill" title="Data Latch 1 (Count 1: Track R1 -> MT BIT 5)">1:R1</span>
+            </div>
+            <span id="ild-mt-byte" class="ild-byte-readout" title="8-Bit Character Decoded by MT BITS (AA211)">MT: 0x00</span>
+          </div>
+          <div class="ild-tsltr-group">
+            <span class="ild-tsltr-lbl" title="ILD 0301–0302 (AA191..AA212): 3-Group Odd Parity (X/Y/Z -> ODD) &amp; Transport Latches">PRTY / DECK:</span>
+            <span id="ild-mt-prty-x" class="ild-sig-pill" title="X Parity (DL 1^2^3, AA212)">X</span>
+            <span id="ild-mt-prty-y" class="ild-sig-pill" title="Y Parity (DL 4^5^6, AA212)">Y</span>
+            <span id="ild-mt-prty-z" class="ild-sig-pill" title="Z Parity (DL 7^8^9, AA212)">Z</span>
+            <span id="ild-mt-odd" class="ild-sig-pill" title="+ODD Parity (X^Y^Z | SKIP, AA212)">ODD</span>
+            <span id="ild-mt-char-rdy" class="ild-sig-pill" title="+CHARACTER READY (ILD 0311)">CHAR RDY</span>
+            <span id="ild-mt-sta" class="ild-sig-pill" title="Active Station Latch (STA RT / STA LF, AA202)">STA RT</span>
+            <span id="ild-mt-incr" class="ild-sig-pill" title="+INCREMENT Flip-Flop (AA191)">INCR</span>
+            <span id="ild-mt-rd" class="ild-sig-pill" title="+MT READ Flip-Flop (AA191)">MT RD</span>
+            <span id="ild-mt-sch" class="ild-sig-pill" title="+SEARCH / +TRF SCH STA (AA202)">SCH</span>
+            <span id="ild-mt-setlo" class="ild-sig-pill pill-warn" title="+MT SET LO Flip-Flop (AA193: set by SKIP, sets CCU +LOW LATCH at I-5)">SET LO</span>
+            <span id="ild-mt-err" class="ild-sig-pill pill-warn" title="+ERROR LIGHT (AA202: EOT/Unload or Even Parity at 10 Count)">ERR LT</span>
+          </div>
+        </div>
+
         <!-- Custom Copy Tape Mounter (Dual Station) -->
         <div class="custom-tape-box">
           <div class="custom-tape-header">

@@ -521,12 +521,106 @@ final class BackplaneSignals {
   /** `+KEYBOARD SINGLE ENTRY` (`KB SNG ENT`, AA051 / 0308 / 0311). */
   var kbSingleEntry: Boolean = false
 
-  /** Magnetic Tape & Paper Tape character readiness inputs (`AA232`, `AA233`, `AA212` / `0311`). */
+  // ===============================================================================================
+  // ILD 0301 & 0302: Magnetic Tape Deck Magnet/Solenoid Logic, MT Counter, Data Latches & Parity
+  // (AA191, AA192, AA193, AA201, AA202, AA211, AA212, AA222)
+  // ===============================================================================================
+
+  /** 5-bit Magnetic Tape Counter flip-flops `MT CTR A..E` (`AA191`, `AA192` / `ILD 0302`). Initialized to `0 Count` (`00010`). */
+  var mtCtrA: Boolean = false
+  var mtCtrB: Boolean = false
+  var mtCtrC: Boolean = false
+  var mtCtrD: Boolean = true
+  var mtCtrE: Boolean = false
+
+  /** Emitter sweep single-shot pulses `MPS A` (odd emitter coils) and `MPS B` (even emitter coils) (`AA201` / `ILD 0302`). */
+  var mpsA: Boolean = false
+  var mpsB: Boolean = false
+
+  /** Counter preset and reset buses (`ILD 0302`): `RD COM` (`AA072`), `SET 0` (`AA191`), `SET 14` (`AA192`), `SET 15` (`AA202`), `COM RES` (`AA202`). */
+  var rdCom: Boolean = false
+  var mtSet0: Boolean = false
+  var mtSet14: Boolean = false
+  var mtSet15: Boolean = false
+  var mtComRes: Boolean = false
+
+  /** Decoded `MT CTR A..E` count states (`Count 0`..`Count 10`, `13 Count`, `14 Count`, `15 Count` on `ILD 0301` & `0302`). */
+  var mtCount0: Boolean = true
+  var mtCount1: Boolean = false
+  var mtCount2: Boolean = false
+  var mtCount3: Boolean = false
+  var mtCount4: Boolean = false
+  var mtCount5: Boolean = false
+  var mtCount6: Boolean = false
+  var mtCount7: Boolean = false
+  var mtCount8: Boolean = false
+  var mtCount9: Boolean = false
   var mtTenCount: Boolean = false
+  var mtCount13: Boolean = false
+  var mtCount14: Boolean = false
+  var mtCount15: Boolean = false
+
+  /** 9-bit Magnetic Tape Data Register flip-flops `DATA LATCH 1..9` (`AA211` / `ILD 0302`). */
+  var mtData1: Boolean = false
+  var mtData2: Boolean = false
+  var mtData3: Boolean = false
+  var mtData4: Boolean = false
+  var mtData5: Boolean = false
+  var mtData6: Boolean = false
+  var mtData7: Boolean = false
+  var mtData8: Boolean = false
+  var mtData9: Boolean = false
+
+  /** Read head sense amplifier pulse `MT BIT` (`AA193`), search bit sense `SCH BIT` (`AA193`), and `RES DL3` (`AA211`). */
+  var mtBit: Boolean = false
+  var mtSchBit: Boolean = false
+  var mtResDl3: Boolean = false
+
+  /** 3-Group Odd Parity Checker signals `X PRTY` (`DL 1..3`), `Y PRTY` (`DL 4..6`), `Z PRTY` (`DL 7..9`), and `ODD` (`AA212` / `ILD 0302`). */
+  var mtXParity: Boolean = false
+  var mtYParity: Boolean = false
+  var mtZParity: Boolean = false
+  var mtOddParity: Boolean = false
+
+  /** Station selection, Transfer Search Station, Read, Search, Increment, and Carrier Return decode (`ILD 0301`). */
+  var mtStaRight: Boolean = true
+  var mtStaLeft: Boolean = false
   var mtCde: Boolean = false
   var mtSch: Boolean = false
   var mtRd: Boolean = false
   var trSchSta: Boolean = false
+  var mtIncr: Boolean = false
+  var mtCarRet: Boolean = false
+
+  /** Magnetic Tape transport solenoid, clutch, and magnet driver logic (`AA201`, `AA202` / `ILD 0301`). */
+  var mtCycClutch: Boolean = false
+  var mtSchPosMag: Boolean = false
+  var mtLdSchSol: Boolean = false
+  var mtStepMags: Boolean = false
+  var mtDntRtSol: Boolean = false
+  var mtDntLfSol: Boolean = false
+  var mtLfPpSol: Boolean = false
+  var mtHiBias: Boolean = false
+
+  /** Magnetic Tape Reader Console pushbuttons and mechanical switch contacts (`BC051`, `AA222` / `ILD 0301` & `0302`). */
+  var mtLdRt: Boolean = false
+  var mtLdLf: Boolean = false
+  var mtUnldRt: Boolean = false
+  var mtUnldLf: Boolean = false
+  var mtSchKey: Boolean = false
+  var mtReread: Boolean = false
+  var mtSkip: Boolean = false
+  var mtRtPpUp: Boolean = false
+  var mtLfPpUp: Boolean = false
+  var mtLdrSenLfEmpty: Boolean = true
+  var mtRwdSen: Boolean = false
+  var mtDntOut: Boolean = false
+  var mtSchPos: Boolean = false
+  var mtHome: Boolean = true
+  var mtEotOrUnld: Boolean = false
+  var mtLdSchSolSw: Boolean = false
+
+  /** Paper Tape & Combined Character Readiness (`AA232`, `AA233`, `AA212` / `0311`). */
   var ptCharRdy: Boolean = false
   var charRdy: Boolean = false
 
@@ -800,6 +894,58 @@ final class BackplaneSignals {
   /** Returns the current Bit Time index `0..3` (`0` = `B1-4`, `1` = `B5-8`, `2` = `B9-12`, `3` = `B13-16`). */
   def bitTimeIndex: Int =
     (if (btCtrB) 2 else 0) | (if (btCtrA) 1 else 0)
+
+  /** Returns the 5-bit `MT CTR` register `(A, B, C, D, E)` as an integer in `0..31` (`bit 4 = A .. bit 0 = E`). */
+  def mtCounterBits: Int =
+    (if (mtCtrA) 16 else 0) |
+      (if (mtCtrB) 8 else 0) |
+      (if (mtCtrC) 4 else 0) |
+      (if (mtCtrD) 2 else 0) |
+      (if (mtCtrE) 1 else 0)
+
+  /**
+   * Returns the decoded Magnetic Tape Counter state number (`0..10`, `13`, `14`, `15`, or `-1` if unmapped)
+   * matching the `MT READER COUNTER AND BIT DECODE` timing diagram (`0403` / `ILD 0301` & `0302`).
+   */
+  def mtCounterNumber: Int = mtCounterBits match {
+    case 0x02 => 0  // 00010 (Count 0)
+    case 0x10 => 1  // 10000 (Count 1 -> DL1 / R1)
+    case 0x18 => 2  // 11000 (Count 2 -> DL2 / R2)
+    case 0x0c => 3  // 01100 (Count 3 -> DL3 / R2A)
+    case 0x04 => 4  // 00100 (Count 4 -> DL4 / R5)
+    case 0x16 => 5  // 10110 (Count 5 -> DL8 / SCH)
+    case 0x1e => 6  // 11110 (Count 6 -> DL5 / T1)
+    case 0x0b => 7  // 01011 (Count 7 -> DL6 / T2)
+    case 0x03 => 8  // 00011 (Count 8 -> DL9 / CK)
+    case 0x11 => 9  // 10001 (Count 9 -> DL7 / SHIFT)
+    case 0x19 => 10 // 11001 (10 Count)
+    case 0x1f => if (mtEotOrUnld || mtCount13) 13 else 14 // 11111 (13 Count Unload / 14 Count Search)
+    case 0x0a => 15 // 01010 (15 Count Load)
+    case _    => -1
+  }
+
+  /** Returns the 9-bit `DATA LATCH 1..9` state as a 9-bit mask (`bit 0 = DL1 .. bit 8 = DL9`). */
+  def mtDataLatchesMask: Int =
+    (if (mtData1) 0x001 else 0) |
+      (if (mtData2) 0x002 else 0) |
+      (if (mtData3) 0x004 else 0) |
+      (if (mtData4) 0x008 else 0) |
+      (if (mtData5) 0x010 else 0) |
+      (if (mtData6) 0x020 else 0) |
+      (if (mtData7) 0x040 else 0) |
+      (if (mtData8) 0x080 else 0) |
+      (if (mtData9) 0x100 else 0)
+
+  /** Returns the 8-bit character decoded by `MT BITS AA211` from `DATA LATCH 1..8`. */
+  def mtDecodedByte: Int =
+    (if (mtData4) 0x01 else 0) | // MT BIT 1 (R5)
+      (if (mtData2) 0x02 else 0) | // MT BIT 2 (R2)
+      (if (mtData5) 0x04 else 0) | // MT BIT 3 (T1)
+      (if (mtData6) 0x08 else 0) | // MT BIT 4 (T2)
+      (if (mtData1) 0x10 else 0) | // MT BIT 5 (R1)
+      (if (mtData3) 0x20 else 0) | // MT BIT 6 (R2A)
+      (if (mtData7) 0x40 else 0) | // MT BIT 7 (SHIFT)
+      (if (mtData8) 0x80 else 0)   // MT BIT 8 (SCH)
 
   /**
    * Loads the 7 Operational Code latches (`OPL CDE 1..7`) from a 16-bit instruction word

@@ -137,6 +137,12 @@ enum CeTestProbe(
   val evaluate: BackplaneSignals => Boolean
 ) {
   case Off         extends CeTestProbe("off",         "Unconnected (Manual)",   "0312", _ => false)
+  case MtStaRight  extends CeTestProbe("mt_sta_rt",   "+STATION RIGHT",         "0301", _.mtStaRight)
+  case MtTenCount  extends CeTestProbe("mt_10_ct",    "+MT 10 COUNT",           "0301", _.mtTenCount)
+  case MtIncr      extends CeTestProbe("mt_incr",     "+MT INCREMENT",          "0301", _.mtIncr)
+  case MtCarRet    extends CeTestProbe("mt_car_ret",  "+MT CARRIER RETURN",     "0301", _.mtCarRet)
+  case MtOddParity extends CeTestProbe("mt_odd",      "+MT ODD PARITY",         "0302", _.mtOddParity)
+  case MtSetLo     extends CeTestProbe("mt_set_lo",   "+MT SET LOW (SKIP)",     "0302", _.setLo)
   case PTime       extends CeTestProbe("p_time",      "+P TIME",                "0303", _.pTime)
   case CenBt       extends CeTestProbe("cen_bt",      "+CENTRAL BIT TIME",      "0303", _.cenBt)
   case Twr         extends CeTestProbe("twr",         "+TIME WRITE (TWR)",      "0303", _.twr)

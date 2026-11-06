@@ -5,6 +5,7 @@ import mtsc.console.CeStepGranularity
 import mtsc.isa.{Decoder, Instruction}
 import mtsc.memory.{CoreImage, CoreMemory}
 import mtsc.cpu.{Ccu, CcuEngineMode, StepResult}
+import mtsc.cpu.ild.Ild0301To0302MagneticTape
 import mtsc.diag.{ContinuousComposerRoutine, DiagnosticPrograms, EscapementRoutine}
 
 /**
@@ -36,20 +37,32 @@ class MtscSystem(
    */
   def pressTapeButton(button: TapeConsoleButton): String = button match {
     case TapeConsoleButton.LoadRight =>
-      if (rightTape.pressLoad()) s"Right Tape loaded to BOT track 0 (cover locked)."
-      else "Right Station has no tape cartridge mounted."
+      if (rightTape.pressLoad()) {
+        Ild0301To0302MagneticTape.pressLoad(cpu.ild.signals, rightStation = true, ioBus)
+        cpu.ild.syncAllCombinational()
+        s"Right Tape loaded to BOT track 0 (cover locked)."
+      } else "Right Station has no tape cartridge mounted."
 
     case TapeConsoleButton.UnloadRight =>
-      if (rightTape.pressUnload()) "Right Tape rewound into cartridge (ready to unlock cover)."
-      else "Right Station has no tape to unload."
+      if (rightTape.pressUnload()) {
+        Ild0301To0302MagneticTape.pressUnload(cpu.ild.signals, rightStation = true, ioBus)
+        cpu.ild.syncAllCombinational()
+        "Right Tape rewound into cartridge (ready to unlock cover)."
+      } else "Right Station has no tape to unload."
 
     case TapeConsoleButton.LoadLeft =>
-      if (leftTape.pressLoad()) s"Left Tape loaded to BOT track 0 (cover locked)."
-      else "Left Station has no tape cartridge mounted."
+      if (leftTape.pressLoad()) {
+        Ild0301To0302MagneticTape.pressLoad(cpu.ild.signals, rightStation = false, ioBus)
+        cpu.ild.syncAllCombinational()
+        s"Left Tape loaded to BOT track 0 (cover locked)."
+      } else "Left Station has no tape cartridge mounted."
 
     case TapeConsoleButton.UnloadLeft =>
-      if (leftTape.pressUnload()) "Left Tape rewound into cartridge (ready to unlock cover)."
-      else "Left Station has no tape to unload."
+      if (leftTape.pressUnload()) {
+        Ild0301To0302MagneticTape.pressUnload(cpu.ild.signals, rightStation = false, ioBus)
+        cpu.ild.syncAllCombinational()
+        "Left Tape rewound into cartridge (ready to unlock cover)."
+      } else "Left Station has no tape to unload."
 
     case TapeConsoleButton.CoverUnlock =>
       val rOk = rightTape.pressCoverUnlock()
@@ -60,7 +73,7 @@ class MtscSystem(
       else "Cover interlock active: unload tape into cartridge before unlocking cover."
 
     case TapeConsoleButton.Reread =>
-      if (leftTape.parityError && !rightTape.parityError) {
+      val msg = if (leftTape.parityError && !rightTape.parityError) {
         val pos = leftTape.pressReread()
         s"Left Tape REREAD: backstepped to track $pos (parity error cleared)."
       } else if (rightTape.parityError && !leftTape.parityError) {
@@ -76,9 +89,12 @@ class MtscSystem(
         val pos = active.pressReread()
         s"$name Tape REREAD: backstepped to track $pos."
       }
+      Ild0301To0302MagneticTape.pressReread(cpu.ild.signals, ioBus)
+      cpu.ild.syncAllCombinational()
+      msg
 
     case TapeConsoleButton.Skip =>
-      if (leftTape.parityError && !rightTape.parityError) {
+      val msg = if (leftTape.parityError && !rightTape.parityError) {
         val pos = leftTape.pressSkip()
         s"Left Tape SKIP: advanced to track $pos."
       } else if (rightTape.parityError && !leftTape.parityError) {
@@ -90,17 +106,26 @@ class MtscSystem(
         val pos = active.pressSkip()
         s"$name Tape SKIP: advanced to track $pos."
       }
+      Ild0301To0302MagneticTape.pressSkip(cpu.ild.signals, ioBus)
+      cpu.ild.syncAllCombinational()
+      msg
 
     case TapeConsoleButton.Search =>
       if (rightTape.isTapeLoaded && leftTape.isTapeLoaded) {
         val pR = rightTape.pressSearch()
         val pL = leftTape.pressSearch()
+        Ild0301To0302MagneticTape.pressSearch(cpu.ild.signals, ioBus)
+        cpu.ild.syncAllCombinational()
         s"Dual Tape SEARCH: Right advanced to track $pR, Left advanced to track $pL."
       } else if (leftTape.isTapeLoaded) {
         val pos = leftTape.pressSearch()
+        Ild0301To0302MagneticTape.pressSearch(cpu.ild.signals, ioBus)
+        cpu.ild.syncAllCombinational()
         s"Left Tape SEARCH: advanced to reference track $pos."
       } else if (rightTape.isTapeLoaded) {
         val pos = rightTape.pressSearch()
+        Ild0301To0302MagneticTape.pressSearch(cpu.ild.signals, ioBus)
+        cpu.ild.syncAllCombinational()
         s"Right Tape SEARCH: advanced to reference track $pos."
       } else {
         "Tape SEARCH inactive: no tape loaded."
@@ -113,12 +138,19 @@ class MtscSystem(
       case Device.LeftTape  => leftTape.mount(cartridge)
       case _ => throw new IllegalArgumentException("Can only load tape on RightTape or LeftTape")
     }
+    Ild0301To0302MagneticTape.pressLoad(cpu.ild.signals, rightStation = (station == Device.RightTape), ioBus)
+    cpu.ild.syncAllCombinational()
   }
 
-  def unloadTape(station: Device): Option[TapeCartridge] = station match {
-    case Device.RightTape => rightTape.unmount()
-    case Device.LeftTape  => leftTape.unmount()
-    case _ => None
+  def unloadTape(station: Device): Option[TapeCartridge] = {
+    val res = station match {
+      case Device.RightTape => rightTape.unmount()
+      case Device.LeftTape  => leftTape.unmount()
+      case _ => None
+    }
+    Ild0301To0302MagneticTape.pressUnload(cpu.ild.signals, rightStation = (station == Device.RightTape), ioBus)
+    cpu.ild.syncAllCombinational()
+    res
   }
 
   /**

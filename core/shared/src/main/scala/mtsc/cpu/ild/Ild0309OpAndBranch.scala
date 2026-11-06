@@ -101,7 +101,7 @@ object Ild0309OpAndBranch {
 
     // [AA132 2C-PA, 2D-AE, 2E-AF -> 3B-AC] Set conditions for +LOW LATCH:
     // 1. 2C-PA: Tape parity error / skip (SET LO) during I-5 Input
-    val setLowInputError = s.setLo && !s.output && s.insnT5 && s.cenBt && !s.athOp
+    val setLowInputError = s.setLo && !s.output && s.insnT5 && (s.cenBt || s.strLthStrobe) && !s.athOp
     // 2. 2D-AE: Sign bit (ACC 4) on at I-9, B13-16, STR LTH STROBE of 16-bit Arithmetic / CMPB
     val isSingleByteMovb = s.oplCde2 && s.oplCde3 && (s.oplCde6 || s.oplCde7) && !s.immediate
     val setLowArithI9 = s.insnT9 && s.oplCde2 && s.acc4 && s.b13_16 && s.strLthStrobe && !isSingleByteMovb

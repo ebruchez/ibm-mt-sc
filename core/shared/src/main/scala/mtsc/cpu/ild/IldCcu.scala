@@ -4,7 +4,7 @@ import mtsc.console.{CeDisplayMode, CeEditSelector, CeStepGranularity, LampState
 import mtsc.cpu.{CcuState, IoBus, IoResult, StepResult}
 import mtsc.isa.{Decoder, Instruction}
 import mtsc.memory.CoreMemory
-import mtsc.periph.{ConsoleKey, ConsoleLampSpec, OperatorPanelState, SystemIoBus}
+import mtsc.periph.{ConsoleKey, ConsoleLampSpec, OperatorPanelState, SystemIoBus, TapeFrame}
 import mtsc.types.{Address, Device, Word}
 
 /**
@@ -68,6 +68,10 @@ final class IldCcu(
     signals.eq = false
     signals.strCarOver = false
     signals.carOver = false
+    signals.setLo = false
+    signals.mtSkip = false
+    signals.mtReread = false
+    signals.mtEotOrUnld = false
     signals.setMalValue(0)
     signals.setOutputByte(0)
     inProgressInstruction = false
@@ -77,12 +81,16 @@ final class IldCcu(
     midInstructionQBfrAtI1B5_8 = 0
     Ild0303Clock.reset(signals)
     signals.edit = signals.editSwitch != CeEditSelector.Proc
+    ioBus match {
+      case sysBus: SystemIoBus => Ild0301To0302MagneticTape.syncStationSensors(signals, sysBus)
+      case _                   => ()
+    }
     syncAllCombinational()
     syncStateFromSignals()
   }
 
   /**
-   * Evaluates all combinational networks across ILDs `0303`–`0312`.
+   * Evaluates all combinational networks across ILDs `0301`–`0312`.
    */
   def syncAllCombinational(): Unit = {
     Ild0312ConsoleLights.evaluateSwitchAndDisplayDecodes(signals)
@@ -93,6 +101,7 @@ final class IldCcu(
     Ild0308DataFlow.evaluateCombinational(signals)
     Ild0309OpAndBranch.evaluateCombinational(signals)
     Ild0310WriteInhibit.evaluateCombinational(signals)
+    Ild0301To0302MagneticTape.evaluateCombinational(signals)
     Ild0311OutputIo.evaluateCombinational(signals)
     Ild0312ConsoleLights.evaluateCombinational(signals)
   }
@@ -373,6 +382,13 @@ final class IldCcu(
 
     // Update LOW / EQUAL condition latches (and 0304 TAKEN / SET 9) at STR LTH STROBE
     Ild0309OpAndBranch.updateConditionLatches(s)
+    // At I-5, B13-16 of Magnetic Tape INPUT: RD COM & MT CDE updates STA RT/LF and resets MT SET LO (ILD 0301–0302)
+    if (s.insnT5 && s.b13_16 && s.input && !s.inh && s.mtCde) {
+      s.rdCom = true
+      Ild0301To0302MagneticTape.updateTransportLatches(s)
+      s.setLo = false
+      s.rdCom = false
+    }
     // Latch CARRY 4 into CARRY OVER steering latch
     Ild0308DataFlow.updateCarrySteering(s)
 
@@ -786,19 +802,35 @@ final class IldCcu(
       case _                 => Device.RightTape
     }
 
+    val isMagTape = device == Device.RightTape || device == Device.LeftTape
+    if (isMagTape) {
+      ioBus match {
+        case sysBus: SystemIoBus =>
+          Ild0301To0302MagneticTape.prepareStationForInput(s, sysBus)
+        case _ => ()
+      }
+    }
+
     ioBus.read(device) match {
       case IoResult.Ready(byte) =>
         s.inh = false
         s.rdy = true
         val b = byte & 0xff
-        s.inBit1 = (b & 0x01) != 0
-        s.inBit2 = (b & 0x02) != 0
-        s.inBit3 = (b & 0x04) != 0
-        s.inBit4 = (b & 0x08) != 0
-        s.inBit5 = (b & 0x10) != 0
-        s.inBit6 = (b & 0x20) != 0
-        s.inBit7 = (b & 0x40) != 0
-        s.inBit8 = (b & 0x80) != 0
+        if (isMagTape) {
+          if (!ioBus.isInstanceOf[SystemIoBus]) {
+            Ild0301To0302MagneticTape.sweepFrame(s, TapeFrame.encodeByte8WithOddParity(b))
+          }
+          Ild0301To0302MagneticTape.evaluateCombinational(s)
+        } else {
+          s.inBit1 = (b & 0x01) != 0
+          s.inBit2 = (b & 0x02) != 0
+          s.inBit3 = (b & 0x04) != 0
+          s.inBit4 = (b & 0x08) != 0
+          s.inBit5 = (b & 0x10) != 0
+          s.inBit6 = (b & 0x20) != 0
+          s.inBit7 = (b & 0x40) != 0
+          s.inBit8 = (b & 0x80) != 0
+        }
 
       case IoResult.Busy =>
         s.inh = true
