@@ -2,6 +2,7 @@ package mtsc.console
 
 import mtsc.cpu.Ccu
 import mtsc.periph.*
+import mtsc.types.Fmt
 
 /**
  * Renderer for the IBM MT/SC Operator Control Panel and
@@ -77,10 +78,10 @@ object OperatorConsoleView {
     for (i <- 0 until 11) {
       val x = lampX(i)
       if (topRow1(i).nonEmpty) {
-        terminal.writeText(x, 2, f"${topRow1(i)}%-7s", Some(AnsiColor.BrightWhite), bold = !opPanel.isSetupLampOn)
+        terminal.writeText(x, 2, Fmt.padRight(topRow1(i), 7), Some(AnsiColor.BrightWhite), bold = !opPanel.isSetupLampOn)
       }
       if (topRow2(i).nonEmpty) {
-        terminal.writeText(x, 3, f"${topRow2(i)}%-7s", Some(AnsiColor.BrightWhite), bold = !opPanel.isSetupLampOn)
+        terminal.writeText(x, 3, Fmt.padRight(topRow2(i), 7), Some(AnsiColor.BrightWhite), bold = !opPanel.isSetupLampOn)
       }
     }
 
@@ -115,10 +116,10 @@ object OperatorConsoleView {
     val redRow1 = Vector((4, "LEADER"), (5, "MIN IW"), (6, "MAX IW"), (7, "MAX"),  (8, "MIN"),    (9, "DEAD"))
     val redRow2 = Vector((4, "SPACE"),  (5, ""),       (6, ""),       (7, "QUAD"), (8, "HYPHEN"), (9, "KEY"))
     for ((idx, text) <- redRow1 if text.nonEmpty) {
-      terminal.writeText(lampX(idx), 5, f"$text%-7s", Some(redColor), bold = opPanel.isSetupLampOn)
+      terminal.writeText(lampX(idx), 5, Fmt.padRight(text, 7), Some(redColor), bold = opPanel.isSetupLampOn)
     }
     for ((idx, text) <- redRow2 if text.nonEmpty) {
-      terminal.writeText(lampX(idx), 6, f"$text%-7s", Some(redColor), bold = opPanel.isSetupLampOn)
+      terminal.writeText(lampX(idx), 6, Fmt.padRight(text, 7), Some(redColor), bold = opPanel.isSetupLampOn)
     }
 
     // 3. Bottom: 12-Key Console Keyboard (y = 9..11)
@@ -127,7 +128,7 @@ object OperatorConsoleView {
     var kx = 14
     for (k <- keys) {
       val isLastPressed = opPanel.lastKeyPressed.contains(k)
-      val keyBox = if (k == ConsoleKey.Start) "[START]" else f"[  ${k.topLegend}  ]"
+      val keyBox = if (k == ConsoleKey.Start) "[START]" else s"[  ${k.topLegend}  ]"
       val keyFg = if (isLastPressed) Some(AnsiColor.BrightYellow) else Some(AnsiColor.BrightWhite)
       terminal.writeText(kx, 9, keyBox, keyFg, bold = true, inverse = isLastPressed)
 
@@ -145,7 +146,7 @@ object OperatorConsoleView {
     // 4. Operator Setup Summary Bar (y = 13..14)
     terminal.drawHLine(1, 12, terminal.width - 2, Some(AnsiColor.Gray))
     val summary1 =
-      f" MODE: ${opPanel.mode.codeLetter} (${opPanel.mode.displayName}%-10s) │ MEASURE: ${opPanel.measure}%3du │ LINE CNT: ${opPanel.lineCount}%3d │ INDENT L:${opPanel.lineIndent}%2du P:${opPanel.paraIndent}%2du │ MERGE: ${if (opPanel.mergeDecision) "YES" else "NO "}"
+      s" MODE: ${opPanel.mode.codeLetter} (${Fmt.padRight(opPanel.mode.displayName, 10)}) │ MEASURE: ${Fmt.dec3(opPanel.measure)}u │ LINE CNT: ${Fmt.dec3(opPanel.lineCount)} │ INDENT L:${Fmt.dec2(opPanel.lineIndent)}u P:${Fmt.dec2(opPanel.paraIndent)}u │ MERGE: ${if (opPanel.mergeDecision) "YES" else "NO "}"
     val promptStr = opPanel.activeSetupParam match {
       case Some(p) =>
         val buf = if (opPanel.entryBuffer.isEmpty) "_" else opPanel.entryBuffer
@@ -190,9 +191,9 @@ object OperatorConsoleView {
       val (l1, l2, lit) = topButtons(i)
       val bx = 2 + i * 12
       val fg = if (lit) Some(AnsiColor.BrightYellow) else Some(AnsiColor.BrightWhite)
-      terminal.writeText(bx, 18, f"[$l1%-6s]", fg, bold = true, inverse = lit)
+      terminal.writeText(bx, 18, s"[${Fmt.padRight(l1, 6)}]", fg, bold = true, inverse = lit)
       if (l2.nonEmpty) {
-        terminal.writeText(bx, 19, f"[$l2%-6s]", fg, bold = true, inverse = lit)
+        terminal.writeText(bx, 19, s"[${Fmt.padRight(l2, 6)}]", fg, bold = true, inverse = lit)
       }
     }
 
@@ -207,8 +208,8 @@ object OperatorConsoleView {
       val (l1, l2, lit) = botButtons(i)
       val bx = 2 + i * 12
       val fg = if (lit) Some(AnsiColor.BrightGreen) else Some(AnsiColor.BrightWhite)
-      terminal.writeText(bx, 21, f"[$l1%-6s]", fg, bold = true, inverse = lit)
-      terminal.writeText(bx, 22, f"[$l2%-6s]", fg, bold = true, inverse = lit)
+      terminal.writeText(bx, 21, s"[${Fmt.padRight(l1, 6)}]", fg, bold = true, inverse = lit)
+      terminal.writeText(bx, 22, s"[${Fmt.padRight(l2, 6)}]", fg, bold = true, inverse = lit)
     }
 
     // Tape station telemetry (y = 24..25)
@@ -219,7 +220,7 @@ object OperatorConsoleView {
           case None => s"$name: [Empty]"
           case Some(c) =>
             val stateStr = if (r.parityError) "PARITY ERR"
-                           else if (r.isLoadedOnHub) f"LOADED trk ${r.headPosition}%3d/${c.length}"
+                           else if (r.isLoadedOnHub) s"LOADED trk ${Fmt.dec3(r.headPosition)}/${c.length}"
                            else "UNLOADED (In Cart)"
             s"$name: ${c.label.take(12)} ($stateStr)"
         }
@@ -253,7 +254,7 @@ object OperatorConsoleView {
       for (i <- recentLines.indices) {
         val line = recentLines(i)
         val num = startIdx + i + 1
-        val text = f"$num%02d: $line"
+        val text = s"${Fmt.dec02(num)}: $line"
         terminal.writeText(boxX + 2, 17 + i, text.take(boxW - 4), Some(AnsiColor.BrightWhite), bold = true)
       }
     }

@@ -1,6 +1,7 @@
 package mtsc.periph
 
 import scala.collection.mutable.ArrayBuffer
+import mtsc.types.Fmt
 
 /**
  * Single typed character or space glyph on the Selectric Composer galley sheet.
@@ -115,9 +116,9 @@ class ComposerPaper {
       sb.append("│ [Blank page - no output printed yet]                            │\n")
     } else {
       for ((line, idx) <- lines.zipWithIndex) {
-        val num = f"${idx + 1}%02d"
+        val num = Fmt.dec02(idx + 1)
         val truncatedLine = if (line.length > 58) line.take(55) + "..." else line
-        sb.append(f"│ $num: $truncatedLine%-58s │\n")
+        sb.append(s"│ $num: ${Fmt.padRight(truncatedLine, 58)} │\n")
       }
     }
     sb.append("└─────────────────────────────────────────────────────────────────┘\n")

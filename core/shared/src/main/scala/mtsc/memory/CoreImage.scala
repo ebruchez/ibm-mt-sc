@@ -34,10 +34,10 @@ final class CoreImage(val bytes: Array[Byte]) {
     var addr = start.unsigned & ~0xf // 16-byte aligned
 
     while (addr < end) {
-      sb.append(f"$addr%04X: ")
+      sb.append(Fmt.hex4(addr)).append(": ")
       val hexPart = (0 until 16).map { i =>
         val a = addr + i
-        if (a < CoreImage.Size) f"${bytes(a) & 0xff}%02X " else "   "
+        if (a < CoreImage.Size) s"${Fmt.hex2(bytes(a) & 0xff)} " else "   "
       }.mkString
 
       val asciiPart = (0 until 16).map { i =>

@@ -89,20 +89,15 @@ object TapeCartridge {
     new TapeCartridge(label, ArrayBuffer.empty)
 
   val HistoricalSampleText: String =
-    """The IBM Magnetic Tape Selectric Composer is a system for preparing camera-ready copy for publication.
-      |
-      |Input data recorded on magnetic tape cartridges is read by the tape reader. Each tape cartridge holds approximately 4,000 words.
-      |
-      |The Composer Control Unit houses coincident-current magnetic core storage and Solid Logic Dense circuitry. Characters are read at 20 characters per second.
-      |
-      |Font escapement values are looked up automatically and line deficits are divided across inter-word space bands. The single-element spherical typing head prints camera-ready proofs at 14 characters per second.""".stripMargin
+    "The IBM Magnetic Tape Selectric Composer is a system for preparing camera-ready copy for publication.\n\n" +
+      "Input data recorded on magnetic tape cartridges is read by the tape reader. Each tape cartridge holds approximately 4,000 words.\n\n" +
+      "The Composer Control Unit houses coincident-current magnetic core storage and Solid Logic Dense circuitry. Characters are read at 20 characters per second.\n\n" +
+      "Font escapement values are looked up automatically and line deficits are divided across inter-word space bands. The single-element spherical typing head prints camera-ready proofs at 14 characters per second."
 
   val HistoricalMergeSampleText: String =
-    """CORRECTION MERGE TAPE:
-      |
-      |The IBM MT/SC Dual Tape Reader (Model 6310) enables merging of revised copy from the Left Station into the original recorded tape on the Right Station.
-      |
-      |Correction blocks and updated paragraphs are read from the Left Tape during playback when Merge is enabled.""".stripMargin
+    "CORRECTION MERGE TAPE:\n\n" +
+      "The IBM MT/SC Dual Tape Reader (Model 6310) enables merging of revised copy from the Left Station into the original recorded tape on the Right Station.\n\n" +
+      "Correction blocks and updated paragraphs are read from the Left Tape during playback when Merge is enabled."
 
   /**
    * Creates a tape cartridge from plain text.

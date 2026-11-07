@@ -87,6 +87,22 @@ lazy val rp2040 = project
       log.info(s"Linked RP2040 Scala Native static library: $staticLib")
 
       val firmwareDir = (ThisBuild / baseDirectory).value / "firmware"
+      // Weaken java.lang.String.indexOfImpl(Int, Int, Int) in libmtsc_rp2040.a so that
+      // ALL calls (including intra-object calls from String.indexOf(Int) inside java.lang.String.o)
+      // resolve to the alignment-safe Cortex-M0+ implementation in firmware/main.c.
+      val objcopyExit = Process(
+        Seq(
+          "arm-none-eabi-objcopy",
+          "--weaken-symbol=_SM16java.lang.StringD11indexOfImpliiiiEPT16java.lang.String",
+          "--weaken-symbol=Settings_MinHeapSize",
+          staticLib.getAbsolutePath
+        ),
+        firmwareDir
+      ).!(log)
+      if (objcopyExit != 0) {
+        sys.error(s"arm-none-eabi-objcopy failed with exit code $objcopyExit")
+      }
+
       val buildDir = firmwareDir / "build-feather-rp2040"
       IO.createDirectory(buildDir)
 

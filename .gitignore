@@ -1,6 +1,7 @@
 target/
 project/target/
 project/project/
+firmware/build-*/
 .bsp/
 .bloop/
 .metals/

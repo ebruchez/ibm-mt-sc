@@ -16,8 +16,8 @@ final case class Word(value: Int) extends AnyVal {
     Word(if (set) unsigned | mask else unsigned & ~mask)
   }
 
-  def toHexString: String = f"$unsigned%04X"
-  override def toString: String = f"0x$unsigned%04X"
+  def toHexString: String = Fmt.hex4(unsigned)
+  override def toString: String = s"0x${Fmt.hex4(unsigned)}"
 }
 
 object Word {
@@ -36,8 +36,8 @@ final case class Address(value: Int) extends AnyVal {
   def +(offset: Int): Address = Address((unsigned + offset) & 0x7ff)
   def -(offset: Int): Address = Address((unsigned - offset) & 0x7ff)
 
-  def toHexString: String = f"$unsigned%03X"
-  override def toString: String = f"0x$unsigned%03X($unsigned)"
+  def toHexString: String = Fmt.hex3(unsigned)
+  override def toString: String = s"0x${Fmt.hex3(unsigned)}($unsigned)"
 }
 
 object Address {
@@ -96,4 +96,119 @@ enum Device(val code: Int) {
   case Keyboard   extends Device(3)
   case Translator extends Device(4) // Modified Selectric Composer printer
   case Lights     extends Device(5) // Console display lamps
+}
+
+/**
+ * Lightweight, regex-free string formatting and ASCII case-conversion helpers.
+ * Avoids pulling `java.util.Formatter`, `scala.scalanative.regex`, and `StringSpecialCasing`
+ * into bare-metal RP2040 builds.
+ */
+object Fmt {
+  private val HexChars: Array[Char] = "0123456789ABCDEF".toCharArray
+
+  def hex2(v: Int): String = {
+    val c0 = HexChars((v >> 4) & 0xf)
+    val c1 = HexChars(v & 0xf)
+    new String(Array(c0, c1))
+  }
+
+  def hex3(v: Int): String = {
+    val c0 = HexChars((v >> 8) & 0xf)
+    val c1 = HexChars((v >> 4) & 0xf)
+    val c2 = HexChars(v & 0xf)
+    new String(Array(c0, c1, c2))
+  }
+
+  def hex4(v: Int): String = {
+    val c0 = HexChars((v >> 12) & 0xf)
+    val c1 = HexChars((v >> 8) & 0xf)
+    val c2 = HexChars((v >> 4) & 0xf)
+    val c3 = HexChars(v & 0xf)
+    new String(Array(c0, c1, c2, c3))
+  }
+
+  def padLeft(s: String, width: Int, padChar: Char = ' '): String = {
+    val len = s.length
+    if (len >= width) s
+    else {
+      val out = new Array[Char](width)
+      val pad = width - len
+      var i = 0
+      while (i < pad) {
+        out(i) = padChar
+        i += 1
+      }
+      var j = 0
+      while (j < len) {
+        out(pad + j) = s.charAt(j)
+        j += 1
+      }
+      new String(out)
+    }
+  }
+
+  def padRight(s: String, width: Int, padChar: Char = ' '): String = {
+    val len = s.length
+    if (len >= width) s
+    else {
+      val out = new Array[Char](width)
+      var i = 0
+      while (i < len) {
+        out(i) = s.charAt(i)
+        i += 1
+      }
+      while (i < width) {
+        out(i) = padChar
+        i += 1
+      }
+      new String(out)
+    }
+  }
+
+  def dec02(v: Int): String = padLeft(v.toString, 2, '0')
+  def dec06(v: Long): String = padLeft(v.toString, 6, '0')
+  def dec2(v: Int): String = padLeft(v.toString, 2, ' ')
+  def dec3(v: Int): String = padLeft(v.toString, 3, ' ')
+  def dec4(v: Int): String = padLeft(v.toString, 4, ' ')
+  def dec5(v: Int): String = padLeft(v.toString, 5, ' ')
+
+  def asciiUpper(s: String): String = {
+    val len = s.length
+    var needsChange = false
+    var i = 0
+    while (i < len && !needsChange) {
+      val c = s.charAt(i)
+      if (c >= 'a' && c <= 'z') needsChange = true
+      i += 1
+    }
+    if (!needsChange) return s
+    val out = new Array[Char](len)
+    i = 0
+    while (i < len) {
+      val c = s.charAt(i)
+      out(i) = if (c >= 'a' && c <= 'z') (c - 32).toChar else c
+      i += 1
+    }
+    new String(out)
+  }
+
+  def asciiLower(s: String): String = {
+    val len = s.length
+    var needsChange = false
+    var i = 0
+    while (i < len && !needsChange) {
+      val c = s.charAt(i)
+      if (c >= 'A' && c <= 'Z') needsChange = true
+      i += 1
+    }
+    if (!needsChange) return s
+    val out = new Array[Char](len)
+    i = 0
+    while (i < len) {
+      val c = s.charAt(i)
+      out(i) = if (c >= 'A' && c <= 'Z') (c + 32).toChar else c
+      i += 1
+    }
+    new String(out)
+  }
 }

@@ -26,7 +26,7 @@ object CcuEngineMode {
   /** Default execution engine for the full system simulator (CLI & Web UI). */
   val Default: CcuEngineMode = CcuEngineMode.Ild
 
-  def fromString(raw: String): Option[CcuEngineMode] = raw.trim.toLowerCase match {
+  def fromString(raw: String): Option[CcuEngineMode] = Fmt.asciiLower(raw.trim) match {
     case "ild" | "gate" | "gate-level" | "hardware" | "--ild" | "--gate" =>
       Some(CcuEngineMode.Ild)
     case "behavioral" | "isa" | "high-level" | "fast" | "--behavioral" | "--isa" =>

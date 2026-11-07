@@ -22,39 +22,41 @@ object Assembler {
 
   def assemble(source: String): Either[List[AsmError], CoreImage] = {
     val errors = List.newBuilder[AsmError]
-    val lines = source.linesIterator.zipWithIndex.map { case (text, idx) =>
-      SourceLine(idx + 1, text)
-    }.toList
 
     // Pass 1: Parse statements, track PC, record labels
     var currentPc = 546 // Default start address (Address.PowerOn)
     val symbols = collection.mutable.Map[String, Int]()
-    val statements = List.newBuilder[(SourceLine, Int, Statement)]
+    val statements = List.newBuilder[(Int, Int, Statement)]
 
-    for (line <- lines) {
-      val stripped = line.text.split(';').headOption.getOrElse("").trim
+    var lineNo = 0
+    val lineIter = source.linesIterator
+    while (lineIter.hasNext) {
+      val lineText = lineIter.next()
+      lineNo += 1
+      val semiIdx = lineText.indexOf(';')
+      val stripped = (if (semiIdx >= 0) lineText.substring(0, semiIdx) else lineText).trim
       if (stripped.nonEmpty) {
         // Check for label
-        val (labelOpt, rest) = if (stripped.contains(':')) {
-          val parts = stripped.split(":", 2)
-          (Some(parts(0).trim), parts(1).trim)
+        val colonIdx = stripped.indexOf(':')
+        val (labelOpt, rest) = if (colonIdx >= 0) {
+          (Some(stripped.substring(0, colonIdx).trim), stripped.substring(colonIdx + 1).trim)
         } else {
           (None, stripped)
         }
 
         labelOpt.foreach { label =>
           if (symbols.contains(label)) {
-            errors += AsmError(line.lineNo, s"Duplicate label '$label'")
+            errors += AsmError(lineNo, s"Duplicate label '$label'")
           } else {
             symbols(label) = currentPc
           }
         }
 
         if (rest.nonEmpty) {
-          parseStatement(rest, line.lineNo) match {
+          parseStatement(rest, lineNo) match {
             case Left(err) => errors += err
             case Right(stmt) =>
-              statements += ((line, currentPc, stmt))
+              statements += ((lineNo, currentPc, stmt))
               stmt match {
                 case DirectiveOrg(newPc) =>
                   currentPc = newPc
@@ -80,17 +82,17 @@ object Assembler {
     val image = CoreImage.empty()
     val parsedStmts = statements.result()
 
-    for ((line, pc, stmt) <- parsedStmts) {
+    for ((stmtLineNo, pc, stmt) <- parsedStmts) {
       stmt match {
         case DirectiveOrg(_) =>
           // PC updated during pass 1
 
         case DirectiveWord(expr) =>
-          parseNumberOrSymbol(expr, symbols.toMap) match {
+          parseNumberOrSymbol(expr, symbols) match {
             case Right(num) =>
               image.writeWord(Address(pc), Word(num & 0xffff))
             case Left(err) =>
-              errors += AsmError(line.lineNo, err)
+              errors += AsmError(stmtLineNo, err)
           }
 
         case DirectiveByte(value) =>
@@ -102,7 +104,7 @@ object Assembler {
           }
 
         case AsmInstruction(mnemonic, args) =>
-          encodeInstruction(mnemonic, args, pc, symbols.toMap, line.lineNo) match {
+          encodeInstruction(mnemonic, args, pc, symbols, stmtLineNo) match {
             case Right(insn) =>
               val word = Encoder.encode(insn)
               image.writeWord(Address(pc), word)
@@ -117,9 +119,13 @@ object Assembler {
   }
 
   private def parseStatement(lineText: String, lineNo: Int): Either[AsmError, Statement] = {
-    val tokens = lineText.trim.split("\\s+", 2)
-    val op = tokens(0).toUpperCase
-    val argsStr = if (tokens.length > 1) tokens(1).trim else ""
+    val trimmed = lineText.trim
+    var wsIdx = 0
+    while (wsIdx < trimmed.length && !trimmed.charAt(wsIdx).isWhitespace) {
+      wsIdx += 1
+    }
+    val op = Fmt.asciiUpper(trimmed.substring(0, wsIdx))
+    val argsStr = if (wsIdx < trimmed.length) trimmed.substring(wsIdx).trim else ""
 
     op match {
       case ".ORG" =>
@@ -143,8 +149,20 @@ object Assembler {
     }
   }
 
-  private def splitArgs(args: String): List[String] =
-    args.split(',').map(_.trim).filter(_.nonEmpty).toList
+  private def splitArgs(args: String): List[String] = {
+    val out = List.newBuilder[String]
+    var start = 0
+    var commaIdx = args.indexOf(',', start)
+    while (commaIdx >= 0) {
+      val part = args.substring(start, commaIdx).trim
+      if (part.nonEmpty) out += part
+      start = commaIdx + 1
+      commaIdx = args.indexOf(',', start)
+    }
+    val last = args.substring(start).trim
+    if (last.nonEmpty) out += last
+    out.result()
+  }
 
   private def parseNumber(str: String): Option[Int] = {
     val s = str.trim
@@ -155,7 +173,7 @@ object Assembler {
     }
   }
 
-  private def parseNumberOrSymbol(expr: String, symbols: Map[String, Int]): Either[String, Int] = {
+  private def parseNumberOrSymbol(expr: String, symbols: collection.Map[String, Int]): Either[String, Int] = {
     val s = expr.trim
     symbols.get(s)
       .map(Right.apply)
@@ -163,14 +181,14 @@ object Assembler {
   }
 
   private def parseReg(str: String): Option[RegId] = {
-    val s = str.trim.toUpperCase
+    val s = Fmt.asciiUpper(str.trim)
     if (s.startsWith("R")) {
       scala.util.Try(s.substring(1).toInt).toOption.filter(i => i >= 0 && i < 32).map(RegId.apply)
     } else None
   }
 
   private def parseDevice(str: String): Option[Device] = {
-    str.trim.toUpperCase match {
+    Fmt.asciiUpper(str.trim) match {
       case "TAPE" | "TAPE_R" | "RIGHT_TAPE" => Some(Device.RightTape)
       case "TAPE_L" | "LEFT_TAPE"           => Some(Device.LeftTape)
       case "PAPER" | "PAPER_TAPE"           => Some(Device.PaperTape)
@@ -185,7 +203,7 @@ object Assembler {
     mnemonic: String,
     args: List[String],
     pc: Int,
-    symbols: Map[String, Int],
+    symbols: collection.Map[String, Int],
     lineNo: Int
   ): Either[AsmError, Instruction] = {
 

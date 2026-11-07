@@ -25,10 +25,15 @@ add_executable(mtsc_feather_rp2040
     main.c
 )
 
+target_compile_definitions(mtsc_feather_rp2040 PRIVATE
+    PICO_STACK_SIZE=0x1000
+    PICO_STDIO_USB_CONNECT_WAIT_TIMEOUT_MS=0
+)
+
 pico_generate_pio_header(mtsc_feather_rp2040 ${CMAKE_CURRENT_LIST_DIR}/ws2812.pio)
 
 pico_enable_stdio_usb(mtsc_feather_rp2040 1)
-pico_enable_stdio_uart(mtsc_feather_rp2040 1)
+pico_enable_stdio_uart(mtsc_feather_rp2040 0)
 
 pico_add_extra_outputs(mtsc_feather_rp2040)
 

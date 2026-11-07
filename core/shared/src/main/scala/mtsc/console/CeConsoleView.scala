@@ -68,12 +68,12 @@ object CeConsoleView {
     val bw = cpu.memory.bWord
     val cycles = cpu.state.cycleCount
     val modeStr = s"MODE: [${state.mode.displayName}]"
-    val psarStr = f"PSAR: 0x${psar.unsigned}%03X (${psar.unsigned}%4d)"
-    val awStr   = f"AW: 0x${aw.unsigned}%04X"
-    val bwStr   = f"BW: 0x${bw.unsigned}%04X"
+    val psarStr = s"PSAR: 0x${Fmt.hex3(psar.unsigned)} (${Fmt.dec4(psar.unsigned)})"
+    val awStr   = s"AW: 0x${Fmt.hex4(aw.unsigned)}"
+    val bwStr   = s"BW: 0x${Fmt.hex4(bw.unsigned)}"
     val speedStr = if (!state.realTimePacing || state.pacingSpeed <= 0.0) "MAX"
-                   else f"${state.pacingSpeed}%.0fx (${(14 * state.pacingSpeed).toInt} cps)"
-    val headerLine = f" $modeStr%-18s $psarStr  $awStr  $bwStr  CYC:$cycles%06d  [$speedStr│${cpu.engineMode.shortLabel}]"
+                   else s"${state.pacingSpeed.toInt}x (${(14 * state.pacingSpeed).toInt} cps)"
+    val headerLine = s" ${Fmt.padRight(modeStr, 18)} $psarStr  $awStr  $bwStr  CYC:${Fmt.dec06(cycles)}  [$speedStr│${cpu.engineMode.shortLabel}]"
     terminal.writeText(2, 1, headerLine, Some(AnsiColor.BrightWhite), bold = true)
   }
 
@@ -98,7 +98,7 @@ object CeConsoleView {
         val c = if (lamp.spec.isRedLens) AnsiColor.Red else AnsiColor.Gray
         (Some(c), false, false)
       }
-      terminal.writeText(x, 4, f"[$rawLbl%4s]", fg, bold = bold, inverse = inv)
+      terminal.writeText(x, 4, s"[${Fmt.padLeft(rawLbl, 4)}]", fg, bold = bold, inverse = inv)
       x += 6
       if (idx == 2 || idx == 6) {
         terminal.writeText(x, 4, "│", Some(AnsiColor.Cyan), bold = true)
@@ -120,7 +120,7 @@ object CeConsoleView {
     var bx = 72
     for ((label, on, activeColor) <- summaryBadges) {
       val (fg, bold, inv) = if (on) (Some(activeColor), true, true) else (Some(AnsiColor.Gray), false, false)
-      terminal.writeText(bx, 4, f"[$label%4s]", fg, bold = bold, inverse = inv)
+      terminal.writeText(bx, 4, s"[${Fmt.padLeft(label, 4)}]", fg, bold = bold, inverse = inv)
       bx += 7
     }
   }
@@ -141,7 +141,7 @@ object CeConsoleView {
         val regIdx = col * 8 + row
         val regId = RegId(regIdx)
         val word = cpu.memory.readReg(regId)
-        val text = f"R$regIdx%02d: 0x${word.unsigned}%04X (${word.unsigned}%5d)"
+        val text = s"R${Fmt.dec02(regIdx)}: 0x${Fmt.hex4(word.unsigned)} (${Fmt.dec5(word.unsigned)})"
         val x = 2 + col * colWidth
         val y = 7 + row
 
@@ -174,7 +174,7 @@ object CeConsoleView {
       val disasmStr = Disassembler.disassemble(rawWord, addr)
 
       val marker = if (isCurrent) ">>>" else if (hasBp) " * " else "   "
-      val line = f"$marker 0x${addr.unsigned}%03X: ${rawWord.unsigned}%04X  $disasmStr%-26s"
+      val line = s"$marker 0x${Fmt.hex3(addr.unsigned)}: ${Fmt.hex4(rawWord.unsigned)}  ${Fmt.padRight(disasmStr, 26)}"
 
       val (fg, bold) = if (isCurrent) {
         (Some(AnsiColor.BrightYellow), true)
@@ -199,7 +199,7 @@ object CeConsoleView {
 
     val baseAddr = state.memoryInspectionAddress.unsigned & 0x7f0
     val regionName = getMemoryRegionName(baseAddr)
-    val title = f"CORE MEMORY (0x$baseAddr%03X - $regionName)"
+    val title = s"CORE MEMORY (0x${Fmt.hex3(baseAddr)} - $regionName)"
     terminal.drawBox(boxX, 16, boxW, boxH, title, Some(AnsiColor.Cyan))
 
     for (row <- 0 until 9) {
@@ -209,12 +209,12 @@ object CeConsoleView {
 
       for (b <- 0 until 16) {
         val byteVal = cpu.memory.readByte(Address(rowAddr + b))
-        sbHex.append(f"$byteVal%02X ")
+        sbHex.append(Fmt.hex2(byteVal)).append(' ')
         val ch = if (byteVal >= 32 && byteVal <= 126) byteVal.toChar else '.'
         sbAscii.append(ch)
       }
 
-      val line = f"0x$rowAddr%03X: ${sbHex.toString()} │${sbAscii.toString()}│"
+      val line = s"0x${Fmt.hex3(rowAddr)}: ${sbHex.toString()} │${sbAscii.toString()}│"
       terminal.writeText(boxX + 1, 17 + row, line.take(boxW - 2), Some(AnsiColor.White))
     }
   }
@@ -243,7 +243,7 @@ object CeConsoleView {
       for (i <- recentLines.indices) {
         val line = recentLines(i)
         val num = startIdx + i + 1
-        val text = f"$num%02d: $line"
+        val text = s"${Fmt.dec02(num)}: $line"
         terminal.writeText(boxX + 2, 17 + i, text.take(boxW - 4), Some(AnsiColor.BrightWhite), bold = true)
       }
     }

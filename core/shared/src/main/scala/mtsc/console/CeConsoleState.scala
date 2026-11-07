@@ -308,7 +308,7 @@ class CeConsoleState {
         statusMessage = cpuOpt match {
           case Some(cpu) =>
             val a = cpu.memory.psar.unsigned
-            f"Edit Selector [Addr]: Display 1 (Y 11..Y 1). PSAR = $a (0x$a%03X). Press Clear to zero, or keys 0..9/R to set Y bits."
+            s"Edit Selector [Addr]: Display 1 (Y 11..Y 1). PSAR = $a (0x${Fmt.hex3(a)}). Press Clear to zero, or keys 0..9/R to set Y bits."
           case None =>
             "Edit Memory Selector switch: Addr (Display 1)"
         }
@@ -331,7 +331,7 @@ class CeConsoleState {
             val a = cpu.memory.psar.unsigned
             val b = cpu.state.outputReg & 0xff
             val binStr = s"${toNibbleBinary(b >> 4)} ${toNibbleBinary(b)}"
-            f"Edit Selector [Data]: Display 2 (O 8..O 1). Byte at $a (0x$a%03X) = $binStr (0x$b%02X). Press Clear to zero, or keys 3..9/R to set O bits."
+            s"Edit Selector [Data]: Display 2 (O 8..O 1). Byte at $a (0x${Fmt.hex3(a)}) = $binStr (0x${Fmt.hex2(b)}). Press Clear to zero, or keys 3..9/R to set O bits."
           case None =>
             "Edit Memory Selector switch: Data (Display 2)"
         }
@@ -362,9 +362,9 @@ class CeConsoleState {
           case Some(cpu) =>
             val a = cpu.memory.psar.unsigned
             if ((a & 1) != 0)
-              f"Edit Selector [Proc]: Note — PSAR is at odd byte $a (0x$a%03X); set Addr to an even instruction address (e.g. 42 / 0x02A)."
+              s"Edit Selector [Proc]: Note — PSAR is at odd byte $a (0x${Fmt.hex3(a)}); set Addr to an even instruction address (e.g. 42 / 0x02A)."
             else
-              f"Edit Memory Selector switch: Proc (ready at PSAR $a / 0x$a%03X)."
+              s"Edit Memory Selector switch: Proc (ready at PSAR $a / 0x${Fmt.hex3(a)})."
           case None =>
             "Edit Memory Selector switch: Proc"
         }
@@ -411,8 +411,8 @@ class CeConsoleState {
         cpu.memory.writeByte(addr, 0)
         cpu.state.mal = addr
         cpu.state.outputReg = 0
-        log(f"CE Clear [Data]: cleared byte at ${addr.unsigned} (0x${addr.unsigned}%03X) to 0x00.")
-        f"Cleared byte at ${addr.unsigned} (0x${addr.unsigned}%03X) to 0000 0000 (0x00)."
+        log(s"CE Clear [Data]: cleared byte at ${addr.unsigned} (0x${Fmt.hex3(addr.unsigned)}) to 0x00.")
+        s"Cleared byte at ${addr.unsigned} (0x${Fmt.hex3(addr.unsigned)}) to 0000 0000 (0x00)."
 
       case _ =>
         cpu.state.inhibit = false
@@ -455,7 +455,7 @@ class CeConsoleState {
             cpu.memory.aWord = cpu.memory.readWord(Address(updated & 0x7fe))
             cpu.state.outputReg = cpu.memory.readByte(addr)
             cpu.state.pBuffer = 1 << (bit & 3)
-            val m = f"CE Edit Addr [Key ${key.topLegend} -> Y ${bit + 1} (+${1 << bit})]: PSAR = $updated (0x$updated%03X)."
+            val m = s"CE Edit Addr [Key ${key.topLegend} -> Y ${bit + 1} (+${1 << bit})]: PSAR = $updated (0x${Fmt.hex3(updated)})."
             log(m)
             m
 
@@ -477,7 +477,7 @@ class CeConsoleState {
             cpu.state.outputReg = updated
             cpu.state.pBuffer = 1 << (bit & 3)
             val binStr = s"${toNibbleBinary(updated >> 4)} ${toNibbleBinary(updated)}"
-            val m = f"CE Edit Data [Key ${key.topLegend} -> O ${bit + 1}] at ${addr.unsigned} (0x${addr.unsigned}%03X): $binStr (0x$updated%02X)."
+            val m = s"CE Edit Data [Key ${key.topLegend} -> O ${bit + 1}] at ${addr.unsigned} (0x${Fmt.hex3(addr.unsigned)}): $binStr (0x${Fmt.hex2(updated)})."
             log(m)
             m
 
@@ -495,11 +495,11 @@ class CeConsoleState {
   def toggleBreakpoint(addr: Address): Boolean = {
     if (breakpoints.contains(addr)) {
       breakpoints -= addr
-      log(f"Breakpoint cleared at 0x${addr.unsigned}%03X")
+      log(s"Breakpoint cleared at 0x${Fmt.hex3(addr.unsigned)}")
       false
     } else {
       breakpoints += addr
-      log(f"Breakpoint set at 0x${addr.unsigned}%03X")
+      log(s"Breakpoint set at 0x${Fmt.hex3(addr.unsigned)}")
       true
     }
   }
@@ -661,8 +661,8 @@ class CeConsoleState {
         "Cleared PSAR & MAL to 0 (0x000)."
       case CeEditSelector.Data =>
         val addr = ild.memory.psar
-        log(f"CE Clear [Data]: cleared byte at ${addr.unsigned} (0x${addr.unsigned}%03X) to 0x00.")
-        f"Cleared byte at ${addr.unsigned} (0x${addr.unsigned}%03X) to 0000 0000 (0x00)."
+        log(s"CE Clear [Data]: cleared byte at ${addr.unsigned} (0x${Fmt.hex3(addr.unsigned)}) to 0x00.")
+        s"Cleared byte at ${addr.unsigned} (0x${Fmt.hex3(addr.unsigned)}) to 0000 0000 (0x00)."
       case _ =>
         log("CE Clear: reset condition and error indicators (RES INDS).")
         "Indicators cleared."
@@ -683,7 +683,7 @@ class CeConsoleState {
         val msg = key.addrBitIndex match {
           case Some(bit) =>
             val updated = ild.memory.psar.unsigned
-            f"CE Edit Addr [Key ${key.topLegend} -> Y ${bit + 1} (+${1 << bit})]: PSAR = $updated (0x$updated%03X)."
+            s"CE Edit Addr [Key ${key.topLegend} -> Y ${bit + 1} (+${1 << bit})]: PSAR = $updated (0x${Fmt.hex3(updated)})."
           case None =>
             "CE Edit Addr: START has no Y-latch bit (use keys 0..9, R for Y 11..Y 1; press Clear to zero)."
         }
@@ -699,7 +699,7 @@ class CeConsoleState {
             val addr = ild.memory.psar
             val updated = ild.state.outputReg & 0xff
             val binStr = s"${toNibbleBinary(updated >> 4)} ${toNibbleBinary(updated)}"
-            f"CE Edit Data [Key ${key.topLegend} -> O ${bit + 1}] at ${addr.unsigned} (0x${addr.unsigned}%03X): $binStr (0x$updated%02X)."
+            s"CE Edit Data [Key ${key.topLegend} -> O ${bit + 1}] at ${addr.unsigned} (0x${Fmt.hex3(addr.unsigned)}): $binStr (0x${Fmt.hex2(updated)})."
           case None =>
             s"CE Edit Data: Key ${key.topLegend} ignored by -BT CTR B gate (use keys 3..9, R for O 8..O 1; press Clear to zero byte)."
         }
@@ -710,7 +710,7 @@ class CeConsoleState {
       case CeEditSelector.Edit | CeEditSelector.Prog if key == ConsoleKey.Start =>
         ild.pressCeKey(key)
         val updated = ild.memory.psar.unsigned
-        val msg = f"CE Edit [${editSelector.label}]: START advanced PSAR by +1 to $updated (0x$updated%03X)."
+        val msg = s"CE Edit [${editSelector.label}]: START advanced PSAR by +1 to $updated (0x${Fmt.hex3(updated)})."
         log(msg)
         statusMessage = msg
         Some(msg)

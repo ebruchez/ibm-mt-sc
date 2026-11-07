@@ -37,7 +37,7 @@ object Main {
     var i = 0
     while (i < args.length) {
       val arg = args(i)
-      val lower = arg.toLowerCase
+      val lower = Fmt.asciiLower(arg)
       if (lower == "--ild" || lower == "--gate" || lower == "--gate-level" || lower == "--engine=ild" || lower == "--engine=gate") {
         system.setEngineMode(CcuEngineMode.Ild)
       } else if (lower == "--behavioral" || lower == "--isa" || lower == "--engine=behavioral" || lower == "--engine=isa") {
@@ -117,7 +117,7 @@ object Main {
       system.memory.writeByte(Address(316 + sampleText.length), 0)
     }
 
-    consoleState.log(f"Program '${prog.name}' loaded at 0x${system.memory.psar.unsigned}%03X.")
+    consoleState.log(s"Program '${prog.name}' loaded at 0x${Fmt.hex3(system.memory.psar.unsigned)}.")
     val speedNote = if (consoleState.realTimePacing) " [Real-time 14 cps]" else " [Instant]"
     consoleState.statusMessage = s"Loaded ${prog.name}.$speedNote Press [r] to run, [a] to toggle pacing."
   }
@@ -133,8 +133,8 @@ object Main {
       val filename = new java.io.File(path).getName
       system.loadTape(station, TapeCartridge.fromText(content, filename))
       val stName = if (station == Device.LeftTape) "Left" else "Right"
-      consoleState.log(f"Mounted '$filename' (${content.length} chars) on $stName Tape Reader.")
-      consoleState.statusMessage = f"Tape mounted on $stName: '$filename' (${content.length} chars). Press [r] to compose."
+      consoleState.log(s"Mounted '$filename' (${content.length} chars) on $stName Tape Reader.")
+      consoleState.statusMessage = s"Tape mounted on $stName: '$filename' (${content.length} chars). Press [r] to compose."
       true
     } catch {
       case e: Exception =>
@@ -188,11 +188,10 @@ object Main {
     mountFileFn: (String, Device, MtscSystem, CeConsoleState) => Boolean = (_, _, _, _) => false,
     runFn: () => Unit = () => ()
   ): Boolean = {
-    if (cmd.equalsIgnoreCase("q") || cmd.equalsIgnoreCase("quit") || cmd.equalsIgnoreCase("exit")) {
+    val lower = Fmt.asciiLower(cmd)
+    if (lower == "q" || lower == "quit" || lower == "exit") {
       return false
     }
-
-    val lower = cmd.toLowerCase
 
     // If CE Chassis is exposed and Edit Selector is in Addr or Data position, route console keys 0..9 and R to hardware bit entry
     if (
@@ -236,10 +235,10 @@ object Main {
         val prevAddr = system.memory.psar
         val res = system.step()
         val insnStr = system.cpu.state.lastInsn.map(_.toString).getOrElse("")
-        consoleState.log(f"Step 0x${prevAddr.unsigned}%03X: $insnStr")
+        consoleState.log(s"Step 0x${Fmt.hex3(prevAddr.unsigned)}: $insnStr")
         res match {
           case StepResult.Halted =>
-            consoleState.statusMessage = f"Program HALTED at 0x${system.memory.psar.unsigned}%03X."
+            consoleState.statusMessage = s"Program HALTED at 0x${Fmt.hex3(system.memory.psar.unsigned)}."
             consoleState.log("CPU entered halt loop.")
           case StepResult.Stalled =>
             consoleState.statusMessage = "I/O Stalled (Inhibit latch active - waiting for peripheral)."
@@ -247,7 +246,7 @@ object Main {
             consoleState.statusMessage = s"Execution Error: $err"
             consoleState.log(s"ERROR: $err")
           case StepResult.Normal =>
-            consoleState.statusMessage = f"Stepped to 0x${system.memory.psar.unsigned}%03X."
+            consoleState.statusMessage = s"Stepped to 0x${Fmt.hex3(system.memory.psar.unsigned)}."
         }
 
       case "r" | "run" =>
@@ -265,7 +264,7 @@ object Main {
           consoleState.realTimePacing = false
         }
         val stateStr = if (consoleState.realTimePacing) {
-          f"ENABLED at ${consoleState.pacingSpeed}%.0fx (${(14 * consoleState.pacingSpeed).toInt} cps)"
+          s"ENABLED at ${consoleState.pacingSpeed.toInt}x (${(14 * consoleState.pacingSpeed).toInt} cps)"
         } else {
           "DISABLED (instant/max speed)"
         }
@@ -403,24 +402,24 @@ object Main {
         val targetTape = if (system.leftTape.isTapeLoaded && !system.rightTape.isTapeLoaded) system.leftTape else system.rightTape
         val targetName = if (targetTape eq system.leftTape) "Left" else "Right"
         if (targetTape.injectParityError()) {
-          consoleState.log(f"Injected parity error on track ${targetTape.headPosition} of $targetName Tape.")
-          consoleState.statusMessage = f"Parity error injected on $targetName track ${targetTape.headPosition}. [ERR] lamp will light on next read."
+          consoleState.log(s"Injected parity error on track ${targetTape.headPosition} of $targetName Tape.")
+          consoleState.statusMessage = s"Parity error injected on $targetName track ${targetTape.headPosition}. [ERR] lamp will light on next read."
         } else {
           consoleState.statusMessage = s"Cannot inject parity error: no $targetName tape mounted or end reached."
         }
 
       case "e left" =>
         if (system.leftTape.injectParityError()) {
-          consoleState.log(f"Injected parity error on track ${system.leftTape.headPosition} of Left Tape.")
-          consoleState.statusMessage = f"Parity error injected on track ${system.leftTape.headPosition} of Left Tape."
+          consoleState.log(s"Injected parity error on track ${system.leftTape.headPosition} of Left Tape.")
+          consoleState.statusMessage = s"Parity error injected on track ${system.leftTape.headPosition} of Left Tape."
         } else {
           consoleState.statusMessage = "Cannot inject parity error: no Left Tape mounted or end reached."
         }
 
       case "e right" =>
         if (system.rightTape.injectParityError()) {
-          consoleState.log(f"Injected parity error on track ${system.rightTape.headPosition} of Right Tape.")
-          consoleState.statusMessage = f"Parity error injected on track ${system.rightTape.headPosition} of Right Tape."
+          consoleState.log(s"Injected parity error on track ${system.rightTape.headPosition} of Right Tape.")
+          consoleState.statusMessage = s"Parity error injected on track ${system.rightTape.headPosition} of Right Tape."
         } else {
           consoleState.statusMessage = "Cannot inject parity error: no Right Tape mounted or end reached."
         }
@@ -452,24 +451,24 @@ object Main {
         loadProgram(nextProg, system, consoleState)
 
       case s if s.startsWith("b ") || s.startsWith("bp ") =>
-        val parts = s.split("\\s+")
-        if (parts.length > 1) {
+        val arg = s.substring(s.indexOf(' ') + 1).trim
+        if (arg.nonEmpty) {
           try {
-            val addrInt = Integer.parseInt(parts(1).replace("0x", ""), 16)
+            val addrInt = Integer.parseInt(arg.replace("0x", "").replace("0X", ""), 16)
             consoleState.toggleBreakpoint(Address(addrInt))
-            consoleState.statusMessage = f"Toggled breakpoint at 0x$addrInt%03X."
+            consoleState.statusMessage = s"Toggled breakpoint at 0x${Fmt.hex3(addrInt)}."
           } catch {
             case _: Exception => consoleState.statusMessage = "Invalid hex address."
           }
         }
 
       case s if s.startsWith("j ") || s.startsWith("mem ") =>
-        val parts = s.split("\\s+")
-        if (parts.length > 1) {
+        val arg = s.substring(s.indexOf(' ') + 1).trim
+        if (arg.nonEmpty) {
           try {
-            val addrInt = Integer.parseInt(parts(1).replace("0x", ""), 16)
+            val addrInt = Integer.parseInt(arg.replace("0x", "").replace("0X", ""), 16)
             consoleState.memoryInspectionAddress = Address(addrInt)
-            consoleState.statusMessage = f"Memory view set to 0x$addrInt%03X."
+            consoleState.statusMessage = s"Memory view set to 0x${Fmt.hex3(addrInt)}."
           } catch {
             case _: Exception => consoleState.statusMessage = "Invalid hex address."
           }
@@ -491,8 +490,8 @@ object Main {
       val bootRes = system.runBootLoader()
       bootRes match {
         case StepResult.Normal =>
-          consoleState.log(f"Cold boot complete: loaded program from tape, CPU at 0x${system.memory.psar.unsigned}%03X.")
-          consoleState.statusMessage = f"Cold boot complete! CPU ready at 0x${system.memory.psar.unsigned}%03X. Mount text tape [t] and [r] to compose."
+          consoleState.log(s"Cold boot complete: loaded program from tape, CPU at 0x${Fmt.hex3(system.memory.psar.unsigned)}.")
+          consoleState.statusMessage = s"Cold boot complete! CPU ready at 0x${Fmt.hex3(system.memory.psar.unsigned)}. Mount text tape [t] and [r] to compose."
         case other =>
           consoleState.statusMessage = s"Boot loader stopped: $other"
       }
@@ -556,16 +555,16 @@ object Main {
     }
 
     if (interrupted) {
-      consoleState.statusMessage = f"Execution paused by user at 0x${system.memory.psar.unsigned}%03X after $steps steps."
-      consoleState.log(f"Execution paused at 0x${system.memory.psar.unsigned}%03X.")
+      consoleState.statusMessage = s"Execution paused by user at 0x${Fmt.hex3(system.memory.psar.unsigned)} after $steps steps."
+      consoleState.log(s"Execution paused at 0x${Fmt.hex3(system.memory.psar.unsigned)}.")
     } else if (hitBreakpoint) {
-      consoleState.statusMessage = f"Breakpoint hit at 0x${system.memory.psar.unsigned}%03X after $steps steps."
-      consoleState.log(f"Breakpoint hit at 0x${system.memory.psar.unsigned}%03X.")
+      consoleState.statusMessage = s"Breakpoint hit at 0x${Fmt.hex3(system.memory.psar.unsigned)} after $steps steps."
+      consoleState.log(s"Breakpoint hit at 0x${Fmt.hex3(system.memory.psar.unsigned)}.")
     } else if (res == StepResult.Halted) {
-      consoleState.statusMessage = f"Composition completed in $steps cycles (${system.paper.lines.length} lines on galley proof)."
-      consoleState.log(f"Program HALTED after $steps cycles. ${system.paper.lines.length} lines printed.")
+      consoleState.statusMessage = s"Composition completed in $steps cycles (${system.paper.lines.length} lines on galley proof)."
+      consoleState.log(s"Program HALTED after $steps cycles. ${system.paper.lines.length} lines printed.")
     } else {
-      consoleState.statusMessage = f"Ran $steps steps."
+      consoleState.statusMessage = s"Ran $steps steps."
     }
   }
 
