@@ -86,19 +86,20 @@ object OperatorConsoleView {
     }
 
     // 11 Lamp Lenses at y = 4
-    val computedLamps = state.computeLamps(cpu)
+    val lampsMask = state.computeLampsMask(cpu)
+    val allSpecs = ConsoleLampSpec.AllLamps
     for (i <- 0 until 11) {
       val x = lampX(i)
-      val lamp = computedLamps(i)
-      val isRedLens = lamp.spec.isRedLens
-      val (glyph, fg, inv) = if (lamp.isOn) {
+      val isOn = ((lampsMask >> i) & 1) != 0
+      val isRedLens = allSpecs(i).isRedLens
+      val (glyph, fg, inv) = if (isOn) {
         val c = if (isRedLens) AnsiColor.BrightRed else AnsiColor.BrightYellow
         (" (●) ", Some(c), true)
       } else {
         val c = if (isRedLens) AnsiColor.Red else AnsiColor.Gray
         (" (○) ", Some(c), false)
       }
-      terminal.writeText(x + 1, 4, glyph, fg, bold = lamp.isOn, inverse = inv)
+      terminal.writeText(x + 1, 4, glyph, fg, bold = isOn, inverse = inv)
     }
 
     // Bottom Legends below Lamps (y = 5, 6, 7):
@@ -242,20 +243,31 @@ object OperatorConsoleView {
     val title = "SELECTRIC COMPOSER ─ CAMERA-READY GALLEY PROOF"
     terminal.drawBox(boxX, 16, boxW, boxH, title, Some(AnsiColor.BrightGreen))
 
-    val lines = paper.lines
-    if (lines.isEmpty) {
+    val totalLines = paper.lineCount
+    if (totalLines == 0) {
       terminal.writeText(boxX + 2, 18, "[Galley blank - no text printed yet]", Some(AnsiColor.Gray))
       terminal.writeText(boxX + 2, 20, "Press [r] to run automatic typesetting or", Some(AnsiColor.Gray))
       terminal.writeText(boxX + 2, 21, "press [p] to step through Operator Setup.", Some(AnsiColor.Gray))
       terminal.writeText(boxX + 2, 23, "Press [f] to remove faceplate (CE Console).", Some(AnsiColor.BrightYellow))
     } else {
-      val recentLines = lines.takeRight(9)
-      val startIdx = lines.length - recentLines.length
-      for (i <- recentLines.indices) {
-        val line = recentLines(i)
-        val num = startIdx + i + 1
-        val text = s"${Fmt.dec02(num)}: $line"
-        terminal.writeText(boxX + 2, 17 + i, text.take(boxW - 4), Some(AnsiColor.BrightWhite), bold = true)
+      val startIdx = math.max(0, totalLines - 9)
+      val count = totalLines - startIdx
+      val completedCount = paper.completedLinesCount
+      val white = Some(AnsiColor.BrightWhite)
+      val maxTextLen = boxW - 8
+      var i = 0
+      while (i < count) {
+        val lineIdx = startIdx + i
+        val num = lineIdx + 1
+        val y = 17 + i
+        var cx = terminal.writeDec(boxX + 2, y, num, 2, '0', white, bold = true)
+        cx = terminal.writeText(cx, y, ": ", white, bold = true)
+        if (lineIdx < completedCount) {
+          terminal.writeText(cx, y, paper.completedLineAt(lineIdx), white, bold = true, maxLen = maxTextLen)
+        } else {
+          terminal.writeStringBuilder(cx, y, paper.currentLineBuilder, white, bold = true, maxLen = maxTextLen)
+        }
+        i += 1
       }
     }
   }
@@ -270,9 +282,10 @@ object OperatorConsoleView {
     terminal.drawBox(0, boxY, terminal.width, boxH, "STATUS & COMMANDS (OPERATOR MODE)", Some(AnsiColor.White))
 
     val cmds = "[f] Remove Faceplate(CE)  [p] Setup Param  [0-9/Enter] Keypad/START  [u] Tape Panel  [r] Run  [q] Quit"
-    terminal.writeText(2, boxY + 1, cmds.take(terminal.width - 4), Some(AnsiColor.BrightCyan), bold = true)
+    terminal.writeText(2, boxY + 1, cmds, Some(AnsiColor.BrightCyan), bold = true, maxLen = terminal.width - 4)
 
-    val statusText = s"Status: ${state.statusMessage}"
-    terminal.writeText(2, boxY + 2, statusText.take(terminal.width - 4), Some(AnsiColor.BrightYellow))
+    val yellow = Some(AnsiColor.BrightYellow)
+    val sx = terminal.writeText(2, boxY + 2, "Status: ", yellow)
+    terminal.writeText(sx, boxY + 2, state.statusMessage, yellow, maxLen = terminal.width - 4 - 8)
   }
 }

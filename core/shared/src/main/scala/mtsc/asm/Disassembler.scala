@@ -3,6 +3,7 @@ package mtsc.asm
 import mtsc.types.*
 import mtsc.isa.*
 import mtsc.memory.CoreImage
+import mtsc.console.{AnsiColor, AnsiTerminal}
 
 /**
  * Disassembler for IBM MT/SC 16-bit instructions.
@@ -99,5 +100,164 @@ object Disassembler {
       val devStr = if (device == Device.Translator) "TSLTR" else "LTS"
       val srcStr = if (indirect) s"[$sourceReg]" else sourceReg.toString
       s"${Fmt.padRight(mnem, 8)} $devStr, $srcStr"
+  }
+
+  /**
+   * Zero-allocation disassembler that decodes `rawWord` and writes the formatted disassembly directly
+   * into `terminal` starting at `(x, y)` without allocating `Instruction`, `RegId`, or `String` objects.
+   */
+  def writeDisassembled(
+    terminal: AnsiTerminal,
+    x: Int,
+    y: Int,
+    rawWord: Int,
+    pc: Int,
+    fg: Option[AnsiColor],
+    bold: Boolean
+  ): Unit = {
+    val raw = rawWord & 0xffff
+    val top2 = (raw >> 14) & 0x3
+    var col = x
+
+    top2 match {
+      case 0 =>
+        val op34 = (raw >> 12) & 0x3
+        val op5  = (raw >> 11) & 0x1f
+        val op7  = raw & 1
+
+        if (op5 == 2 && op7 == 0) {
+          // Output
+          val m = ((raw >> 10) & 1) == 1
+          val devBits = (raw >> 7) & 0x7
+          val ind = ((raw >> 6) & 1) == 1
+          val regIdx = (raw >> 1) & 0x1f
+          val mnem = if (m) "OUTM     " else "OUT      "
+          val devStr = if (devBits == 0) "TSLTR, " else "LTS, "
+          col = terminal.writeText(col, y, mnem, fg, bold = bold)
+          col = terminal.writeText(col, y, devStr, fg, bold = bold)
+          if (ind) col = terminal.writeChar(col, y, '[', fg, bold = bold)
+          col = terminal.writeRegName(col, y, regIdx, fg, bold = bold)
+          if (ind) col = terminal.writeChar(col, y, ']', fg, bold = bold)
+        } else if (op5 == 3 && op7 == 0) {
+          // Input
+          val devBits = (raw >> 7) & 0xf
+          val devStr = devBits match {
+            case 0                 => "TAPE_R, "
+            case 2                 => "TAPE_L, "
+            case 1 | 3             => "PAPER, "
+            case 7                 => "KB, "
+            case d if (d & 1) != 0 => "PAPER, "
+            case d if (d & 2) != 0 => "TAPE_L, "
+            case _                 => "TAPE_R, "
+          }
+          val regIdx = (raw >> 1) & 0x1f
+          col = terminal.writeText(col, y, "IN      ", fg, bold = bold)
+          col = terminal.writeText(col, y, devStr, fg, bold = bold)
+          col = terminal.writeRegName(col, y, regIdx, fg, bold = bold)
+        } else if (op34 == 3 && op7 == 1) {
+          // BitControl
+          val bit11 = (raw >> 11) & 1
+          val bit6  = (raw >> 6) & 1
+          val mnem = (bit11, bit6) match {
+            case (0, 0) => "RBIT     "
+            case (0, 1) => "PBIT     "
+            case (1, 0) => "SBIT     "
+            case _      => "TBIT     "
+          }
+          val bit = (raw >> 7) & 0xf
+          val regIdx = (raw >> 1) & 0x1f
+          col = terminal.writeText(col, y, mnem, fg, bold = bold)
+          col = terminal.writeRegName(col, y, regIdx, fg, bold = bold)
+          col = terminal.writeText(col, y, ", ", fg, bold = bold)
+          col = terminal.writeDec(col, y, bit, 0, ' ', fg, bold = bold)
+        } else {
+          // Branch
+          val link = ((raw >> 11) & 1) == 1
+          val mnem = if (link) "JMPL     " else (op34, op7) match {
+            case (0, _) => "JMP      "
+            case (1, 1) => "JMP.HI   "
+            case (2, 0) => "JMP.LO   "
+            case (2, 1) => "JMP.EQ   "
+            case (3, 0) => "JMP.NE   "
+            case _      => "JMP      "
+          }
+          val target = raw & 0x7fe
+          col = terminal.writeText(col, y, mnem, fg, bold = bold)
+          col = terminal.writeText(col, y, "0x", fg, bold = bold)
+          col = terminal.writeHex3(col, y, target, fg, bold = bold)
+        }
+
+      case 1 =>
+        val pRegIdx = (raw >> 7) & 0x1f
+        val qInd = ((raw >> 6) & 1) == 1
+        val qRegIdx = (raw >> 1) & 0x1f
+        val pInd = (raw & 1) == 1
+
+        if (!pInd && !qInd) {
+          val opBits = (raw >> 12) & 0x3
+          val mnem = opBits match {
+            case 0 => "SUB      "
+            case 1 => "CMP      "
+            case 2 => "ADD      "
+            case _ => "MOV      "
+          }
+          col = terminal.writeText(col, y, mnem, fg, bold = bold)
+          col = terminal.writeRegName(col, y, pRegIdx, fg, bold = bold)
+          col = terminal.writeText(col, y, ", ", fg, bold = bold)
+          col = terminal.writeRegName(col, y, qRegIdx, fg, bold = bold)
+        } else {
+          val opBit = (raw >> 13) & 1
+          val mnem = if (opBit == 0) "CMPB     " else "MOVB     "
+          val bump = ((raw >> 12) & 1) == 1
+          col = terminal.writeText(col, y, mnem, fg, bold = bold)
+          if (pInd) col = terminal.writeChar(col, y, '[', fg, bold = bold)
+          col = terminal.writeRegName(col, y, pRegIdx, fg, bold = bold)
+          if (pInd) {
+            col = terminal.writeChar(col, y, ']', fg, bold = bold)
+            if (bump) col = terminal.writeText(col, y, "++", fg, bold = bold)
+          }
+          col = terminal.writeText(col, y, ", ", fg, bold = bold)
+          if (qInd) col = terminal.writeChar(col, y, '[', fg, bold = bold)
+          col = terminal.writeRegName(col, y, qRegIdx, fg, bold = bold)
+          if (qInd) {
+            col = terminal.writeChar(col, y, ']', fg, bold = bold)
+            if (bump && !pInd) col = terminal.writeText(col, y, "++", fg, bold = bold)
+          }
+        }
+
+      case 2 =>
+        val forward = ((raw >> 13) & 1) == 1
+        val onBitSet = ((raw >> 11) & 1) == 1
+        val bit = (raw >> 7) & 0xf
+        val regIdx = (raw >> 5) & 0x3
+        val steps = ((raw >> 1) & 0xf) + 1
+        val targetOffset = if (forward) steps * 2 else -steps * 2
+        val targetAddr = (pc + 2 + targetOffset) & 0x7ff
+        val mnem = if (onBitSet) "IJMP.ON  " else "IJMP.OFF "
+        col = terminal.writeText(col, y, mnem, fg, bold = bold)
+        col = terminal.writeRegName(col, y, regIdx, fg, bold = bold)
+        col = terminal.writeText(col, y, ", ", fg, bold = bold)
+        col = terminal.writeDec(col, y, bit, 0, ' ', fg, bold = bold)
+        col = terminal.writeText(col, y, if (forward) ", +" else ", -", fg, bold = bold)
+        col = terminal.writeDec(col, y, steps, 0, ' ', fg, bold = bold)
+        col = terminal.writeText(col, y, " (0x", fg, bold = bold)
+        col = terminal.writeHex3(col, y, targetAddr, fg, bold = bold)
+        col = terminal.writeChar(col, y, ')', fg, bold = bold)
+
+      case _ =>
+        val opBits = (raw >> 12) & 0x3
+        val mnem = opBits match {
+          case 0 => "SUBI     "
+          case 1 => "CMPI     "
+          case 2 => "ADDI     "
+          case _ => "MOVI     "
+        }
+        val regIdx = ((raw >> 8) & 0xf) * 2
+        val imm = raw & 0xff
+        col = terminal.writeText(col, y, mnem, fg, bold = bold)
+        col = terminal.writeRegName(col, y, regIdx, fg, bold = bold)
+        col = terminal.writeText(col, y, ", ", fg, bold = bold)
+        col = terminal.writeDec(col, y, imm, 0, ' ', fg, bold = bold)
+    }
   }
 }

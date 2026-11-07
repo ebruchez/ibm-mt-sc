@@ -203,6 +203,35 @@ void pico_serial_print(const void *str_obj) {
     }
 }
 
+void pico_serial_print_chars(const void *char_array_obj, int32_t count) {
+    if (char_array_obj == NULL || count <= 0) {
+        return;
+    }
+    const uint16_t *chars = (const uint16_t *)((uintptr_t)char_array_obj + 12u);
+    char buf[256];
+    size_t pos = 0;
+    for (int32_t i = 0; i < count; i++) {
+        uint16_t ch = chars[i];
+        if (pos > sizeof(buf) - 4u) {
+            fwrite(buf, 1, pos, stdout);
+            pos = 0;
+        }
+        if (ch < 0x80u) {
+            buf[pos++] = (char)ch;
+        } else if (ch < 0x800u) {
+            buf[pos++] = (char)(0xC0u | (ch >> 6));
+            buf[pos++] = (char)(0x80u | (ch & 0x3Fu));
+        } else {
+            buf[pos++] = (char)(0xE0u | (ch >> 12));
+            buf[pos++] = (char)(0x80u | ((ch >> 6) & 0x3Fu));
+            buf[pos++] = (char)(0x80u | (ch & 0x3Fu));
+        }
+    }
+    if (pos > 0) {
+        fwrite(buf, 1, pos, stdout);
+    }
+}
+
 void pico_serial_flush(void) {
     fflush(stdout);
 }

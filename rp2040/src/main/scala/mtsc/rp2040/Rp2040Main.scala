@@ -28,6 +28,7 @@ object PicoSdk {
   def pico_stdio_usb_connected(): CBool = extern
   def pico_time_us_32(): CUnsignedInt = extern
   def pico_serial_print(s: Object): Unit = extern
+  def pico_serial_print_chars(chars: Object, count: CInt): Unit = extern
   def pico_serial_flush(): Unit = extern
   def sleep_ms(ms: CUnsignedInt): Unit = extern
 }
@@ -54,6 +55,21 @@ object Rp2040Main {
 
   private var ledPin: CUnsignedInt = 13.toUInt
   private var ledToggle: Boolean = false
+  private var lastNeoPackedRgb: Int = -1
+  private var lastLedOn: Int = -1
+
+  @inline private def setNeoAndLed(r: Int, g: Int, b: Int, ledOn: Boolean): Unit = {
+    val packed = (r << 16) | (g << 8) | b
+    if (packed != lastNeoPackedRgb) {
+      lastNeoPackedRgb = packed
+      PicoSdk.pico_neopixel_set_rgb(r.toUInt, g.toUInt, b.toUInt)
+    }
+    val ledBit = if (ledOn) 1 else 0
+    if (ledBit != lastLedOn) {
+      lastLedOn = ledBit
+      PicoSdk.pico_led_put(ledPin, ledOn)
+    }
+  }
 
   // Keep top-level emulator state rooted in module fields so Immix GC always marks them
   private var systemRef: MtscSystem = null
@@ -61,7 +77,10 @@ object Rp2040Main {
   private var terminalRef: AnsiTerminal = null
 
   private def flushTerminal(terminal: AnsiTerminal, forceFull: Boolean = false): Int = {
-    val rows = terminal.renderDirtyRows(forceFull, row => PicoSdk.pico_serial_print(row))
+    val rows = terminal.renderDirtyRowsChars(
+      forceFull,
+      (buf, len) => PicoSdk.pico_serial_print_chars(buf, len)
+    )
     PicoSdk.pico_serial_flush()
     rows
   }
@@ -85,28 +104,22 @@ object Rp2040Main {
 
     if (hasError) {
       // Red (LITE 9 / +RESET): Parity or Instruction Check Error
-      PicoSdk.pico_neopixel_set_rgb(80.toUInt, 0.toUInt, 0.toUInt)
-      PicoSdk.pico_led_put(ledPin, true)
+      setNeoAndLed(80, 0, 0, ledOn = true)
     } else if (isMtActive) {
       // Blue pulse (+MT CALL): Magnetic Tape 6310 stepping a frame
-      PicoSdk.pico_neopixel_set_rgb(0.toUInt, 24.toUInt, 96.toUInt)
-      PicoSdk.pico_led_put(ledPin, true)
+      setNeoAndLed(0, 24, 96, ledOn = true)
     } else if (isInhibit) {
       // Amber (LITE 11): Waiting for Operator (Inhibit)
-      PicoSdk.pico_neopixel_set_rgb(64.toUInt, 24.toUInt, 0.toUInt)
-      PicoSdk.pico_led_put(ledPin, true)
+      setNeoAndLed(64, 24, 0, ledOn = true)
     } else if (isRun) {
       // Bright Green (+RUN): 240 kHz Clock Running
-      PicoSdk.pico_neopixel_set_rgb(0.toUInt, 64.toUInt, 0.toUInt)
-      PicoSdk.pico_led_put(ledPin, ledToggle)
+      setNeoAndLed(0, 64, 0, ledOn = ledToggle)
     } else if (PicoSdk.pico_stdio_usb_connected()) {
       // Dim Green: USB Serial connected & Ready in Customer Engineer console
-      PicoSdk.pico_neopixel_set_rgb(0.toUInt, 16.toUInt, 0.toUInt)
-      PicoSdk.pico_led_put(ledPin, false)
+      setNeoAndLed(0, 16, 0, ledOn = false)
     } else {
       // Dim Cyan: Ready & waiting for USB Serial terminal connection
-      PicoSdk.pico_neopixel_set_rgb(0.toUInt, 8.toUInt, 24.toUInt)
-      PicoSdk.pico_led_put(ledPin, false)
+      setNeoAndLed(0, 8, 24, ledOn = false)
     }
   }
 
@@ -353,9 +366,12 @@ object Rp2040Main {
       var lastPrintCount = system.translator.printCount
       var lastRightHead = system.rightTape.headPosition
       var lastLeftHead = system.leftTape.headPosition
+      val hasBreakpoints = consoleState.breakpoints.nonEmpty
+      val targetPeriodUs = delayMs.toInt * 1000
+      var lastPrintDeadlineUs = PicoSdk.pico_time_us_32().toInt
 
       while (res == StepResult.Normal && !hitBreakpoint && !interrupted && steps < 100000) {
-        val prevPsar = system.memory.psar
+        val prevPsar = system.memory.psarRaw
         res = system.step()
         steps += 1
 
@@ -370,7 +386,7 @@ object Rp2040Main {
           updateHardwareLamps(system, isRunningLoop = true, mtPulse = tapeMoved)
         }
 
-        if (consoleState.breakpoints.contains(system.memory.psar)) {
+        if (hasBreakpoints && consoleState.breakpoints.contains(system.memory.psar)) {
           hitBreakpoint = true
         }
 
@@ -382,7 +398,16 @@ object Rp2040Main {
           CeConsoleView.render(terminal, system.cpu, consoleState)
           flushTerminal(terminal, forceFull = false)
 
-          PicoSdk.sleep_ms(delayMs.toUInt)
+          // Wall-clock deadline pacing: subtract render + USB flush + CCU execution time from target period
+          val nowUs = PicoSdk.pico_time_us_32().toInt
+          val targetUs = lastPrintDeadlineUs + targetPeriodUs
+          val remainingUs = targetUs - nowUs
+          if (remainingUs > 1000) {
+            PicoSdk.sleep_ms((remainingUs / 1000).toUInt)
+            lastPrintDeadlineUs = targetUs
+          } else {
+            lastPrintDeadlineUs = nowUs
+          }
 
           if (PicoSdk.pico_getchar_timeout_us(0.toUInt) >= 0) {
             interrupted = true
@@ -393,7 +418,7 @@ object Rp2040Main {
           }
         }
 
-        if (!system.cpu.state.multiplex && system.memory.psar == prevPsar && !system.cpu.state.inhibit) {
+        if (!system.cpu.state.multiplex && system.memory.psarRaw == prevPsar && !system.cpu.state.inhibit) {
           system.cpu.state.halted = true
           res = StepResult.Halted
         }
@@ -417,7 +442,7 @@ object Rp2040Main {
       consoleState.log(s"Breakpoint hit at 0x$hexPsar.")
     } else if (res == StepResult.Halted) {
       consoleState.statusMessage =
-        s"Composition completed in $steps cycles (${system.paper.lines.length} lines, ${heapSummary()})."
+        s"Composition completed in $steps cycles (${system.paper.lineCount} lines, ${heapSummary()})."
       consoleState.log(s"Program HALTED after $steps cycles. ${heapSummary()}")
     } else {
       consoleState.statusMessage = s"Ran $steps steps (${heapSummary()})."
@@ -447,10 +472,36 @@ object Rp2040Main {
     val t3 = PicoSdk.pico_time_us_32().toInt
     val flushFullUs = t3 - t2
 
-    // 3. Measure 1,000 gate-level ILD bit-times (saving and restoring state/memory PSAR)
-    val savedPsar = system.memory.psar
-    val savedAw = system.memory.aWord
-    val savedBw = system.memory.bWord
+    // 3. Measure 1,000 gate-level ILD bit-times on a self-contained non-destructive loop at 0x7f8
+    val mem = system.memory
+    val s = system.cpu.ild.signals
+    val savedPsar = mem.psarRaw
+    val savedAw = mem.aWordRaw
+    val savedBw = mem.bWordRaw
+    val savedR0L = mem.readByteAt(0)
+    val savedR0H = mem.readByteAt(1)
+    val savedB0 = mem.readByteAt(0x7f8)
+    val savedB1 = mem.readByteAt(0x7f9)
+    val savedB2 = mem.readByteAt(0x7fa)
+    val savedB3 = mem.readByteAt(0x7fb)
+    val savedLow = s.low
+    val savedEq = s.eq
+    val savedInh = s.inh
+    val savedMpx = s.mpx
+    val savedHalted = system.cpu.state.halted
+
+    // Place ADDI R0, 1 (0x01d8 -> low=0xd8, high=0x01) and JMP 0x7f8 (0x07f8 -> low=0xf8, high=0x07) at 0x7f8
+    mem.writeByteAt(0x7f8, 0xd8)
+    mem.writeByteAt(0x7f9, 0x01)
+    mem.writeByteAt(0x7fa, 0xf8)
+    mem.writeByteAt(0x7fb, 0x07)
+    mem.setPsarRaw(0x7f8)
+    s.inh = false
+    s.mpx = false
+    s.masterReset = false
+    mtsc.cpu.ild.Ild0303Clock.reset(s)
+    system.cpu.ild.syncAllCombinational()
+
     system.cpu.ild.timingTrace.enabled = false
     val t4 = PicoSdk.pico_time_us_32().toInt
     var bt = 0
@@ -462,10 +513,23 @@ object Rp2040Main {
     val ild1000BtUs = t5 - t4
     val usPerBt = ild1000BtUs / 1000
     val effKhz = if (ild1000BtUs > 0) 1000000 / ild1000BtUs else 0
-    system.memory.psar = savedPsar
-    system.memory.aWord = savedAw
-    system.memory.bWord = savedBw
-    mtsc.cpu.ild.Ild0303Clock.reset(system.cpu.ild.signals)
+
+    // Restore all memory, registers, and signals
+    mem.writeByteAt(0, savedR0L)
+    mem.writeByteAt(1, savedR0H)
+    mem.writeByteAt(0x7f8, savedB0)
+    mem.writeByteAt(0x7f9, savedB1)
+    mem.writeByteAt(0x7fa, savedB2)
+    mem.writeByteAt(0x7fb, savedB3)
+    mem.setPsarRaw(savedPsar)
+    mem.setAWordRaw(savedAw)
+    mem.setBWordRaw(savedBw)
+    s.low = savedLow
+    s.eq = savedEq
+    s.inh = savedInh
+    s.mpx = savedMpx
+    system.cpu.state.halted = savedHalted
+    mtsc.cpu.ild.Ild0303Clock.reset(s)
     system.cpu.ild.syncAllCombinational()
     system.cpu.ild.syncStateFromSignals()
 

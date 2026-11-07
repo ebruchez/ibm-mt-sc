@@ -521,6 +521,93 @@ class CeConsoleState {
     mode
   }
 
+  private val scratchSignals: BackplaneSignals = new BackplaneSignals()
+
+  /**
+   * Zero-allocation computation of the 11 console indicator lamps (`bit 0 = Lamp 1 .. bit 10 = Lamp 11`).
+   */
+  def computeLampsMask(cpu: Ccu): Int = {
+    if (!powerOn) return 0
+    if (cpu.isIldMode) {
+      val probeMask = computeTestProbeMask(cpu.ild.signals)
+      return cpu.ild.computeLampsMask(displayMode, ceTestInputs | probeMask, faceplateInstalled, powerOn)
+    }
+
+    val sysBus: SystemIoBus = cpu.ioBus match {
+      case s: SystemIoBus => s
+      case _              => null
+    }
+    val parityErr = (sysBus ne null) && (sysBus.rightTape.parityError || sysBus.leftTape.parityError)
+    val eotActive = (sysBus ne null) && (
+      (sysBus.rightTape.isTapeLoaded && sysBus.rightTape.isAtEnd) ||
+      (sysBus.leftTape.isTapeLoaded && sysBus.leftTape.isAtEnd)
+    )
+    val translatorBusy = (sysBus ne null) && (sysBus.translator.busy || sysBus.translator.cycleRemaining > 0)
+    val readySignal = !cpu.state.inhibit && !translatorBusy && !cpu.state.halted
+
+    if (faceplateInstalled) {
+      val opPanel = if (sysBus ne null) sysBus.operatorPanel else null
+      val setupRedOn = (opPanel ne null) && opPanel.isSetupLampOn
+      val activeLampNum = if ((opPanel ne null) && opPanel.activeSetupParam.isDefined) opPanel.activeSetupParam.get.lampIndex else -1
+      val rawLights = if (sysBus ne null) sysBus.consoleLights else 0
+
+      var mask = 0
+      var idx = 0
+      while (idx < 11) {
+        val n = idx + 1
+        val isOn = n match {
+          case 1 => parityErr || ((opPanel ne null) && opPanel.hyphenationPromptActive)
+          case 2 => eotActive || ((opPanel ne null) && opPanel.typeInterventionActive)
+          case 3 => (rawLights & 0x80) != 0
+          case 4 => setupRedOn
+          case _ => activeLampNum == n || ((rawLights >> (11 - n)) & 1) == 1
+        }
+        if (isOn) mask |= (1 << idx)
+        idx += 1
+      }
+      mask
+    } else {
+      val s = scratchSignals
+      s.setMalValue(cpu.state.mal.unsigned)
+      s.setOutputByte(cpu.state.outputReg)
+      s.oplCde1 = cpu.state.opBit(1)
+      s.oplCde2 = cpu.state.opBit(2)
+      s.oplCde3 = cpu.state.opBit(3)
+      s.oplCde4 = cpu.state.opBit(4)
+      s.oplCde5 = cpu.state.opBit(5)
+      s.oplCde6 = cpu.state.opBit(6)
+      s.oplCde7 = cpu.state.opBit(7)
+      s.qBfr1   = cpu.state.qbBit(1)
+      s.qBfr2   = cpu.state.qbBit(2)
+      s.qBfr3   = cpu.state.qbBit(3)
+      s.qBfr4   = cpu.state.qbBit(4)
+      s.pBfr1   = cpu.state.pbBit(1)
+      s.pBfr2   = cpu.state.pbBit(2)
+      s.pBfr3   = cpu.state.pbBit(3)
+      s.pBfr4   = cpu.state.pbBit(4)
+      s.insnTCtrA = (cpu.state.insnTimeCtr & 1) == 1
+      s.insnTCtrB = ((cpu.state.insnTimeCtr >> 1) & 1) == 1
+      s.insnTCtrC = ((cpu.state.insnTimeCtr >> 2) & 1) == 1
+      s.insnTCtrD = ((cpu.state.insnTimeCtr >> 3) & 1) == 1
+      s.btCtrA    = (cpu.state.bitTimeCtr & 1) == 1
+      s.btCtrB    = ((cpu.state.bitTimeCtr >> 1) & 1) == 1
+      s.low       = cpu.state.low
+      s.eq        = cpu.state.equal
+      s.inh       = cpu.state.inhibit
+      s.mpx       = cpu.state.multiplex
+      s.rdy       = readySignal
+      s.busy      = translatorBusy
+      s.errorLite = eotActive
+      s.masterReset = displayMode == CeDisplayMode.ClockDefault && parityErr
+      s.setCeTestInputs(ceTestInputs)
+      s.editSwitch = CeEditSelector.Proc
+      Ild0312ConsoleLights.applyDisplayModeButtons(s, displayMode)
+      s.autoOrStep = displayMode != CeDisplayMode.ClockDefault
+      Ild0312ConsoleLights.evaluateCombinational(s)
+      s.lampsLeftToRightMask
+    }
+  }
+
   /**
    * Computes the hardware lamp state for all 11 lamps according to ILD Page 0312 (Manual p. 111).
    *

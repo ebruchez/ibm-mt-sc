@@ -78,6 +78,11 @@ class ComposerPaper {
     currentXUnits = 0
   }
 
+  def completedLinesCount: Int = completedLines.length
+  def completedLineAt(idx: Int): String = completedLines(idx)
+  def currentLineBuilder: StringBuilder = currentLine
+  def lineCount: Int = completedLines.length + (if (currentLine.nonEmpty) 1 else 0)
+
   def lines: List[String] = {
     val result = completedLines.toList
     if (currentLine.nonEmpty) result :+ currentLine.toString() else result
