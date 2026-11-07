@@ -65,55 +65,91 @@ object Ild0306To0307Address {
    */
   def evaluateDecoders(s: BackplaneSignals): Unit = {
     val selSpec = s.selMemSpec
-    val selMem = !selSpec
     val selUp = s.selMemUp
 
-    // ---------------------------------------------------------------------------------------------
-    // [AA112], [AA121], [AA122] Y-Driver (1..8) and Y-Switch (1..4) Decodes (ILD 0306)
-    // ---------------------------------------------------------------------------------------------
-    s.dcdDrvrY1234 = selMem && (!selUp || !s.y11)
-    val dY2468 = (selSpec && !s.selAWd) || (selMem && s.y2)
-    val dY3478 = (selSpec && !s.selBWd) || (selMem && s.y3)
-    val dY5678 = selSpec || (selMem && selUp && s.y11)
-    s.dcdDrvrY2468 = dY2468
-    s.dcdDrvrY3478 = dY3478
-    s.dcdDrvrY5678 = dY5678
+    if (selSpec) {
+      s.dcdDrvrY1234 = false
+      val dY2468 = !s.selAWd
+      val dY3478 = !s.selBWd
+      s.dcdDrvrY2468 = dY2468
+      s.dcdDrvrY3478 = dY3478
+      s.dcdDrvrY5678 = true
 
-    val swY24 = s.btCtrB || (selUp && s.y1)
-    val swY34 = selSpec || (selUp && s.y7)
-    s.dcdSwY24 = swY24
-    s.dcdSwY34 = swY34
+      val swY24 = s.btCtrB || (selUp && s.y1)
+      s.dcdSwY24 = swY24
+      s.dcdSwY34 = true
 
-    s.activeYDriver =
-      (if (dY5678) 4 else 0) |
-        (if (dY3478) 2 else 0) |
-        (if (dY2468) 1 else 0)
+      s.activeYDriver =
+        4 |
+          (if (dY3478) 2 else 0) |
+          (if (dY2468) 1 else 0)
 
-    s.activeYSwitch =
-      (if (swY34) 2 else 0) |
-        (if (swY24) 1 else 0)
+      s.activeYSwitch =
+        2 |
+          (if (swY24) 1 else 0)
 
-    // ---------------------------------------------------------------------------------------------
-    // [AA112], [AA121], [AA122] X-Driver (1..8) and X-Switch (1..8) Decodes (ILD 0307)
-    // ---------------------------------------------------------------------------------------------
-    s.dcdDrvrX1   = selMem && (!selUp || (!s.y8 && !s.y9 && !s.y10))
-    s.dcdDrvrX234 = selMem && selUp && ((!s.y10 && s.y8) || (!s.y10 && s.y9))
-    s.dcdDrvrX567 = selMem && selUp && ((s.y10 && !s.y8) || (s.y10 && !s.y9))
-    s.dcdDrvrX8   = selSpec || (selMem && selUp && s.y8 && s.y9 && s.y10)
+      s.dcdDrvrX1   = false
+      s.dcdDrvrX234 = false
+      s.dcdDrvrX567 = false
+      s.dcdDrvrX8   = true
 
-    s.dcdSwX1234 = selMem && !s.y6
-    s.dcdSwX56   = selMem && !s.y5 && s.y6
-    s.dcdSwX57   = selMem && !s.y4 && s.y6
-    s.dcdSwX8    = selSpec || (selMem && s.y4 && s.y5 && s.y6)
+      s.dcdSwX1234 = false
+      s.dcdSwX56   = false
+      s.dcdSwX57   = false
+      s.dcdSwX8    = true
 
-    s.activeXDriver =
-      if (selSpec) 7
-      else if (!selUp) 0
-      else ((if (s.y10) 4 else 0) | (if (s.y9) 2 else 0) | (if (s.y8) 1 else 0))
+      s.activeXDriver = 7
+      s.activeXSwitch = 7
+    } else {
+      val y1 = s.y1
+      val y2 = s.y2
+      val y3 = s.y3
+      val y4 = s.y4
+      val y5 = s.y5
+      val y6 = s.y6
+      val y7 = s.y7
+      val y8 = s.y8
+      val y9 = s.y9
+      val y10 = s.y10
+      val y11 = s.y11
 
-    s.activeXSwitch =
-      if (selSpec) 7
-      else ((if (s.y6) 4 else 0) | (if (s.y5) 2 else 0) | (if (s.y4) 1 else 0))
+      val dY5678 = selUp && y11
+      s.dcdDrvrY1234 = !dY5678
+      s.dcdDrvrY2468 = y2
+      s.dcdDrvrY3478 = y3
+      s.dcdDrvrY5678 = dY5678
+
+      val swY24 = s.btCtrB || (selUp && y1)
+      val swY34 = selUp && y7
+      s.dcdSwY24 = swY24
+      s.dcdSwY34 = swY34
+
+      s.activeYDriver =
+        (if (dY5678) 4 else 0) |
+          (if (y3) 2 else 0) |
+          (if (y2) 1 else 0)
+
+      s.activeYSwitch =
+        (if (swY34) 2 else 0) |
+          (if (swY24) 1 else 0)
+
+      s.dcdDrvrX1   = !selUp || (!y8 && !y9 && !y10)
+      s.dcdDrvrX234 = selUp && !y10 && (y8 || y9)
+      s.dcdDrvrX567 = selUp && y10 && (!y8 || !y9)
+      s.dcdDrvrX8   = selUp && y8 && y9 && y10
+
+      s.dcdSwX1234 = !y6
+      s.dcdSwX56   = !y5 && y6
+      s.dcdSwX57   = !y4 && y6
+      s.dcdSwX8    = y4 && y5 && y6
+
+      s.activeXDriver =
+        if (!selUp) 0
+        else ((if (y10) 4 else 0) | (if (y9) 2 else 0) | (if (y8) 1 else 0))
+
+      s.activeXSwitch =
+        (if (y6) 4 else 0) | (if (y5) 2 else 0) | (if (y4) 1 else 0)
+    }
   }
 
   /**
@@ -201,5 +237,113 @@ object Ild0306To0307Address {
     }
 
     evaluateDecoders(s)
+  }
+
+  /**
+   * Fast P-Time (`pTime = true`) evaluation of memory allocation signals (`selProgStepAddr`,
+   * `selAWd`, `selBWd`, `selMemSpec`, `selectMemory`, `selMemUp`) and 3D X/Y indices
+   * (`activeXDriver`, `activeXSwitch`, `activeYDriver`, `activeYSwitch`).
+   */
+  inline def evaluateAddressPTimeFast(s: BackplaneSignals): Unit = {
+    val selPsar = s.insnT0 || (s.insnT3 && s.jmp) || (s.insnT9 && !s.oplCde2)
+    val selA = (!s.insnTCtrA && (s.insnTCtrB || s.insnTCtrD)) || (!s.edit && s.insnT1 && s.inh)
+    val selB = s.insnT4
+    val selSpec = selPsar || selA || selB
+    s.selProgStepAddr = selPsar
+    s.selAWd = selA
+    s.selBWd = selB
+    s.selMemSpec = selSpec
+    s.selectMemory = !selSpec
+
+    val selUp =
+      (!selA && s.insnT1) ||
+      (s.insnT5 && s.oplCde6) ||
+      (s.oplCde2 && s.oplCde7 && s.insnT9 && !s.immediate)
+    s.selMemUp = selUp
+
+    if (selSpec) {
+      s.activeYDriver = 4 | (if (!selB) 2 else 0) | (if (!selA) 1 else 0)
+      s.activeYSwitch = 2 | (if (s.btCtrB || (selUp && s.y1)) 1 else 0)
+      s.activeXDriver = 7
+      s.activeXSwitch = 7
+    } else {
+      val dY5678 = selUp && s.y11
+      s.activeYDriver = (if (dY5678) 4 else 0) | (if (s.y3) 2 else 0) | (if (s.y2) 1 else 0)
+      s.activeYSwitch = (if (selUp && s.y7) 2 else 0) | (if (s.btCtrB || (selUp && s.y1)) 1 else 0)
+      s.activeXDriver = if (!selUp) 0 else ((if (s.y10) 4 else 0) | (if (s.y9) 2 else 0) | (if (s.y8) 1 else 0))
+      s.activeXSwitch = (if (s.y6) 4 else 0) | (if (s.y5) 2 else 0) | (if (s.y4) 1 else 0)
+    }
+  }
+
+  /**
+   * Fast Q-Time (`pTime = false`, `insnTCtrA = true`) evaluation of memory allocation signals and
+   * 3D X/Y indices (`activeXDriver`, `activeXSwitch`, `activeYDriver`, `activeYSwitch`).
+   */
+  inline def evaluateAddressQTimeFast(s: BackplaneSignals): Unit = {
+    val selA = (s.insnT9 && (s.oplCde1 || s.jmp)) || (!s.insnT3 && !s.insnT5 && !s.insnT9)
+    val selB = (s.athOp && s.insnT5) || (!s.jmp && !s.oplCde1 && s.insnT3 && !s.prgCtl) || (!s.immediate && s.oplCde2 && s.insnT9)
+    val selSpec = selA || selB
+    s.selProgStepAddr = false
+    s.selAWd = selA
+    s.selBWd = selB
+    s.selMemSpec = selSpec
+    s.selectMemory = !selSpec
+
+    val selUp =
+      (s.jmp && s.insnT3) ||
+      (!selB && ((s.insnT5 && s.oplCde6) || (s.oplCde2 && s.oplCde7 && s.insnT9 && !s.immediate)))
+    s.selMemUp = selUp
+
+    if (selSpec) {
+      s.activeYDriver = 4 | (if (!selB) 2 else 0) | (if (!selA) 1 else 0)
+      s.activeYSwitch = 2 | (if (s.btCtrB || (selUp && s.y1)) 1 else 0)
+      s.activeXDriver = 7
+      s.activeXSwitch = 7
+    } else {
+      val dY5678 = selUp && s.y11
+      s.activeYDriver = (if (dY5678) 4 else 0) | (if (s.y3) 2 else 0) | (if (s.y2) 1 else 0)
+      s.activeYSwitch = (if (selUp && s.y7) 2 else 0) | (if (s.btCtrB || (selUp && s.y1)) 1 else 0)
+      s.activeXDriver = if (!selUp) 0 else ((if (s.y10) 4 else 0) | (if (s.y9) 2 else 0) | (if (s.y8) 1 else 0))
+      s.activeXSwitch = (if (s.y6) 4 else 0) | (if (s.y5) 2 else 0) | (if (s.y4) 1 else 0)
+    }
+  }
+
+  /**
+   * Fast Y-latch load at `Cycle 2 SSB` (`CEN BT = true`) when `resY`, `!edit && jmp`, and
+   * `incrJmpResY` have already been applied earlier in the bit-time.
+   * Only active during `B1-4`, `B5-8`, and `B9-12` of even instruction times (`!s.insnTCtrA`).
+   */
+  inline def loadYLatchesAtCenBt(s: BackplaneSignals, pNib: Int): Unit = {
+    if (!s.insnTCtrA && !s.b13_16) {
+      if (!s.insnT6) {
+        if (s.b1_4) {
+          if ((pNib & 1) != 0 && (s.edit || !s.jmp)) s.y1 = true
+          if ((pNib & 2) != 0) s.y2 = true
+          if ((pNib & 4) != 0) s.y3 = true
+          if ((pNib & 8) != 0) s.y4 = true
+        } else if (s.b5_8) {
+          val incJmpI2 = s.oplCde1 && s.insnTCtrB
+          val p3 = (pNib & 4) != 0
+          if (p3 && incJmpI2) s.y4 = true
+          if ((pNib & 1) != 0 || incJmpI2) s.y5 = true
+          if ((pNib & 2) != 0) s.y6 = true
+          if (p3) s.y7 = true
+          if ((pNib & 8) != 0) s.y8 = true
+        } else {
+          if ((pNib & 1) != 0) s.y9 = true
+          if ((pNib & 2) != 0) s.y10 = true
+          if ((pNib & 4) != 0) s.y11 = true
+        }
+      } else {
+        if (s.b5_8) {
+          if ((pNib & 8) != 0 && !s.immediate) s.y2 = true
+        } else if (s.b9_12) {
+          if ((pNib & 1) != 0) s.y3 = true
+          if ((pNib & 2) != 0) s.y4 = true
+          if ((pNib & 4) != 0) s.y5 = true
+          if ((pNib & 8) != 0) s.y6 = true
+        }
+      }
+    }
   }
 }

@@ -52,6 +52,10 @@ object Ild0304Permute {
     // [AA041 3G-AK / 4G-AL] +JUMP = -ATH OP & -INPUT & -OUTPUT & -PROGRAM CONTROL
     s.jmp = !s.athOp && !s.input && !s.output && !s.prgCtl
 
+    // [AA041] 16-bit Direct/Immediate Transfer (MOV / MOVI) and Transfer-or-Compare (TRANS + COMP)
+    s.trans16 = s.oplCde2 && s.oplCde3 && s.oplCde4 && (s.immediate || (!s.oplCde6 && !s.oplCde7))
+    s.transOrComp = s.oplCde2 && (s.oplCde4 || (!s.immediate && (s.oplCde6 || s.oplCde7)))
+
     // ---------------------------------------------------------------------------------------------
     // [AA131] +TAKEN Branch & Incremental Jump Condition Decode (1F-AL .. 1L-AW -> 2J-AQ -> 3J-AS)
     // ---------------------------------------------------------------------------------------------
@@ -221,6 +225,56 @@ object Ild0304Permute {
       if (s.strInsnTCtrB) s.insnTCtrB = true
       if (s.strInsnTCtrC) s.insnTCtrC = true
       if (s.strInsnTCtrD) s.insnTCtrD = true
+    }
+
+    evaluateCombinational(s)
+  }
+
+  /**
+   * Fast combined Instruction Time steering & indicator transition at the end of `BIT 13-16`
+   * (`STR LTH STROBE` -> `SSA #1`), evaluating `0304` combinational nets once for the new Instruction Time.
+   */
+  inline def advanceInstructionTimeAtB13_16(s: BackplaneSignals): Unit = {
+    if (s.masterReset) {
+      s.strInsnTCtrA = false
+      s.strInsnTCtrB = false
+      s.strInsnTCtrC = false
+      s.strInsnTCtrD = false
+      s.insnTCtrA = false
+      s.insnTCtrB = false
+      s.insnTCtrC = false
+      s.insnTCtrD = false
+    } else if (s.prmt) {
+      val permuteToI6 = !s.edit && s.insnT1 && s.oplCde1 && s.oplCde2
+      val nextA = s.insnT2 || s.set9
+      val nextB = permuteToI6
+      val nextC = s.insnT2 || permuteToI6
+      val nextD = s.set9
+      s.strInsnTCtrA = nextA
+      s.strInsnTCtrB = nextB
+      s.strInsnTCtrC = nextC
+      s.strInsnTCtrD = nextD
+      s.insnTCtrA = nextA
+      s.insnTCtrB = nextB
+      s.insnTCtrC = nextC
+      s.insnTCtrD = nextD
+    } else {
+      val curA = s.insnTCtrA
+      val curB = s.insnTCtrB
+      val curC = s.insnTCtrC
+      val curD = s.insnTCtrD
+      val nextA = !curA
+      val nextB = if (curA) !curB else curB
+      val nextC = if (curA && curB) !curC else curC
+      val nextD = if (curA && curB && curC && !curD) true else s.strInsnTCtrD
+      s.strInsnTCtrA = nextA
+      s.strInsnTCtrB = nextB
+      s.strInsnTCtrC = nextC
+      s.strInsnTCtrD = nextD
+      s.insnTCtrA = nextA
+      s.insnTCtrB = nextB
+      s.insnTCtrC = nextC
+      s.insnTCtrD = nextD
     }
 
     evaluateCombinational(s)

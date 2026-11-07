@@ -796,6 +796,20 @@ final class BackplaneSignals {
   def lampsLeftToRight: Vector[Boolean] =
     Vector(lite11, lite10, lite9, lite8, lite7, lite6, lite5, lite4, lite3, lite2, lite1)
 
+  /** Returns the 11 console lamps ordered left-to-right as an 11-bit mask (`bit 0 = lite11 .. bit 10 = lite1`). */
+  def lampsLeftToRightMask: Int =
+    (if (lite11) 0x001 else 0) |
+      (if (lite10) 0x002 else 0) |
+      (if (lite9)  0x004 else 0) |
+      (if (lite8)  0x008 else 0) |
+      (if (lite7)  0x010 else 0) |
+      (if (lite6)  0x020 else 0) |
+      (if (lite5)  0x040 else 0) |
+      (if (lite4)  0x080 else 0) |
+      (if (lite3)  0x100 else 0) |
+      (if (lite2)  0x200 else 0) |
+      (if (lite1)  0x400 else 0)
+
   /** Returns the 7 Translator Select Magnet driver states (`TSLTR SEL MAG 1..7`) as a 7-bit integer (`bit 0 = Mag 1 .. bit 6 = Mag 7`). */
   def translatorSelectMagnetsMask: Int =
     (if (tsltrSelMag1) 0x01 else 0) |

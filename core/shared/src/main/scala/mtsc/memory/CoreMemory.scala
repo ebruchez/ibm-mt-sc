@@ -24,6 +24,21 @@ final class CoreMemory(private val storage: Array[Byte]) {
   def writeByte(addr: Address, b: Int): Unit =
     storage(addr.unsigned) = (b & 0xff).toByte
 
+  inline def readByteAt(addr: Int): Int =
+    storage(addr & 0x7ff) & 0xff
+
+  inline def writeByteAt(addr: Int, b: Int): Unit =
+    storage(addr & 0x7ff) = b.toByte
+
+  inline def psarRaw: Int = psar.value & 0x7ff
+  inline def setPsarRaw(v: Int): Unit = psar = new Address(v & 0x7ff)
+
+  inline def aWordRaw: Int = aWord.value & 0xffff
+  inline def setAWordRaw(v: Int): Unit = aWord = new Word(v & 0xffff)
+
+  inline def bWordRaw: Int = bWord.value & 0xffff
+  inline def setBWordRaw(v: Int): Unit = bWord = new Word(v & 0xffff)
+
   def readWord(addr: Address): Word = {
     val lo = readByte(addr)
     val hi = readByte(addr + 1)

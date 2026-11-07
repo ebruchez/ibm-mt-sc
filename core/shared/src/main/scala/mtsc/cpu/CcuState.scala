@@ -1,7 +1,7 @@
 package mtsc.cpu
 
 import mtsc.types.*
-import mtsc.isa.Instruction
+import mtsc.isa.{Decoder, Instruction}
 
 /**
  * Encapsulates the latches and runtime status of the CCU.
@@ -27,7 +27,28 @@ final class CcuState {
 
   // Telemetry & Diagnostic state
   var cycleCount: Long = 0L
-  var lastInsn: Option[Instruction] = None
+  private var _lastRawWord: Int = -1
+  private var _lastInsn: Option[Instruction] = None
+
+  /** Records the raw 16-bit fetched word at `I-0` without allocating `Instruction`/`Some` unless `lastInsn` is read. */
+  @inline def recordFetchedWord(rawWord: Int): Unit = {
+    _lastRawWord = rawWord & 0xffff
+    _lastInsn = null
+  }
+
+  def lastInsn: Option[Instruction] = {
+    if (_lastInsn eq null) {
+      _lastInsn =
+        if (_lastRawWord < 0) None
+        else Decoder.decode(Word(_lastRawWord)).toOption
+    }
+    _lastInsn
+  }
+
+  def lastInsn_=(v: Option[Instruction]): Unit = {
+    _lastRawWord = -1
+    _lastInsn = v
+  }
 
   def isHi: Boolean = !low && !equal
   def isLo: Boolean = low

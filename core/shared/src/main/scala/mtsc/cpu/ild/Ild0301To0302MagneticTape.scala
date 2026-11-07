@@ -389,6 +389,47 @@ object Ild0301To0302MagneticTape {
    * across `frame` via alternating `MPS A` and `MPS B` emitter pulses (`MDM 0401` & `0403`).
    */
   def sweepFrame(s: BackplaneSignals, frame: TapeFrame): Unit = {
+    if (!(s.mtSch && !s.mtRd) && !s.mtEotOrUnld && !s.masterReset && !s.mtLdRt && !s.mtLdLf && !s.mtSchKey) {
+      // Fast path for normal 10-step read sweep (Count 0 -> Count 10):
+      s.mtHome = false
+      s.mtReread = false
+      s.mpsA = false
+      s.mpsB = false
+      s.mtBit = false
+      s.mtSchBit = false
+      s.mtIncr = false
+
+      // Advance counter directly to 10 Count (11001)
+      s.mtCtrA = true
+      s.mtCtrB = true
+      s.mtCtrC = false
+      s.mtCtrD = false
+      s.mtCtrE = true
+
+      // Latch all 9 tracks into DATA LATCH 1..9 per MDM 0403 track mapping
+      val isEobSentinel = !frame.is8Bit && frame.rawByte == TapeCartridge.EndOfBlock
+      val b = if (isEobSentinel) 0xff else frame.dataByte
+      s.mtData1 = (b & 0x10) != 0
+      s.mtData2 = (b & 0x02) != 0
+      s.mtData3 = (b & 0x20) != 0 && !(!s.mtSchPos && s.mtSch && s.mtStaLeft)
+      s.mtData4 = (b & 0x01) != 0
+      s.mtData5 = (b & 0x04) != 0
+      s.mtData6 = (b & 0x08) != 0
+      s.mtData7 = (b & 0x40) != 0
+      s.mtData8 = (b & 0x80) != 0
+      s.mtData9 = if (isEobSentinel) true else frame.parityBit
+
+      if (!s.y8 && !s.y10 && s.inStrb && s.b13_16) {
+        s.setLo = false
+      }
+      if (s.mtSkip) {
+        s.setLo = true
+      }
+
+      updateTransportLatches(s)
+      return
+    }
+
     // 1. At HOME: reset counter to Count 0 (00010), clear DATA LATCH 1..9, and reset INCR via SET 0
     s.mtHome = true
     s.mtReread = true

@@ -92,4 +92,24 @@ object Ild0310WriteInhibit {
     s.senseInhLineOdd3 = s.currSource3 && s.rewoGate
     s.senseInhLineOdd4 = s.currSource4 && s.rewoGate
   }
+
+  /**
+   * Fast register-only evaluation of the 4-bit P-Write nibble (`0..15`) at `Write P` (`pTime = true`)
+   * without storing intermediate inhibit driver nets to [[BackplaneSignals]].
+   */
+  inline def computeWritePNibble(s: BackplaneSignals, pNib: Int, accNib: Int): Int = {
+    val wrPBfr = s.insnT9 && s.transOrComp && s.oplCde2 && !s.oplCde3
+    val wrAcc = !wrPBfr && !s.insnT4 && !(s.b5_8 && s.insnT2 && s.oplCde1) && !(s.insnT6 && !s.immediate)
+    var wNib = if (wrAcc) accNib else if (wrPBfr) pNib else 0
+
+    if (s.insnT3 && s.samBt && !s.oplCde6 && s.prgCtl) {
+      val bitIdx = (if (s.y8) 1 else 0) | (if (s.y9) 2 else 0)
+      val mask = 1 << bitIdx
+      wNib = if (s.oplCde5) (wNib | mask) else (wNib & ~mask)
+    }
+    if (s.insnT2 && ((accNib & 1) != 0) && s.athOp) {
+      wNib |= 1
+    }
+    wNib
+  }
 }

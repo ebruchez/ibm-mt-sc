@@ -50,8 +50,10 @@ object Address {
  * Working registers reside at byte addresses (RegId * 2) in core storage.
  */
 final case class RegId(index: Int) {
-  require(index >= 0 && index < 32, s"RegId must be between 0 and 31, got $index")
-  def byteAddress: Address = Address(index * 2)
+  if (index < 0 || index >= 32) {
+    throw new IllegalArgumentException(s"RegId must be between 0 and 31, got $index")
+  }
+  def byteAddress: Address = Address(index << 1)
   override def toString: String = s"R$index"
 }
 

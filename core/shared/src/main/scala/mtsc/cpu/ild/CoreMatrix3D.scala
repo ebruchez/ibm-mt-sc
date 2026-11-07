@@ -28,7 +28,7 @@ final class CoreMatrix3D(val memory: CoreMemory) {
    * Computes the 11-bit byte address (`0..2047`) decoded by `(xDriver, xSwitch, yDriver, ySwitch)`
    * when `SEL MEM` is active (`!s.selMemSpec`).
    */
-  def decodedByteAddress(xDriver: Int, xSwitch: Int, yDriver: Int, ySwitch: Int): Int =
+  inline def decodedByteAddress(xDriver: Int, xSwitch: Int, yDriver: Int, ySwitch: Int): Int =
     (ySwitch & 1) |
       ((yDriver & 3) << 1) |
       ((xSwitch & 7) << 3) |
@@ -44,15 +44,15 @@ final class CoreMatrix3D(val memory: CoreMemory) {
     val isHighByte = (s.activeYSwitch & 1) != 0
     if (s.selMemSpec) {
       val word = s.activeYDriver match {
-        case 7 => Word(memory.psar.unsigned)
-        case 6 => memory.aWord
-        case 5 => memory.bWord
-        case _ => Word.Zero
+        case 7 => memory.psarRaw
+        case 6 => memory.aWordRaw
+        case 5 => memory.bWordRaw
+        case _ => 0
       }
-      if (isHighByte) word.highByte else word.lowByte
+      if (isHighByte) (word >> 8) & 0xff else word & 0xff
     } else {
       val addr = decodedByteAddress(s.activeXDriver, s.activeXSwitch, s.activeYDriver, s.activeYSwitch)
-      memory.readByte(Address(addr))
+      memory.readByteAt(addr)
     }
   }
 
@@ -66,23 +66,23 @@ final class CoreMatrix3D(val memory: CoreMemory) {
     if (s.selMemSpec) {
       s.activeYDriver match {
         case 7 =>
-          val cur = memory.psar.unsigned
+          val cur = memory.psarRaw
           val updated = if (isHighByte) (cur & 0x00ff) | (cleanByte << 8) else (cur & 0xff00) | cleanByte
           val mask = if (s.edit) 0x7ff else 0x7fe
-          memory.psar = Address(updated & mask)
+          memory.setPsarRaw(updated & mask)
         case 6 =>
-          val cur = memory.aWord.unsigned
+          val cur = memory.aWordRaw
           val updated = if (isHighByte) (cur & 0x00ff) | (cleanByte << 8) else (cur & 0xff00) | cleanByte
-          memory.aWord = Word(updated)
+          memory.setAWordRaw(updated)
         case 5 =>
-          val cur = memory.bWord.unsigned
+          val cur = memory.bWordRaw
           val updated = if (isHighByte) (cur & 0x00ff) | (cleanByte << 8) else (cur & 0xff00) | cleanByte
-          memory.bWord = Word(updated)
+          memory.setBWordRaw(updated)
         case _ => ()
       }
     } else {
       val addr = decodedByteAddress(s.activeXDriver, s.activeXSwitch, s.activeYDriver, s.activeYSwitch)
-      memory.writeByte(Address(addr), cleanByte)
+      memory.writeByteAt(addr, cleanByte)
     }
   }
 
@@ -95,21 +95,77 @@ final class CoreMatrix3D(val memory: CoreMemory) {
    * returned as a 4-bit nibble (`bit 0 = Plane 1 .. bit 3 = Plane 4`).
    */
   def destructiveReadNibble(s: BackplaneSignals): Int = {
-    if (!s.csYLog || s.twr) {
-      return 0
-    }
+    if (!s.csYLog || s.twr) 0 else destructiveReadNibbleDirect(s)
+  }
 
-    val curByte = peekSelectedByte(s)
-    // Even cores (bits 0..3) are read when rewoSenseGate is active (!btCtrA);
-    // Odd cores (bits 4..7) are read when roweSenseGate is active (btCtrA).
-    if (!s.btCtrA) {
-      val nibble = curByte & 0x0f
-      pokeSelectedByte(s, curByte & 0xf0) // Destructive read clears Even cores to 0
-      nibble
+  /**
+   * Fast single-pass destructive Coincident-Current Read of the 4 selected cores when `csYLog`
+   * is known active and `twr` is false.
+   */
+  inline def destructiveReadNibbleDirect(s: BackplaneSignals): Int = {
+    val odd = s.btCtrA
+    if (s.selMemSpec) {
+      val shift = ((s.activeYSwitch & 1) << 3) | (if (odd) 4 else 0)
+      val clrMask = ~(0x0f << shift)
+      s.activeYDriver match {
+        case 7 =>
+          val cur = memory.psarRaw
+          val nibble = (cur >>> shift) & 0x0f
+          val mask = if (s.edit) 0x7ff else 0x7fe
+          memory.setPsarRaw((cur & clrMask) & mask)
+          nibble
+        case 6 =>
+          val cur = memory.aWordRaw
+          val nibble = (cur >>> shift) & 0x0f
+          memory.setAWordRaw(cur & clrMask)
+          nibble
+        case 5 =>
+          val cur = memory.bWordRaw
+          val nibble = (cur >>> shift) & 0x0f
+          memory.setBWordRaw(cur & clrMask)
+          nibble
+        case _ => 0
+      }
     } else {
-      val nibble = (curByte >> 4) & 0x0f
-      pokeSelectedByte(s, curByte & 0x0f) // Destructive read clears Odd cores to 0
-      nibble
+      val addr = decodedByteAddress(s.activeXDriver, s.activeXSwitch, s.activeYDriver, s.activeYSwitch)
+      val curByte = memory.readByteAt(addr)
+      if (!odd) {
+        memory.writeByteAt(addr, curByte & 0xf0)
+        curByte & 0x0f
+      } else {
+        memory.writeByteAt(addr, curByte & 0x0f)
+        (curByte >> 4) & 0x0f
+      }
+    }
+  }
+
+  /**
+   * Fast single-pass Coincident-Current Write of a 4-bit nibble (`0..15`) to the currently
+   * decoded `(selMemSpec, activeXDriver, activeXSwitch, activeYDriver, activeYSwitch)` byte and
+   * Even/Odd (`btCtrA`) core half-byte.
+   */
+  inline def writeNibbleDirect(s: BackplaneSignals, writtenNibble: Int): Unit = {
+    val cleanNib = writtenNibble & 0x0f
+    val odd = s.btCtrA
+    if (s.selMemSpec) {
+      val shift = ((s.activeYSwitch & 1) << 3) | (if (odd) 4 else 0)
+      val clrMask = ~(0x0f << shift)
+      val insBits = cleanNib << shift
+      s.activeYDriver match {
+        case 7 =>
+          val mask = if (s.edit) 0x7ff else 0x7fe
+          memory.setPsarRaw(((memory.psarRaw & clrMask) | insBits) & mask)
+        case 6 =>
+          memory.setAWordRaw((memory.aWordRaw & clrMask) | insBits)
+        case 5 =>
+          memory.setBWordRaw((memory.bWordRaw & clrMask) | insBits)
+        case _ => ()
+      }
+    } else {
+      val addr = decodedByteAddress(s.activeXDriver, s.activeXSwitch, s.activeYDriver, s.activeYSwitch)
+      val curByte = memory.readByteAt(addr)
+      val newByte = if (!odd) (curByte & 0xf0) | cleanNib else (curByte & 0x0f) | (cleanNib << 4)
+      memory.writeByteAt(addr, newByte)
     }
   }
 
@@ -125,23 +181,17 @@ final class CoreMatrix3D(val memory: CoreMemory) {
       return
     }
 
-    val curByte = peekSelectedByte(s)
-    if (!s.btCtrA) {
-      // Write Even cores (B1-4, B9-12): inhibited by SENSE INH LINE EV 1..4
-      val b1 = if (!s.senseInhLineEv1) 1 else 0
-      val b2 = if (!s.senseInhLineEv2) 2 else 0
-      val b3 = if (!s.senseInhLineEv3) 4 else 0
-      val b4 = if (!s.senseInhLineEv4) 8 else 0
-      val writtenNibble = b1 | b2 | b3 | b4
-      pokeSelectedByte(s, (curByte & 0xf0) | writtenNibble)
+    val writtenNibble = if (!s.btCtrA) {
+      (if (!s.senseInhLineEv1) 1 else 0) |
+        (if (!s.senseInhLineEv2) 2 else 0) |
+        (if (!s.senseInhLineEv3) 4 else 0) |
+        (if (!s.senseInhLineEv4) 8 else 0)
     } else {
-      // Write Odd cores (B5-8, B13-16): inhibited by SENSE INH LINE ODD 1..4
-      val b1 = if (!s.senseInhLineOdd1) 1 else 0
-      val b2 = if (!s.senseInhLineOdd2) 2 else 0
-      val b3 = if (!s.senseInhLineOdd3) 4 else 0
-      val b4 = if (!s.senseInhLineOdd4) 8 else 0
-      val writtenNibble = b1 | b2 | b3 | b4
-      pokeSelectedByte(s, (curByte & 0x0f) | (writtenNibble << 4))
+      (if (!s.senseInhLineOdd1) 1 else 0) |
+        (if (!s.senseInhLineOdd2) 2 else 0) |
+        (if (!s.senseInhLineOdd3) 4 else 0) |
+        (if (!s.senseInhLineOdd4) 8 else 0)
     }
+    writeNibbleDirect(s, writtenNibble)
   }
 }
