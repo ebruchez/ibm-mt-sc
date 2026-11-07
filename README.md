@@ -2,7 +2,7 @@
 
 An emulator, assembler, disassembler, and interactive Operator / Customer Engineer (CE) console for the **1967 IBM Magnetic Tape "Selectric" Composer (MT/SC)** cold-type typesetting system and its **16-bit Composer Control Unit (CCU)**.
 
-Built in **Scala 3** and cross-compiled for **JVM**, **Scala.js (Web UI)**, and **Scala Native**.
+Built in **Scala 3** and cross-compiled for **JVM**, **Scala.js (Web UI)**, **Scala Native**, and bare-metal **RP2040 (Adafruit Feather RP2040)**.
 
 ---
 
@@ -58,7 +58,23 @@ Optional CLI flags:
 - `--operator`: Start with the Operator faceplate installed over the CE console.
 - `<path-to-file>`: Mount a text file as a magnetic tape cartridge on the Right Tape Reader at startup.
 
-### 3. Running the Test Suite
+### 3. Bare-Metal Microcontroller (Adafruit Feather RP2040 — Stage 1)
+
+Compile the emulator with Scala Native freestanding (`thumbv6m-none-eabi`, Cortex-M0+, Immix GC) and link the `.uf2` firmware image via the Pico SDK:
+
+```bash
+sbt buildFeatherRp2040
+```
+
+This produces `firmware/build-feather-rp2040/mtsc_feather_rp2040.uf2` (and `.elf`):
+- **USB-C Serial ANSI Console**: Connect over USB CDC (`screen /dev/tty.usbmodem* 115200` or `minicom`) for the live interactive Customer Engineer & Operator console.
+- **Onboard `WS2812` NeoPixel (`GPIO 16`) & Red LED (`GPIO 13`) Status Lamps**:
+  - **Green (`+RUN`)**: `240 kHz` oscillator / CCU clock running.
+  - **Amber (`LITE 11`)**: Waiting for Operator (`Inhibit` latch or Setup prompt active).
+  - **Blue pulse (`+MT CALL`)**: Magnetic Tape `6310` stepping a frame.
+  - **Red (`LITE 9` / `ERR LT`)**: Parity or Instruction Check error.
+
+### 4. Running the Test Suite
 
 ```bash
 sbt coreJVM/test

@@ -42,22 +42,38 @@ class ComposerPaper {
   var currentXUnits: Int = 0
   var totalCharactersPrinted: Long = 0
 
+  /** Optional cap on retained completed lines (0 = unlimited; set e.g. to 24 on microcontroller targets). */
+  var maxRetainedLines: Int = 0
+
+  /** Whether to allocate per-character `GalleyGlyph` coordinates (set false on text-only MCU targets). */
+  var recordGlyphs: Boolean = true
+
   def printChar(ch: Char, escapementUnits: Int = 5): Unit = {
     currentLine.append(ch)
-    currentGlyphs += GalleyGlyph(ch, currentXUnits, escapementUnits)
+    if (recordGlyphs) {
+      currentGlyphs += GalleyGlyph(ch, currentXUnits, escapementUnits)
+    }
     currentXUnits += escapementUnits
     totalCharactersPrinted += 1
   }
 
   def carrierReturn(): Unit = {
     val lineText = currentLine.toString()
-    val glyphs = currentGlyphs.toList
-    val totalU = currentXUnits
-    val isJust = glyphs.exists(g => g.ch == ' ' && g.widthUnits != 4)
     completedLines += lineText
-    completedGalleyLines += GalleyLine(lineText, glyphs, totalU, isJust)
+    if (maxRetainedLines > 0 && completedLines.length > maxRetainedLines) {
+      completedLines.remove(0, completedLines.length - maxRetainedLines)
+    }
+    if (recordGlyphs) {
+      val glyphs = currentGlyphs.toList
+      val totalU = currentXUnits
+      val isJust = glyphs.exists(g => g.ch == ' ' && g.widthUnits != 4)
+      completedGalleyLines += GalleyLine(lineText, glyphs, totalU, isJust)
+      if (maxRetainedLines > 0 && completedGalleyLines.length > maxRetainedLines) {
+        completedGalleyLines.remove(0, completedGalleyLines.length - maxRetainedLines)
+      }
+      currentGlyphs.clear()
+    }
     currentLine.clear()
-    currentGlyphs.clear()
     currentXUnits = 0
   }
 
