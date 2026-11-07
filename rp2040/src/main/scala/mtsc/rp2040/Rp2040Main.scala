@@ -451,6 +451,7 @@ object Rp2040Main {
     val savedPsar = system.memory.psar
     val savedAw = system.memory.aWord
     val savedBw = system.memory.bWord
+    system.cpu.ild.timingTrace.enabled = false
     val t4 = PicoSdk.pico_time_us_32().toInt
     var bt = 0
     while (bt < 1000) {
@@ -464,8 +465,9 @@ object Rp2040Main {
     system.memory.psar = savedPsar
     system.memory.aWord = savedAw
     system.memory.bWord = savedBw
-    system.cpu.ild.reset()
-    system.memory.psar = savedPsar
+    mtsc.cpu.ild.Ild0303Clock.reset(system.cpu.ild.signals)
+    system.cpu.ild.syncAllCombinational()
+    system.cpu.ild.syncStateFromSignals()
 
     val summary =
       s"Bench: render=${renderUs / 1000}ms, usbFlush(${fullRows}r)=${flushFullUs / 1000}ms, ILD=${usPerBt}us/bt (${effKhz}kHz, ~${usPerBt * 12}us/insn)"

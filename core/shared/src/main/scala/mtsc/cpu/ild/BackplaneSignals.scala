@@ -960,5 +960,6 @@ final class BackplaneSignals {
     oplCde5 = ((raw >> 11) & 1) == 1
     oplCde6 = ((raw >> 6) & 1) == 1
     oplCde7 = (raw & 1) == 1
+    Ild0304Permute.evaluateCombinational(this)
   }
 }

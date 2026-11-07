@@ -118,14 +118,24 @@ object Ild0304Permute {
       prmtJmpNotTakenI1 ||
       prmtImmediateI1ToI6
 
+    // [AA092 2L-AZ] +P ONLY = -INSN T 1 & -INSN T 9 & (-JUMP | -INSN T 3)
+    s.pOnly = !s.insnT1 && !s.insnT9 && (!s.jmp || !s.insnT3)
+
+    evaluateClockStrobes(s)
+  }
+
+  /**
+   * Fast evaluation of the 3 `0304` nets (`PRMT INSN T STR LTH`, `RES INSN T STR LTH`, `BEG PRG STP`)
+   * that depend on sub-bit-time `0303` clock strobes (`prmtTime`, `strLthStrobe`, `b1_4`, `pTime`, `cenBt`),
+   * avoiding re-evaluating all instruction-time and opcode class decodes on every single-shot edge
+   * when `insnTCtrA..D`, `oplCde1..7`, `low`, `eq`, and `edit` have not changed.
+   */
+  inline def evaluateClockStrobes(s: BackplaneSignals): Unit = {
     // [AA092 5B-BB] +PERMUTE I TIME STEER LATCHES
     s.prmtInsnTStrLth = s.masterReset || (s.prmtTime && s.prmt)
 
     // [AA092 6B-BG] -RESET I-TIME STEER LATCHES (active low; stored as positive `resInsnTStrLth`)
     s.resInsnTStrLth = s.masterReset || (s.strLthStrobe && s.prmtInsnTStrLth)
-
-    // [AA092 2L-AZ] +P ONLY = -INSN T 1 & -INSN T 9 & (-JUMP | -INSN T 3)
-    s.pOnly = !s.insnT1 && !s.insnT9 && (!s.jmp || !s.insnT3)
 
     // [AA092 9L-BE] +BEGINNING PROGRAM STEP
     s.begPrgStp = s.insnT0 && s.b1_4 && s.pTime && !s.cenBt

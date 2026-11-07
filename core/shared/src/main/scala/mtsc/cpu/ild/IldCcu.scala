@@ -102,12 +102,11 @@ final class IldCcu(
   def syncAllCombinational(): Unit = {
     Ild0312ConsoleLights.evaluateSwitchAndDisplayDecodes(signals)
     Ild0303Clock.evaluateCombinational(signals)
-    Ild0304Permute.evaluateCombinational(signals)
     Ild0306To0307Address.evaluateCombinational(signals)
     Ild0305SenseQBuffer.evaluateCombinational(signals)
     Ild0308DataFlow.evaluateCombinational(signals)
     Ild0309OpAndBranch.evaluateCombinational(signals)
-    Ild0310WriteInhibit.evaluateCombinational(signals)
+    Ild0310WriteInhibit.evaluateWriteNets(signals)
     Ild0301To0302MagneticTape.evaluateCombinational(signals)
     Ild0311OutputIo.evaluateCombinational(signals)
     Ild0312ConsoleLights.evaluateCombinational(signals)
@@ -184,7 +183,346 @@ final class IldCcu(
    * Returns the number of single-shot pulses (`SSA` + `SSB`) executed (8 for a `P-Only` bit time,
    * 12 for a `P & Q` bit time).
    */
-  def stepBitTime(): Int = {
+  def stepBitTime(): Int = stepBitTimeCore(syncAtEnd = true)
+
+  /**
+   * Fast internal Bit-Time execution engine when `timingTrace.enabled == false`.
+   * Collapses intermediate inter-pulse gap sub-phases (`SsaOff`, `SsbOff`) and the 4-sub-phase
+   * Post-Write transition (`Cycle 5`), and evaluates the 4-bit serial adder and address/write
+   * decoders only at active core read/write strobes.
+   */
+  private def stepBitTimeFast(syncAtEnd: Boolean): Int = {
+    val s = signals
+    var pulses = 0
+    val savedClockSwitch = s.clockSwitch
+    s.clockSwitch = CeStepGranularity.Auto
+    s.stpClk1 = false
+    s.stpClk2 = false
+
+    // Ensure we are past SSA #1 of the current Bit Time
+    if (s.a && s.b && s.pTime && !s.cenBt) {
+      Ild0303Clock.pulseSsaOn(s)
+      pulses += 1
+      Ild0309OpAndBranch.updateOpCodeLatches(s)
+      Ild0308DataFlow.updateCarryIndicator(s)
+      Ild0303Clock.pulseSsaOff(s)
+    }
+
+    // Sample EDIT switch and clear OPL CDE 1..7 at BEGINNING PROGRAM STEP (I-0, B1-4, P TIME, -CEN BT)
+    if (s.begPrgStp) {
+      Ild0312ConsoleLights.updateLatches(s)
+    }
+    if (s.insnT0 && s.b1_4) {
+      s.oplCde1 = false
+      s.oplCde2 = false
+      s.oplCde3 = false
+      s.oplCde4 = false
+      s.oplCde5 = false
+      s.oplCde6 = false
+      s.oplCde7 = false
+      Ild0304Permute.evaluateCombinational(s)
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // 1. Cycle 1 SSB: Buffer & Y-Latch Reset before Read P (-A & -B & -TWR & +P TIME & -CEN BT)
+    // ---------------------------------------------------------------------------------------------
+    s.oscTrigger = false
+    s.ssa = false
+    s.ssb = false
+    s.b = false
+    s.resInds = false
+    s.ldInds = false
+    s.resBfr = true
+    s.resPBfr = true
+    s.qBfr1 = false
+    s.qBfr2 = false
+    s.qBfr3 = false
+    s.qBfr4 = false
+    s.pBfr1 = false
+    s.pBfr2 = false
+    s.pBfr3 = false
+    s.pBfr4 = false
+    pulses += 1
+    Ild0306To0307Address.updateYLatches(s)
+
+    // At I-5, B1-4 of INPUT: poll the addressed input device on IoBus before Read P / CEN BT
+    if (s.insnT5 && s.b1_4 && s.input) {
+      prepareInputDeviceAtI5()
+    }
+
+    // At I-3, B1-4 of Indirect Output: check output device readiness before pointer bump
+    if (s.insnT3 && s.b1_4 && s.output) {
+      if (isMultiplexInterruptCycle) {
+        s.rdy = true
+      } else {
+        val regAddr = s.malValue & 0x3e
+        savedIndirectPtrRegAddr = regAddr
+        savedIndirectPtrValue = memory.readWord(Address(regAddr)).unsigned
+        s.rdy = if (latchedOutputDevice == Device.Translator) ioBus.isTranslatorReady else true
+      }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // 2. Cycle 2 SSA/SSB: Read P-Time (+A & -B -> +A & +B, +P TIME, +CEN BT, -TWR)
+    // ---------------------------------------------------------------------------------------------
+    s.a = true
+    s.b = false
+    s.twr = false
+    s.pTime = true
+    s.cenBt = true
+    s.notPTimeStar = true
+    s.notBAndNotTwr = true
+    s.bmpStrbT = false
+    s.strLthStrobe = false
+    s.prmtTime = false
+    s.begPrgStp = false
+    s.resBfr = false
+    s.resPBfr = false
+    pulses += 1
+
+    // In Incremental Jump at I-2, B5-8: INCR JMP RES Y resets Y2, Y3, Y4 prior to loading Y4..Y8
+    if (s.b5_8 && s.oplCde1 && s.insnT2) {
+      s.ssa = true
+      Ild0306To0307Address.updateYLatches(s)
+      s.ssa = false
+    } else {
+      Ild0306To0307Address.evaluateCombinational(s)
+    }
+    Ild0305SenseQBuffer.evaluateCombinational(s)
+
+    // Core Read P: destructive read of the 4 selected P-cores; SSA #2 OFF resets Q BFR 1..4 while P BFR 1..4 holds P-nibble
+    val suppressStalledInputClear = s.insnT5 && s.input && s.inh
+    s.csYLog = !s.inhibitMemory && !s.killCsYUpperByte && !suppressStalledInputClear
+    s.readGate = s.csYLog
+    val pRawSense = coreMatrix.destructiveReadNibble(s)
+    val pNibble = if (s.readGate && !s.inhRd) pRawSense else 0
+    s.pBfr1 = (pNibble & 1) != 0
+    s.pBfr2 = (pNibble & 2) != 0
+    s.pBfr3 = (pNibble & 4) != 0
+    s.pBfr4 = ((pNibble & 8) != 0) && !(s.b9_12 && s.insnT0)
+    s.csYLog = false
+    s.readGate = false
+
+    // SSB #2 ON/OFF (CEN BT active): load Input bits, Keyboard Entry Strobe, Output latches, Y1..Y11, and OPL CDE 1..7
+    s.b = true
+    s.notBAndNotTwr = false
+    s.resBfr = false
+    pulses += 1
+
+    if (s.kbCodeRdy || s.lnStpLth) {
+      Ild0308DataFlow.updatePBuffer(s)
+    }
+
+    if (s.insnT5 && s.input && !s.inh) {
+      if (s.b1_4) {
+        s.pBfr1 = s.inBit1
+        s.pBfr2 = s.inBit2
+        s.pBfr3 = s.inBit3
+        s.pBfr4 = s.inBit4
+      } else if (s.b5_8) {
+        s.pBfr1 = s.inBit5
+        s.pBfr2 = s.inBit6
+        s.pBfr3 = s.inBit7
+        s.pBfr4 = s.inBit8
+      }
+    }
+
+    if ((s.insnT5 && s.output) || s.edit || s.masterReset) {
+      Ild0308DataFlow.evaluateBufferStrobes(s)
+      Ild0311OutputIo.updateOutputLatches(s)
+      if (s.insnT5 && s.output && !s.ldOutLth) {
+        if (s.b1_4) {
+          s.out1 = s.pBfr1
+          s.out2 = s.pBfr2
+          s.out3 = s.pBfr3
+          s.out4 = s.pBfr4
+        } else if (s.b5_8) {
+          s.out5 = s.pBfr1
+          s.out6 = s.pBfr2
+          s.out7 = s.pBfr3
+          s.out8 = s.pBfr4
+        }
+        Ild0311OutputIo.evaluateCombinational(s)
+      }
+    } else {
+      s.ldOutLth = false
+      s.resOutLth = false
+    }
+
+    Ild0306To0307Address.updateYLatches(s)
+    if (s.insnT1) {
+      Ild0309OpAndBranch.updateOpCodeLatches(s)
+    }
+    if (s.insnT2 && s.output) {
+      Ild0312ConsoleLights.updateLatches(s)
+      if (s.b9_12 && !isMultiplexInterruptCycle) {
+        latchedOutputDevice = if (!s.y8 && !s.y9 && !s.y10) Device.Translator else Device.Lights
+        latchedOutputMultiplex = s.y11
+        s.tsltrSel = !s.y8 && !s.y9 && !s.y10
+        s.lites = s.y8 && s.y9 && s.y10
+      }
+    }
+
+    val isPOnlyBitTime = s.pOnly
+
+    // ---------------------------------------------------------------------------------------------
+    // 3. Optional P & Q Cycles: Cycle 3 (BMP STRB T) and Cycle 4 (Read Q-Time) when !pOnly
+    // ---------------------------------------------------------------------------------------------
+    if (!isPOnlyBitTime) {
+      // Cycle 3: BMP STRB T (-A & +B & +CEN BT -> resets P TIME)
+      s.a = false
+      s.b = true
+      s.pTime = false
+      s.cenBt = true
+      s.bmpStrbT = true
+      pulses += 2
+      Ild0305SenseQBuffer.updateQBuffer(s, 0)
+
+      // Cycle 4: Read Q-Time (+A & -B -> +A & +B, -P TIME, -CEN BT, -TWR)
+      s.a = true
+      s.b = false
+      s.cenBt = false
+      s.bmpStrbT = false
+      pulses += 2
+      Ild0306To0307Address.evaluateCombinational(s)
+      Ild0305SenseQBuffer.evaluateCombinational(s)
+
+      val preserveAWordDuringMpxI1 = isMultiplexInterruptCycle && s.insnT1
+      s.csYLog = !s.inhibitMemory && !s.killCsYUpperByte && !preserveAWordDuringMpxI1
+      s.readGate = s.csYLog
+      val qRawSense = coreMatrix.destructiveReadNibble(s)
+      Ild0305SenseQBuffer.updateQBuffer(s, qRawSense)
+      s.csYLog = false
+      s.readGate = false
+      s.b = true
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // 4. Write Cycle (TWR = true): Write Q (-P TIME) followed by Write P (+P TIME & STR LTH STROBE)
+    // ---------------------------------------------------------------------------------------------
+    s.a = false
+    s.b = true
+    s.twr = true
+    s.pTime = false
+    s.bmpStrbT = isPOnlyBitTime
+    pulses += 1
+    if (isPOnlyBitTime) {
+      Ild0305SenseQBuffer.updateQBuffer(s, 0)
+    }
+
+    // Enter SSB ON of Write Cycle (-A & -B & +TWR -> STR LTH STROBE = true)
+    s.b = false
+    s.bmpStrbT = false
+    s.strLthStrobe = true
+    s.prmtTime = s.b13_16
+    Ild0304Permute.evaluateClockStrobes(s)
+    pulses += 1
+
+    // Evaluate 4-bit Full Adder / Borrow Subtractor once for both Write Q and Write P
+    Ild0308DataFlow.evaluateCombinational(s)
+
+    // --- 4a. Write Q (-P TIME & +TWR) ---
+    s.pTime = false
+    Ild0306To0307Address.evaluateAllocationAndControl(s)
+    Ild0305SenseQBuffer.evaluateCombinational(s)
+    if (s.insnT1 && s.b13_16 && s.mpx && s.rdy) {
+      Ild0309OpAndBranch.updateOpCodeLatches(s)
+    }
+    Ild0309OpAndBranch.updateConditionLatches(s)
+
+    val preserveAWordDuringMpxI1 = isMultiplexInterruptCycle && s.insnT1
+    val writeQActive =
+      !s.inhibitMemory &&
+      !s.killCsYUpperByte &&
+      !preserveAWordDuringMpxI1 &&
+      (!s.pOnly || s.selAWd || s.selBWd)
+    s.csYLog = writeQActive
+    if (writeQActive) {
+      Ild0306To0307Address.evaluateDecoders(s)
+      Ild0310WriteInhibit.evaluateWriteNets(s)
+      coreMatrix.writeInhibitedNibble(s)
+    }
+
+    // --- 4b. Write P (+P TIME & +TWR & STR LTH STROBE) ---
+    s.pTime = true
+    Ild0306To0307Address.evaluateCombinational(s)
+    Ild0305SenseQBuffer.evaluateCombinational(s)
+    Ild0309OpAndBranch.evaluateCombinational(s)
+    Ild0310WriteInhibit.evaluateWriteNets(s)
+
+    val writePActive = !s.inhibitMemory && !s.killCsYUpperByte && !suppressStalledInputClear
+    s.csYLog = writePActive
+    if (writePActive) {
+      coreMatrix.writeInhibitedNibble(s)
+    }
+
+    // Update LOW / EQUAL condition latches (and 0304 TAKEN / SET 9) at STR LTH STROBE
+    Ild0309OpAndBranch.updateConditionLatches(s)
+    if (s.insnT5 && s.b13_16 && s.input && !s.inh && s.mtCde) {
+      s.rdCom = true
+      Ild0301To0302MagneticTape.updateTransportLatches(s)
+      s.setLo = false
+      s.rdCom = false
+    }
+    // Latch CARRY 4 into CARRY OVER steering latch
+    s.strCarOver = if (s.b13_16) false else s.car4
+
+    // At I-5, B5-8 of OUTPUT: commit the 8-bit Output Register (OUT 1..8) to IoBus
+    if (s.insnT5 && s.b5_8 && s.output) {
+      commitOutputDeviceAtI5()
+    }
+
+    // Update Instruction Time (0304) and Bit Time (0303) steering latches
+    Ild0304Permute.updateSteeringLatches(s)
+    Ild0303Clock.updateBitSteeringLatches(s)
+
+    // ---------------------------------------------------------------------------------------------
+    // 5. Post-Write Transition (+A & -B -> +A & +B, 2 pulses) & Next Bit Time Indicator Load (SSA #1, 1 pulse)
+    // ---------------------------------------------------------------------------------------------
+    pulses += 3
+    s.csYLog = false
+    s.a = false
+    s.b = true
+    s.twr = false
+    s.pTime = true
+    s.cenBt = false
+    s.strLthStrobe = false
+    s.prmtTime = false
+    s.oscTrigger = true
+    s.ssa = true
+    s.ssb = false
+    s.resInds = true
+    s.ldInds = true
+
+    Ild0303Clock.updateBitIndicatorLatches(s)
+    Ild0304Permute.updateIndicatorLatches(s)
+    s.ssa = false
+    s.resInds = false
+    Ild0303Clock.evaluateClockNets(s)
+
+    s.carOver = if (s.b1_4) false else s.strCarOver
+    Ild0308DataFlow.evaluateAdder(s)
+
+    s.clockSwitch = savedClockSwitch
+    if (syncAtEnd) {
+      Ild0303Clock.evaluateSwitchWafers(s)
+      Ild0306To0307Address.evaluateCombinational(s)
+      Ild0305SenseQBuffer.evaluateCombinational(s)
+      Ild0309OpAndBranch.evaluateCombinational(s)
+      Ild0310WriteInhibit.evaluateWriteNets(s)
+      if (s.input || s.output || s.edit) {
+        Ild0311OutputIo.evaluateCombinational(s)
+        Ild0312ConsoleLights.evaluateCombinational(s)
+      }
+      syncStateFromSignals()
+    }
+    pulses
+  }
+
+  private def stepBitTimeCore(syncAtEnd: Boolean): Int = {
+    if (!timingTrace.enabled) {
+      return stepBitTimeFast(syncAtEnd)
+    }
     val s = signals
     var pulses = 0
     val savedClockSwitch = s.clockSwitch
@@ -507,8 +845,10 @@ final class IldCcu(
     Ild0303Clock.stepSubPhase(s, OscSubPhase.SsaOff)
 
     s.clockSwitch = savedClockSwitch
-    syncAllCombinational()
-    syncStateFromSignals()
+    if (syncAtEnd) {
+      syncAllCombinational()
+      syncStateFromSignals()
+    }
     pulses
   }
 
@@ -518,11 +858,10 @@ final class IldCcu(
    */
   def stepWordTime(): Int = {
     var totalPulses = 0
-    var i = 0
-    while (i < 4) {
-      totalPulses += stepBitTime()
-      i += 1
-    }
+    totalPulses += stepBitTimeCore(syncAtEnd = false)
+    totalPulses += stepBitTimeCore(syncAtEnd = false)
+    totalPulses += stepBitTimeCore(syncAtEnd = false)
+    totalPulses += stepBitTimeCore(syncAtEnd = true)
     totalPulses
   }
 
@@ -763,14 +1102,17 @@ final class IldCcu(
       val curInsnTime = s.insnTime
       if (curInsnTime == 1) {
         // Step the 4 bit times of I-1 individually so we can record Display 4 P/Q buffer telemetry at B1-4/B5-8
-        stepBitTime() // B1-4
+        stepBitTimeCore(syncAtEnd = false) // B1-4
         pBfrAtI1B1_4 = rawWord.unsigned & 0x0f
-        stepBitTime() // B5-8
+        stepBitTimeCore(syncAtEnd = false) // B5-8
         qBfrAtI1B5_8 = (rawWord.unsigned >> 4) & 0x0f
-        stepBitTime() // B9-12
-        stepBitTime() // B13-16
+        stepBitTimeCore(syncAtEnd = false) // B9-12
+        stepBitTimeCore(syncAtEnd = false) // B13-16
       } else {
-        stepWordTime()
+        stepBitTimeCore(syncAtEnd = false)
+        stepBitTimeCore(syncAtEnd = false)
+        stepBitTimeCore(syncAtEnd = false)
+        stepBitTimeCore(syncAtEnd = false)
       }
       wordSteps += 1
       if (s.insnTime == 0 && s.bitTimeIndex == 0) {
@@ -788,6 +1130,7 @@ final class IldCcu(
       StepResult.Normal
     }
 
+    syncAllCombinational()
     syncStateFromSignals()
     state.pBuffer = if (s.output) (s.outputByte & 0x0f) else pBfrAtI1B1_4
     state.qBuffer = qBfrAtI1B5_8

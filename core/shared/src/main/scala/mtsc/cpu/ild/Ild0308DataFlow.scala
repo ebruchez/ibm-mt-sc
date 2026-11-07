@@ -8,11 +8,9 @@ package mtsc.cpu.ild
 object Ild0308DataFlow {
 
   /**
-   * Evaluates all combinational signals on **ILD `0308`**:
-   * `KB CDE`, `IN STRB`, `KB STRB`, `KB ENT STRB`, `RES P BFR`, `ADD` / `-ADD`,
-   * 4-bit ripple carry/borrow `CAR 1..4`, 4-bit sum/difference `ACC 1..4`, and `ACC EQUAL ZERO`.
+   * Evaluates P-Buffer strobe & reset signals (`KB CDE`, `IN STRB`, `KB STRB`, `KB ENT STRB`, `RES P BFR`).
    */
-  def evaluateCombinational(s: BackplaneSignals): Unit = {
+  def evaluateBufferStrobes(s: BackplaneSignals): Unit = {
     // [AA121 AQ4] +KEYBOARD CODE = Y8 & Y9 & Y10 (Device 0111)
     s.kbCde = s.y8 && s.y9 && s.y10
 
@@ -27,52 +25,86 @@ object Ild0308DataFlow {
       )
 
     // [AA051] +KEYBOARD ENTRY STROBE
-    val kbBitGp =
-      (s.b1_4 && ((!s.kbCodeC && !s.kbCodeD) || (s.kbCodeC && s.kbCodeD))) ||
-      (s.b5_8 && s.kbCodeC && !s.kbCodeD) ||
-      (s.b9_12 && !s.kbCodeC && s.kbCodeD)
-    s.kbEntStrb = (s.kbStrb && s.kbCodeRdy && kbBitGp) || (s.kbStrb && s.b1_4 && s.lnStpLth)
+    if (s.kbStrb && (s.kbCodeRdy || s.lnStpLth)) {
+      val kbBitGp =
+        (s.b1_4 && ((!s.kbCodeC && !s.kbCodeD) || (s.kbCodeC && s.kbCodeD))) ||
+        (s.b5_8 && s.kbCodeC && !s.kbCodeD) ||
+        (s.b9_12 && !s.kbCodeC && s.kbCodeD)
+      s.kbEntStrb = (s.kbCodeRdy && kbBitGp) || (s.b1_4 && s.lnStpLth)
+    } else {
+      s.kbEntStrb = false
+    }
 
     // [AA083 / AA011] RES P BFR = (RES BFR & -CEN BT) | MR
     s.resPBfr = (s.resBfr && !s.cenBt) || s.masterReset
+  }
 
+  /**
+   * Evaluates the 4-bit serial full adder / borrow subtractor (`ADD`, `-ADD`, `ACC 1..4`, `CAR 1..4`, `ACC EQUAL ZERO`).
+   */
+  def evaluateAdder(s: BackplaneSignals): Unit = {
     // [AA101 1M-BH..4L-BE] +ADD and -ADD:
     // Subtraction (-ADD) is selected during I-9 of Arithmetic / Incremental Jump when OPL CDE 3 is 0
     // (SUB, SUBI, CMP, CMPI, CMPB, and Backward Incremental Jump).
-    s.add = !(s.insnT9 && s.athOp && !s.oplCde3)
-    s.notAdd = !s.add
+    val add = !(s.insnT9 && s.athOp && !s.oplCde3)
+    val notAdd = !add
+    s.add = add
+    s.notAdd = notAdd
 
     // [AA011..AA014] 4-Bit Full Adder (when +ADD) / Full Borrow Subtractor (when -ADD)
+    val p1 = s.pBfr1
+    val q1 = s.qBfr1
     val c0 = s.carOver
-    s.acc1 = s.pBfr1 ^ s.qBfr1 ^ c0
-    s.car1 =
-      (s.add && s.pBfr1 && (s.qBfr1 || c0)) ||
-      (s.notAdd && !s.pBfr1 && (s.qBfr1 || c0)) ||
-      (s.qBfr1 && c0)
+    val acc1 = p1 ^ q1 ^ c0
+    val c1 =
+      (add && p1 && (q1 || c0)) ||
+      (notAdd && !p1 && (q1 || c0)) ||
+      (q1 && c0)
+    s.acc1 = acc1
+    s.car1 = c1
 
-    val c1 = s.car1
-    s.acc2 = s.pBfr2 ^ s.qBfr2 ^ c1
-    s.car2 =
-      (s.add && s.pBfr2 && (s.qBfr2 || c1)) ||
-      (s.notAdd && !s.pBfr2 && (s.qBfr2 || c1)) ||
-      (s.qBfr2 && c1)
+    val p2 = s.pBfr2
+    val q2 = s.qBfr2
+    val acc2 = p2 ^ q2 ^ c1
+    val c2 =
+      (add && p2 && (q2 || c1)) ||
+      (notAdd && !p2 && (q2 || c1)) ||
+      (q2 && c1)
+    s.acc2 = acc2
+    s.car2 = c2
 
-    val c2 = s.car2
-    s.acc3 = s.pBfr3 ^ s.qBfr3 ^ c2
-    s.car3 =
-      (s.add && s.pBfr3 && (s.qBfr3 || c2)) ||
-      (s.notAdd && !s.pBfr3 && (s.qBfr3 || c2)) ||
-      (s.qBfr3 && c2)
+    val p3 = s.pBfr3
+    val q3 = s.qBfr3
+    val acc3 = p3 ^ q3 ^ c2
+    val c3 =
+      (add && p3 && (q3 || c2)) ||
+      (notAdd && !p3 && (q3 || c2)) ||
+      (q3 && c2)
+    s.acc3 = acc3
+    s.car3 = c3
 
-    val c3 = s.car3
-    s.acc4 = s.pBfr4 ^ s.qBfr4 ^ c3
-    s.car4 =
-      (s.add && s.pBfr4 && (s.qBfr4 || c3)) ||
-      (s.notAdd && !s.pBfr4 && (s.qBfr4 || c3)) ||
-      (s.qBfr4 && c3)
+    val p4 = s.pBfr4
+    val q4 = s.qBfr4
+    val acc4 = p4 ^ q4 ^ c3
+    val c4 =
+      (add && p4 && (q4 || c3)) ||
+      (notAdd && !p4 && (q4 || c3)) ||
+      (q4 && c3)
+    s.acc4 = acc4
+    s.car4 = c4
 
     // [AA012 7F-AW / AA014 6F-AU, 6G-AV] +ACCUMULATOR EQUAL ZERO
-    s.accEqualZero = !s.acc1 && !s.acc2 && !s.acc3 && !s.acc4
+    s.accEqualZero = !acc1 && !acc2 && !acc3 && !acc4
+  }
+
+  /**
+   * Evaluates all combinational signals on **ILD `0308`**:
+   * `KB CDE`, `IN STRB`, `KB STRB`, `KB ENT STRB`, `RES P BFR`, `ADD` / `-ADD`,
+   * 4-bit ripple carry/borrow `CAR 1..4`, 4-bit sum/difference `ACC 1..4`, and `ACC EQUAL ZERO`.
+   */
+  def evaluateCombinational(s: BackplaneSignals): Unit = {
+    evaluateBufferStrobes(s)
+    evaluateAdder(s)
   }
 
   /**
@@ -81,7 +113,7 @@ object Ild0308DataFlow {
    * and re-evaluates the 4-bit Accumulator and Carry network.
    */
   def updatePBuffer(s: BackplaneSignals): Unit = {
-    evaluateCombinational(s)
+    evaluateBufferStrobes(s)
 
     if (s.resPBfr) {
       s.pBfr1 = false
@@ -121,7 +153,7 @@ object Ild0308DataFlow {
       if ( s.kbCodeA &&  s.kbCodeB) s.pBfr4 = true
     }
 
-    evaluateCombinational(s)
+    evaluateAdder(s)
   }
 
   /**
@@ -133,7 +165,7 @@ object Ild0308DataFlow {
       return
     }
     if (s.strLthStrobe) {
-      evaluateCombinational(s)
+      evaluateAdder(s)
       s.strCarOver = if (s.b13_16) false else s.car4
     }
   }
@@ -147,6 +179,6 @@ object Ild0308DataFlow {
     } else if (s.resInds || s.ldInds) {
       s.carOver = s.strCarOver
     }
-    evaluateCombinational(s)
+    evaluateAdder(s)
   }
 }

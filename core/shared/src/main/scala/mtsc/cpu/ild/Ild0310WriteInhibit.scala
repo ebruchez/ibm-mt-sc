@@ -16,6 +16,14 @@ object Ild0310WriteInhibit {
     Ild0305SenseQBuffer.evaluateCombinational(s)
     Ild0308DataFlow.evaluateCombinational(s)
     Ild0309OpAndBranch.evaluateCombinational(s)
+    evaluateWriteNets(s)
+  }
+
+  /**
+   * Evaluates the `0310` write-control and sense-inhibit signals assuming `0305`, `0308`, and `0309`
+   * signals (`inhibitMemory`, `transOrComp`, `rewoGate`, `roweGate`, `samBt`, `acc1..4`) are already fresh.
+   */
+  def evaluateWriteNets(s: BackplaneSignals): Unit = {
 
     // ---------------------------------------------------------------------------------------------
     // [AA061 3G-AS..6G-AV] +WRITE P BUFFER (WR P BFR)

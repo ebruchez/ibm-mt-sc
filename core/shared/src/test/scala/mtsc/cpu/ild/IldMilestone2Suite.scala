@@ -37,6 +37,7 @@ class IldMilestone2Suite extends FunSuite {
     val ioIld = new MockIoBus()
     setup(memIld, ioIld)
     val ccuIld = new IldCcu(memIld, ioIld)
+    ccuIld.timingTrace.enabled = false
 
     var stepIdx = 0
     var done = false

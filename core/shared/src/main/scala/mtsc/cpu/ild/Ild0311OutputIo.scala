@@ -92,34 +92,36 @@ object Ild0311OutputIo {
   def updateOutputLatches(s: BackplaneSignals): Unit = {
     evaluateCombinational(s)
 
-    // [AA031] -RESET OUTPUT LATCH breaks the hold path on OUT 1..8 during B1-4 & B & LD OUT LTH (or Master Reset)
-    if (s.resOutLth) {
-      s.out1 = false
-      s.out2 = false
-      s.out3 = false
-      s.out4 = false
-      s.out5 = false
-      s.out6 = false
-      s.out7 = false
-      s.out8 = false
-    }
-
-    // [AA031] +LOAD OUTPUT LATCH sets OUT 1..4 at B1-4 and OUT 5..8 at B5-8 from P BFR 1..4
-    if (s.ldOutLth) {
-      if (s.b1_4) {
-        if (s.pBfr1) s.out1 = true
-        if (s.pBfr2) s.out2 = true
-        if (s.pBfr3) s.out3 = true
-        if (s.pBfr4) s.out4 = true
-      } else if (s.b5_8) {
-        if (s.pBfr1) s.out5 = true
-        if (s.pBfr2) s.out6 = true
-        if (s.pBfr3) s.out7 = true
-        if (s.pBfr4) s.out8 = true
+    if (s.resOutLth || s.ldOutLth) {
+      // [AA031] -RESET OUTPUT LATCH breaks the hold path on OUT 1..8 during B1-4 & B & LD OUT LTH (or Master Reset)
+      if (s.resOutLth) {
+        s.out1 = false
+        s.out2 = false
+        s.out3 = false
+        s.out4 = false
+        s.out5 = false
+        s.out6 = false
+        s.out7 = false
+        s.out8 = false
       }
-    }
 
-    evaluateCombinational(s)
+      // [AA031] +LOAD OUTPUT LATCH sets OUT 1..4 at B1-4 and OUT 5..8 at B5-8 from P BFR 1..4
+      if (s.ldOutLth) {
+        if (s.b1_4) {
+          if (s.pBfr1) s.out1 = true
+          if (s.pBfr2) s.out2 = true
+          if (s.pBfr3) s.out3 = true
+          if (s.pBfr4) s.out4 = true
+        } else if (s.b5_8) {
+          if (s.pBfr1) s.out5 = true
+          if (s.pBfr2) s.out6 = true
+          if (s.pBfr3) s.out7 = true
+          if (s.pBfr4) s.out8 = true
+        }
+      }
+
+      evaluateCombinational(s)
+    }
   }
 
   /**

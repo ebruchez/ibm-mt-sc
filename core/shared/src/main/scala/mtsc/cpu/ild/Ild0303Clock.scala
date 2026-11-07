@@ -72,39 +72,49 @@ object Ild0303Clock {
    * Evaluates the CE Console Clock Control Switch wafers and Edit Switch (`[AA071]`, `[AA141]`, `[AA221]`).
    */
   def evaluateSwitchWafers(s: BackplaneSignals): Unit = {
-    s.edit = s.editSwitch != CeEditSelector.Proc
+    val newEdit = s.editSwitch != CeEditSelector.Proc
+    val editChanged = s.edit != newEdit
+    s.edit = newEdit
     s.stepButtonReleased = !s.stepButtonPressed
-    s.autoOrStep = (s.clockSwitch == CeStepGranularity.Auto) || s.stepButtonPressed
 
-    // 2-wafer Clock Control Switch encoding on ILD 0303 / AA221:
-    // - Top wafer (STEP 1): grounded at JMP and WORD -> +STEP 1 is true at PRG STP and BIT
-    // - Middle wafer (STEP 2): grounded at JMP and PRG STP -> +STEP 2 is true at WORD and BIT
-    s.clockSwitch match {
-      case CeStepGranularity.Auto =>
-        s.step1 = false
-        s.notStep1 = false
-        s.step2 = false
-        s.notStep2 = false
-      case CeStepGranularity.Jump =>
-        s.step1 = false
-        s.notStep1 = true
-        s.step2 = false
-        s.notStep2 = true
-      case CeStepGranularity.ProgramStep =>
-        s.step1 = true
-        s.notStep1 = false
-        s.step2 = false
-        s.notStep2 = true
-      case CeStepGranularity.Word =>
-        s.step1 = false
-        s.notStep1 = true
-        s.step2 = true
-        s.notStep2 = false
-      case CeStepGranularity.Bit =>
-        s.step1 = true
-        s.notStep1 = false
-        s.step2 = true
-        s.notStep2 = false
+    if (s.clockSwitch == CeStepGranularity.Auto) {
+      s.autoOrStep = true
+      s.step1 = false
+      s.notStep1 = false
+      s.step2 = false
+      s.notStep2 = false
+    } else {
+      s.autoOrStep = s.stepButtonPressed
+      // 2-wafer Clock Control Switch encoding on ILD 0303 / AA221:
+      // - Top wafer (STEP 1): grounded at JMP and WORD -> +STEP 1 is true at PRG STP and BIT
+      // - Middle wafer (STEP 2): grounded at JMP and PRG STP -> +STEP 2 is true at WORD and BIT
+      s.clockSwitch match {
+        case CeStepGranularity.Auto => ()
+        case CeStepGranularity.Jump =>
+          s.step1 = false
+          s.notStep1 = true
+          s.step2 = false
+          s.notStep2 = true
+        case CeStepGranularity.ProgramStep =>
+          s.step1 = true
+          s.notStep1 = false
+          s.step2 = false
+          s.notStep2 = true
+        case CeStepGranularity.Word =>
+          s.step1 = false
+          s.notStep1 = true
+          s.step2 = true
+          s.notStep2 = false
+        case CeStepGranularity.Bit =>
+          s.step1 = true
+          s.notStep1 = false
+          s.step2 = true
+          s.notStep2 = false
+      }
+    }
+
+    if (editChanged) {
+      Ild0304Permute.evaluateCombinational(s)
     }
   }
 
@@ -112,6 +122,24 @@ object Ild0303Clock {
    * Evaluates `STOP CLOCK 1` and `STOP CLOCK 2` latches on `[AA071]`.
    */
   def evaluateStopClockLatches(s: BackplaneSignals): Unit = {
+    if (s.clockSwitch == CeStepGranularity.Auto && !s.stpClk1) {
+      val newEdit = s.editSwitch != CeEditSelector.Proc
+      if (s.edit != newEdit) {
+        s.edit = newEdit
+        Ild0304Permute.evaluateCombinational(s)
+      }
+      s.stepButtonReleased = !s.stepButtonPressed
+      s.autoOrStep = true
+      s.step1 = false
+      s.notStep1 = false
+      s.step2 = false
+      s.notStep2 = false
+      if (s.ssb && s.a) {
+        s.stpClk2 = true
+      }
+      return
+    }
+
     evaluateSwitchWafers(s)
 
     // [AA071 2K-AM / 2L-AN] STOP CLOCK 2 latch:
@@ -154,57 +182,76 @@ object Ild0303Clock {
   }
 
   /**
+   * Fast internal evaluation of `0303` clock, bit-counter decode, current-source timing signals,
+   * and `0304` clock strobes (`prmtInsnTStrLth`, `resInsnTStrLth`, `begPrgStp`), without
+   * re-running all `0304` instruction-time and opcode decodes when `insnTCtrA..D` and `oplCde1..7`
+   * have not changed.
+   */
+  private[ild] def evaluateClockNets(s: BackplaneSignals): Unit = {
+    // [AA081 / AA083] Bit Time Counter Decodes
+    val btA = s.btCtrA
+    val btB = s.btCtrB
+    s.b1_4   = !btA && !btB // [AA081 1G-AZ / 2G-BA]
+    s.b5_8   =  btA && !btB // [AA081 1N-BU / 2N-BV]
+    s.b9_12  = !btA &&  btB // [AA083]
+    s.b13_16 =  btA &&  btB // [AA083]
+
+    val a = s.a
+    val b = s.b
+    val twr = s.twr
+    val pTime = s.pTime
+    val cenBt = s.cenBt
+
+    // [AA081 5B-AH] -P TIME* = !(pTime && !cenBt)
+    val notPTimeStar = !(pTime && !cenBt)
+    s.notPTimeStar = notPTimeStar
+
+    // [AA083 AN4] -B AND -TIME WRITE
+    s.notBAndNotTwr = !b && !twr
+
+    // [AA081 7H-BD] +BUMP STROBE TIME = -A & +B & +CEN BT
+    s.bmpStrbT = !a && b && cenBt
+
+    // [AA081 6F-AX] +STEER LATCH STROBE = -A & -B & +TWR
+    s.strLthStrobe = !a && !b && twr
+
+    // [AA083 AQ4] +PERMUTE TIME = +BIT 13-16 & -B & +TWR (-PERMUTE TIME is !prmtTime)
+    s.prmtTime = s.b13_16 && !b && twr
+
+    // [AA082 2N-BH / AA092 9L-BE] +RESET INDICATORS = +SSA & +B & +P TIME & -CEN BT
+    s.resInds = s.ssa && b && pTime && !cenBt
+
+    // [AA083 AE4] +LOAD INDICATORS = -A & +B & +P TIME
+    s.ldInds = !a && b && pTime
+
+    // [AA082 1K-AY, 1L-BB -> 3L-BC] +CURRENT SOURCE X LOGIC
+    val memEnable = !s.inhibitMemory && s.selectMemory
+    val readX  =  a && !b && !twr && notPTimeStar
+    val writeX = !a &&  b && (cenBt || twr) && notPTimeStar
+    s.csXLog = memEnable && (readX || writeX)
+
+    // [AA082 1B-AA..1F-AP -> 3D-BJ] +CURRENT SOURCE Y LOGIC
+    val readY  =  a &&  b && notPTimeStar
+    val writeY = !a && !b && (cenBt || twr)
+    s.csYLog = memEnable && (readY || writeY)
+
+    // [Timing Diagram 0601 / AA023] REWO & ROWE
+    val abSame = (a && b) || (!a && !b)
+    s.rewo = cenBt && abSame
+    s.rowe = !cenBt && !pTime && ((a && b) || (!a && !b && twr))
+
+    Ild0304Permute.evaluateClockStrobes(s)
+    evaluateStopClockLatches(s)
+  }
+
+  /**
    * Evaluates all combinational clock, bit-counter decode, and current-source timing signals
    * on `[AA081]`, `[AA082]`, `[AA083]`, and `[AA092]`.
    */
   def evaluateCombinational(s: BackplaneSignals): Unit = {
     evaluateSwitchWafers(s)
-
-    // [AA081 / AA083] Bit Time Counter Decodes
-    s.b1_4   = !s.btCtrA && !s.btCtrB // [AA081 1G-AZ / 2G-BA]
-    s.b5_8   =  s.btCtrA && !s.btCtrB // [AA081 1N-BU / 2N-BV]
-    s.b9_12  = !s.btCtrA &&  s.btCtrB // [AA083]
-    s.b13_16 =  s.btCtrA &&  s.btCtrB // [AA083]
-
-    // [AA081 5B-AH] -P TIME* = !(pTime && !cenBt)
-    s.notPTimeStar = !(s.pTime && !s.cenBt)
-
-    // [AA083 AN4] -B AND -TIME WRITE
-    s.notBAndNotTwr = !s.b && !s.twr
-
-    // [AA081 7H-BD] +BUMP STROBE TIME = -A & +B & +CEN BT
-    s.bmpStrbT = !s.a && s.b && s.cenBt
-
-    // [AA081 6F-AX] +STEER LATCH STROBE = -A & -B & +TWR
-    s.strLthStrobe = !s.a && !s.b && s.twr
-
-    // [AA083 AQ4] +PERMUTE TIME = +BIT 13-16 & -B & +TWR (-PERMUTE TIME is !prmtTime)
-    s.prmtTime = s.b13_16 && !s.b && s.twr
-
-    // [AA082 2N-BH / AA092 9L-BE] +RESET INDICATORS = +SSA & +B & +P TIME & -CEN BT
-    s.resInds = s.ssa && s.b && s.pTime && !s.cenBt
-
-    // [AA083 AE4] +LOAD INDICATORS = -A & +B & +P TIME
-    s.ldInds = !s.a && s.b && s.pTime
-
-    // [AA082 1K-AY, 1L-BB -> 3L-BC] +CURRENT SOURCE X LOGIC
-    val memEnable = !s.inhibitMemory && s.selectMemory
-    val readX  =  s.a && !s.b && !s.twr && s.notPTimeStar
-    val writeX = !s.a &&  s.b && (s.cenBt || s.twr) && s.notPTimeStar
-    s.csXLog = memEnable && (readX || writeX)
-
-    // [AA082 1B-AA..1F-AP -> 3D-BJ] +CURRENT SOURCE Y LOGIC
-    val readY  =  s.a &&  s.b && s.notPTimeStar
-    val writeY = !s.a && !s.b && (s.cenBt || s.twr)
-    s.csYLog = memEnable && (readY || writeY)
-
-    // [Timing Diagram 0601 / AA023] REWO & ROWE
-    s.rewo = s.cenBt && ((s.a && s.b) || (!s.a && !s.b))
-    s.rowe = !s.cenBt && !s.pTime && ((s.a && s.b) || (!s.a && !s.b && s.twr))
-
-    // Update 0304 combinational nets and 0303 stop-clock latches
     Ild0304Permute.evaluateCombinational(s)
-    evaluateStopClockLatches(s)
+    evaluateClockNets(s)
   }
 
   /**
@@ -305,13 +352,13 @@ object Ild0303Clock {
     }
 
     // Recompute combinational pulses (RES INDS, LD INDS, BMP STRB T, etc.)
-    evaluateCombinational(s)
+    evaluateClockNets(s)
 
     // If RES INDS or LD INDS is active (-A & +B & +P TIME & -CEN BT), update indicator latches
     if (s.resInds || s.ldInds) {
       updateBitIndicatorLatches(s)
       Ild0304Permute.updateIndicatorLatches(s)
-      evaluateCombinational(s)
+      evaluateClockNets(s)
     }
   }
 
@@ -323,11 +370,11 @@ object Ild0303Clock {
   def pulseSsaOff(s: BackplaneSignals): Unit = {
     s.ssa = false
     s.ssb = false
-    evaluateCombinational(s)
+    s.resInds = false
     if (s.ldInds) {
       updateBitIndicatorLatches(s)
       Ild0304Permute.updateIndicatorLatches(s)
-      evaluateCombinational(s)
+      evaluateClockNets(s)
     }
   }
 
@@ -345,14 +392,14 @@ object Ild0303Clock {
     s.b = s.a
 
     // Recompute combinational pulses (STR LTH STROBE, PERMUTE TIME, STP CLK 2, etc.)
-    evaluateCombinational(s)
+    evaluateClockNets(s)
 
     // If STR LTH STROBE or PERMUTE TIME is active (-A & -B & +TWR), update steering latches
     if (s.strLthStrobe || s.prmtTime) {
       // Important: update 0304 steering latches and 0303 bit steering latches from current indicators
       Ild0304Permute.updateSteeringLatches(s)
       updateBitSteeringLatches(s)
-      evaluateCombinational(s)
+      evaluateClockNets(s)
     }
   }
 
@@ -362,11 +409,10 @@ object Ild0303Clock {
   def pulseSsbOff(s: BackplaneSignals): Unit = {
     s.ssa = false
     s.ssb = false
-    evaluateCombinational(s)
     if (s.strLthStrobe || s.prmtTime) {
       Ild0304Permute.updateSteeringLatches(s)
       updateBitSteeringLatches(s)
-      evaluateCombinational(s)
+      evaluateClockNets(s)
     }
   }
 

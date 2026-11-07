@@ -64,7 +64,7 @@ lazy val rp2040 = project
     Compile / unmanagedSourceDirectories += (ThisBuild / baseDirectory).value / "core" / "shared" / "src" / "main" / "scala",
     nativeConfig ~= { c =>
       c.withLTO(LTO.none)
-        .withMode(Mode.releaseSize)
+        .withMode(Mode.releaseFast)
         .withGC(GC.immix)
         .withBuildTarget(BuildTarget.libraryStatic)
         .withMultithreading(false)
@@ -74,7 +74,7 @@ lazy val rp2040 = project
           c.compileOptions ++ Seq(
             s"--sysroot=$armSysroot",
             "-mcpu=cortex-m0plus",
-            "-Oz",
+            "-O2",
             "-fshort-enums",
             "-ffunction-sections",
             "-fdata-sections"

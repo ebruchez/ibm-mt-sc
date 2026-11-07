@@ -47,6 +47,7 @@ object Ild0309OpAndBranch {
       !s.strBtCtrA && !s.strBtCtrB &&
       !s.strInsnTCtrA && !s.strInsnTCtrB && !s.strInsnTCtrC && !s.strInsnTCtrD
 
+    var changed = false
     if (s.masterReset || resetAtBegPs) {
       s.oplCde1 = false
       s.oplCde2 = false
@@ -55,18 +56,19 @@ object Ild0309OpAndBranch {
       s.oplCde5 = false
       s.oplCde6 = false
       s.oplCde7 = false
+      changed = true
     }
 
     // [AA032] Load OPL CDE 1..7 from P BUFFER 1..4 during I-1, CEN BT
     if (s.loadOplCde) {
-      if (s.b1_4 && s.pBfr1)  s.oplCde7 = true
-      if (s.b5_8 && s.pBfr3)  s.oplCde6 = true
-      if (s.b9_12 && s.pBfr4) s.oplCde5 = true
+      if (s.b1_4 && s.pBfr1)  { s.oplCde7 = true; changed = true }
+      if (s.b5_8 && s.pBfr3)  { s.oplCde6 = true; changed = true }
+      if (s.b9_12 && s.pBfr4) { s.oplCde5 = true; changed = true }
       if (s.b13_16) {
-        if (s.pBfr1) s.oplCde4 = true
-        if (s.pBfr2) s.oplCde3 = true
-        if (s.pBfr3) s.oplCde2 = true
-        if (s.pBfr4) s.oplCde1 = true
+        if (s.pBfr1) { s.oplCde4 = true; changed = true }
+        if (s.pBfr2) { s.oplCde3 = true; changed = true }
+        if (s.pBfr3) { s.oplCde2 = true; changed = true }
+        if (s.pBfr4) { s.oplCde1 = true; changed = true }
       }
     }
 
@@ -75,9 +77,12 @@ object Ild0309OpAndBranch {
     if (s.mpx && s.rdy && s.insnT1 && s.b13_16 && !s.b && s.twr) {
       s.oplCde4 = true
       s.oplCde6 = true
+      changed = true
     }
 
-    Ild0304Permute.evaluateCombinational(s)
+    if (changed) {
+      Ild0304Permute.evaluateCombinational(s)
+    }
   }
 
   /**
@@ -91,6 +96,8 @@ object Ild0309OpAndBranch {
       return
     }
 
+    val prevLow = s.low
+    val prevEq = s.eq
     evaluateCombinational(s)
 
     // [AA132 2G-AH -> 3G-AK] Preset EQ = true, LOW = false at I-2, I-4, I-6, I-8
@@ -124,6 +131,8 @@ object Ild0309OpAndBranch {
       s.eq = false
     }
 
-    Ild0304Permute.evaluateCombinational(s)
+    if (s.low != prevLow || s.eq != prevEq) {
+      Ild0304Permute.evaluateCombinational(s)
+    }
   }
 }
