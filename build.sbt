@@ -12,13 +12,100 @@ lazy val buildFeatherRp2040 = taskKey[File](
   "Link the Scala Native RP2040 static library and build the Adafruit Feather RP2040 UF2 firmware image"
 )
 
+lazy val checkRp2040Lint = taskKey[Unit](
+  "Verify RP2040 firmware ELF against forbidden heavy symbols, hot-path allocations, and XIP cache footprint limits"
+)
+
+def runRp2040Lint(elfFile: File, log: sbt.util.Logger): Unit = {
+  if (!elfFile.exists()) {
+    sys.error(s"RP2040 ELF file not found: $elfFile (run buildFeatherRp2040 first)")
+  }
+  val nmOut = Seq("arm-none-eabi-nm", "-S", elfFile.getAbsolutePath).!!
+  val nmLines = nmOut.linesIterator.toVector
+
+  // 1. Forbidden heavy runtime classes / subsystems on RP2040 (264 KB SRAM)
+  val forbiddenPatterns = Seq(
+    "java.util.Formatter"             -> "String.format / f\"...\" (~95 KB flash, regex + Locale allocations)",
+    "scala.scalanative.regex."        -> "Regex engine (syntax trees / NFA states on heap)",
+    "java.util.regex.Pattern"         -> "java.util.regex.Pattern (pulls in regex engine)",
+    "java.lang.StringSpecialCasing"   -> "Unicode StringSpecialCasing table (allocates 109 CaseEntry objects + TimSort)",
+    "scala.Console$"                  -> "scala.Console$ (allocates 12 KB of Console.in BufferedReader buffers)",
+    "java.util.stream.StreamSupport"  -> "java.util.stream pipeline (Spliterator/Pipeline allocations)"
+  )
+  val forbiddenHits = for {
+    (pattern, reason) <- forbiddenPatterns
+    matching = nmLines.filter(_.contains(pattern))
+    if matching.nonEmpty
+  } yield s"  - $pattern ($reason): ${matching.size} symbol(s), e.g. ${matching.head.trim}"
+
+  if (forbiddenHits.nonEmpty) {
+    sys.error(
+      s"[RP2040 Lint] Forbidden heavy symbols linked into ${elfFile.getName}:\n" +
+        forbiddenHits.mkString("\n")
+    )
+  }
+
+  // 2. Zero-allocation hot-path verification (emulation bit-time loop + console rendering)
+  val objdumpOut = Seq("arm-none-eabi-objdump", "-d", elfFile.getAbsolutePath).!!
+  val hotFunctionMarkers = Seq(
+    "_SM19mtsc.cpu.ild.IldCcuD15stepBitTimeFast",
+    "_SM25mtsc.console.AnsiTerminalD20renderDirtyRowsChars",
+    "_SM22mtsc.asm.Disassembler$D17writeDisassembled",
+    "_SM27mtsc.console.CeConsoleView$D"
+  )
+  val allocRegex = """<(scalanative_alloc[^>]+)>""".r
+  val hotAllocViolations = scala.collection.mutable.ArrayBuffer.empty[String]
+  for (block <- objdumpOut.split("\n\n")) {
+    val lines = block.linesIterator.toVector
+    if (lines.nonEmpty) {
+      val header = lines.head
+      if (hotFunctionMarkers.exists(header.contains)) {
+        val allocs = allocRegex.findAllMatchIn(block).map(_.group(1)).toSeq.distinct
+        if (allocs.nonEmpty) {
+          hotAllocViolations += s"  - $header calls ${allocs.mkString(", ")}"
+        }
+      }
+    }
+  }
+  if (hotAllocViolations.nonEmpty) {
+    sys.error(
+      s"[RP2040 Lint] Heap allocations found in zero-allocation hot path:\n" +
+        hotAllocViolations.mkString("\n")
+    )
+  }
+
+  // 3. XIP Flash Cache footprint check for IldCcu.stepBitTimeFast (< 8 KB = 1 way of 16 KB 2-way XIP cache)
+  val stepBitTimeSymbol = "_SM19mtsc.cpu.ild.IldCcuD15stepBitTimeFastiEPT19mtsc.cpu.ild.IldCcu"
+  val stepLineOpt = nmLines.find(line => line.endsWith(s" $stepBitTimeSymbol"))
+  stepLineOpt match {
+    case Some(line) =>
+      val parts = line.trim.split("\\s+")
+      val addrHex = parts(0)
+      val sizeBytes = Integer.parseInt(parts(1), 16)
+      val maxXipWayBytes = 8192
+      if (sizeBytes > maxXipWayBytes) {
+        sys.error(
+          f"[RP2040 Lint] IldCcu.stepBitTimeFast size is $sizeBytes bytes (0x$sizeBytes%x), " +
+            s"exceeding single XIP cache way limit ($maxXipWayBytes bytes)!"
+        )
+      }
+      log.info(
+        f"[RP2040 Lint] OK: 0 forbidden symbols, 0 hot-path allocations, " +
+          f"stepBitTimeFast=$sizeBytes bytes @ 0x$addrHex (< $maxXipWayBytes B XIP cache way)"
+      )
+    case None =>
+      sys.error(s"[RP2040 Lint] Symbol $stepBitTimeSymbol not found in ${elfFile.getName}")
+  }
+}
+
 lazy val root = project
   .in(file("."))
   .aggregate(core.jvm, core.js, core.native)
   .settings(
     name := "ibm-mt-sc-emulator",
     publish / skip := true,
-    buildFeatherRp2040 := (rp2040 / buildFeatherRp2040).value
+    buildFeatherRp2040 := (rp2040 / buildFeatherRp2040).value,
+    checkRp2040Lint := (rp2040 / checkRp2040Lint).value
   )
 
 lazy val core = crossProject(JSPlatform, JVMPlatform, NativePlatform)
@@ -81,28 +168,18 @@ lazy val rp2040 = project
           )
         )
     },
+    checkRp2040Lint := {
+      val log = streams.value.log
+      val firmwareDir = (ThisBuild / baseDirectory).value / "firmware"
+      val elfFile = firmwareDir / "build-feather-rp2040" / "mtsc_feather_rp2040.elf"
+      runRp2040Lint(elfFile, log)
+    },
     buildFeatherRp2040 := {
       val log = streams.value.log
       val staticLib = (Compile / nativeLink).value
       log.info(s"Linked RP2040 Scala Native static library: $staticLib")
 
       val firmwareDir = (ThisBuild / baseDirectory).value / "firmware"
-      // Weaken java.lang.String.indexOfImpl(Int, Int, Int) in libmtsc_rp2040.a so that
-      // ALL calls (including intra-object calls from String.indexOf(Int) inside java.lang.String.o)
-      // resolve to the alignment-safe Cortex-M0+ implementation in firmware/main.c.
-      val objcopyExit = Process(
-        Seq(
-          "arm-none-eabi-objcopy",
-          "--weaken-symbol=_SM16java.lang.StringD11indexOfImpliiiiEPT16java.lang.String",
-          "--weaken-symbol=Settings_MinHeapSize",
-          staticLib.getAbsolutePath
-        ),
-        firmwareDir
-      ).!(log)
-      if (objcopyExit != 0) {
-        sys.error(s"arm-none-eabi-objcopy failed with exit code $objcopyExit")
-      }
-
       val buildDir = firmwareDir / "build-feather-rp2040"
       IO.createDirectory(buildDir)
 
@@ -126,6 +203,9 @@ lazy val rp2040 = project
       if (buildExit != 0) {
         sys.error(s"CMake build failed with exit code $buildExit")
       }
+
+      val elfFile = buildDir / "mtsc_feather_rp2040.elf"
+      runRp2040Lint(elfFile, log)
 
       val uf2File = buildDir / "mtsc_feather_rp2040.uf2"
       log.info(s"Built Adafruit Feather RP2040 UF2 firmware: $uf2File (${uf2File.length()} bytes)")

@@ -224,9 +224,12 @@ class CeConsoleState {
   var viewGalley: Boolean = false
   var realTimePacing: Boolean = true
   var pacingSpeed: Double = 1.0 // 1.0 = 14 cps (~71 ms/char), 2.0 = 28 cps, 5.0 = 70 cps, 0.0 = instant
+  var customPrintDelayMs: Int = 0 // Optional explicit per-character delay override in ms (>0 overrides pacingSpeed)
 
   def printDelayMs: Long =
-    if (!realTimePacing || pacingSpeed <= 0.0) 0L
+    if (!realTimePacing) 0L
+    else if (customPrintDelayMs > 0) customPrintDelayMs.toLong
+    else if (pacingSpeed <= 0.0) 0L
     else math.max(5L, (71.4 / pacingSpeed).toLong)
 
   def tapeDelayMs: Long =

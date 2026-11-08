@@ -58,7 +58,7 @@ Optional CLI flags:
 - `--operator`: Start with the Operator faceplate installed over the CE console.
 - `<path-to-file>`: Mount a text file as a magnetic tape cartridge on the Right Tape Reader at startup.
 
-### 3. Bare-Metal Microcontroller (Adafruit Feather RP2040 — Stage 1)
+### 3. Bare-Metal Microcontroller (Adafruit Feather RP2040 + 2.9" eInk FeatherWing)
 
 Compile the emulator with Scala Native freestanding (`thumbv6m-none-eabi`, Cortex-M0+, Immix GC) and link the `.uf2` firmware image via the Pico SDK:
 
@@ -68,7 +68,15 @@ sbt buildFeatherRp2040
 
 This produces `firmware/build-feather-rp2040/mtsc_feather_rp2040.uf2` (and `.elf`):
 - **USB-C Serial ANSI Console**: Connect over USB CDC (`screen /dev/tty.usbmodem* 115200` or `minicom`) for the live interactive Customer Engineer & Operator console.
-- **Onboard `WS2812` NeoPixel (`GPIO 16`) & Red LED (`GPIO 13`) Status Lamps**:
+- **Adafruit 2.9" Grayscale eInk FeatherWing (`PID 4777`, `SSD1680`, `296×128`)**:
+  - Plugs directly onto the Feather RP2040 (`SPI0`: `SCK=GPIO18`, `MOSI=GPIO19`, `ECS=D9/GPIO9`, `D/C=D10/GPIO10`, `SRCS=D6/GPIO8`, `SDCS=D5/GPIO7`).
+  - **Proportional Press Roman Serif Galley Output**: Renders the Selectric Composer galley sheet in Landscape (`296×128`) at `2 px = 1 escapement unit` (`6–18 px` character widths matching the `3–9 unit` escapement table), complete with a top pica ruler (`0p`–`12p`), target measure pointer (`▼ 140u`), vertical margin guideline, and 2-digit non-repro line numbers.
+  - **Hybrid eInk Refresh**: Fast non-flashing monochrome updates (~420 ms) at each Carrier Return while composing, followed by a 4-level grayscale camera-ready proof refresh when composition halts (or via `[e]` / `epd` and `epd flip` in the console).
+  - **FeatherWing Tactile Buttons (`A` = `D11/GPIO11`, `B` = `D12/GPIO12`, `C` = `D13/GPIO13`)**:
+    - **Button A**: Start / Pause / Restart composition.
+    - **Button B**: Scroll through completed galley lines or trigger a 4-grayscale proof refresh.
+    - **Button C**: Master Reset CCU, rewind tape cartridge, and clear galley sheet.
+- **Onboard `WS2812` NeoPixel (`GPIO 16`) Status Lamps**:
   - **Green (`+RUN`)**: `240 kHz` oscillator / CCU clock running.
   - **Amber (`LITE 11`)**: Waiting for Operator (`Inhibit` latch or Setup prompt active).
   - **Blue pulse (`+MT CALL`)**: Magnetic Tape `6310` stepping a frame.

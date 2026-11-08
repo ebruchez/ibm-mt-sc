@@ -23,6 +23,7 @@ message(STATUS "Linking Scala Native static library: ${SCALA_NATIVE_LIB}")
 
 add_executable(mtsc_feather_rp2040
     main.c
+    epd_ssd1680.c
 )
 
 target_compile_definitions(mtsc_feather_rp2040 PRIVATE
@@ -37,9 +38,14 @@ pico_enable_stdio_uart(mtsc_feather_rp2040 0)
 
 pico_add_extra_outputs(mtsc_feather_rp2040)
 
+target_link_options(mtsc_feather_rp2040 PRIVATE
+    -Wl,--wrap=scalanative_throw
+)
+
 target_link_libraries(mtsc_feather_rp2040
     pico_stdlib
     hardware_pio
     hardware_clocks
+    hardware_spi
     ${SCALA_NATIVE_LIB}
 )

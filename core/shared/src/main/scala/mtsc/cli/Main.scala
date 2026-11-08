@@ -253,6 +253,7 @@ object Main {
         runFn()
 
       case "a" | "anim" | "pacing" =>
+        consoleState.customPrintDelayMs = 0
         if (!consoleState.realTimePacing) {
           consoleState.realTimePacing = true
           consoleState.pacingSpeed = 1.0
@@ -270,6 +271,27 @@ object Main {
         }
         consoleState.statusMessage = s"Mechanical pacing: $stateStr."
         consoleState.log(s"Pacing $stateStr")
+
+      case s if s.startsWith("delay ") || s.startsWith("d ") =>
+        val arg = s.substring(s.indexOf(' ') + 1).trim
+        try {
+          val ms = Integer.parseInt(arg)
+          if (ms <= 0) {
+            consoleState.customPrintDelayMs = 0
+            consoleState.realTimePacing = false
+            consoleState.statusMessage = "Character typing delay set to 0 ms (instant)."
+            consoleState.log("Character typing delay disabled (0 ms).")
+          } else {
+            consoleState.customPrintDelayMs = ms
+            consoleState.realTimePacing = true
+            val msg = s"Character typing delay set to ${ms} ms/char."
+            consoleState.statusMessage = msg
+            consoleState.log(msg)
+          }
+        } catch {
+          case _: Exception =>
+            consoleState.statusMessage = s"Invalid delay '$arg'. Usage: delay <ms> (e.g. delay 220)."
+        }
 
       case "1" =>
         consoleState.selectDisplayMode(CeDisplayMode.Display1)

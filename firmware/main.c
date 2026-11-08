@@ -9,6 +9,7 @@
 #include "hardware/clocks.h"
 #include "hardware/timer.h"
 #include "ws2812.pio.h"
+#include "epd_ssd1680.h"
 
 // Scala Native library initialization and exported Stage 1 entry point
 extern int ScalaNativeInit(void);
@@ -23,72 +24,6 @@ int64_t scalanative_nano_time(void) {
     return (int64_t)(time_us_64() * 1000ULL);
 }
 
-// Cortex-M0+ (ARMv6-M) faults on unaligned 32-bit loads. Scala Native's
-// java.lang.String.indexOfImpl(Int, Int, Int) casts CharArray.atRaw(offset + startIndex)
-// to Ptr[Long] for SWAR search, which is only 2-byte aligned when (offset + startIndex) is odd.
-// Because libmtsc_rp2040.a has _SM16java.lang.StringD11indexOfImpliiiiEPT16java.lang.String
-// weakened via objcopy, this strong definition overrides both cross-object and intra-object calls.
-extern void scalanative_throwNullPointer(void *module)
-    __asm__("_SM34scala.scalanative.runtime.package$D16throwNullPointernEO");
-extern void scalanative_throwOutOfBounds(void *module, int32_t idx, int32_t len)
-    __asm__("_SM34scala.scalanative.runtime.package$D16throwOutOfBoundsiinEO");
-
-int32_t safe_String_indexOfImpl(
-    void *self, int32_t codePoint, int32_t startIndex, int32_t endIndex)
-    __asm__("_SM16java.lang.StringD11indexOfImpliiiiEPT16java.lang.String");
-
-int32_t safe_String_indexOfImpl(
-    void *self, int32_t codePoint, int32_t startIndex, int32_t endIndex) {
-    if (self == NULL) {
-        scalanative_throwNullPointer(NULL);
-        return -1;
-    }
-    if (endIndex - startIndex < 1) {
-        return -1;
-    }
-    const uint32_t *str_words = (const uint32_t *)self;
-    uintptr_t char_array = (uintptr_t)str_words[1];
-    int32_t offset = (int32_t)str_words[2];
-    if (char_array == 0) {
-        scalanative_throwNullPointer(NULL);
-        return -1;
-    }
-    int32_t arr_len = *(const int32_t *)(char_array + 4u);
-    const uint16_t *chars = (const uint16_t *)(char_array + 12u);
-
-    if ((uint32_t)codePoint <= 0xFFFFu) {
-        uint16_t target = (uint16_t)codePoint;
-        for (int32_t i = startIndex; i < endIndex; i++) {
-            int32_t idx = offset + i;
-            if ((uint32_t)idx >= (uint32_t)arr_len) {
-                scalanative_throwOutOfBounds(NULL, idx, arr_len);
-                return -1;
-            }
-            if (chars[idx] == target) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    if ((uint32_t)codePoint <= 0x10FFFFu) {
-        uint32_t cp = (uint32_t)codePoint - 0x10000u;
-        uint16_t hi = (uint16_t)(0xD800u + (cp >> 10));
-        uint16_t lo = (uint16_t)(0xDC00u + (cp & 0x3FFu));
-        for (int32_t i = startIndex; i + 1 < endIndex; i++) {
-            int32_t idx = offset + i;
-            if ((uint32_t)(idx + 1) >= (uint32_t)arr_len) {
-                scalanative_throwOutOfBounds(NULL, idx + 1, arr_len);
-                return -1;
-            }
-            if (chars[idx] == hi && chars[idx + 1] == lo) {
-                return i;
-            }
-        }
-    }
-    return -1;
-}
-
 // Thin C wrappers for Pico SDK inline GPIO functions and board macros
 uint pico_default_led_pin(void) {
 #ifdef PICO_DEFAULT_LED_PIN
@@ -99,11 +34,17 @@ uint pico_default_led_pin(void) {
 }
 
 void pico_led_init(uint pin) {
+    if (pin == 13 && pico_epd_buttons_active()) {
+        return; // GPIO 13 (D13) is shared with FeatherWing Button C (active-low to GND)
+    }
     gpio_init(pin);
     gpio_set_dir(pin, GPIO_OUT);
 }
 
 void pico_led_put(uint pin, bool value) {
+    if (pin == 13 && pico_epd_buttons_active()) {
+        return; // Avoid driving GPIO 13 HIGH against Button C pull-to-GND
+    }
     gpio_put(pin, value);
 }
 
@@ -246,20 +187,40 @@ void pico_set_boot_stage(uint32_t stage) {
     boot_stage = stage;
 }
 
-// Override for Scala Native freestanding heap size using available SRAM
+// Override for Scala Native freestanding heap size using available SRAM.
+// Note: Immix `Heap_Init` divides `__scalanative_memory_size()` by 2344 bytes/block
+// (2048 block + 256 bytemap + 32 lineMeta + 8 blockMeta), so metadata is already included.
 size_t __scalanative_memory_size(void) {
     size_t total_heap = (size_t)(&__HeapLimit - &__end__);
-    size_t c_heap_reserve = 40 * 1024; // Reserve 40 KB for Immix mark stack, Zone, stdio, and C malloc
+    size_t c_heap_reserve = 16 * 1024; // Reserve 16 KB for Immix mark stack, Zone, and stdio
     if (total_heap > c_heap_reserve) {
         return (total_heap - c_heap_reserve) & ~(size_t)2047;
     }
     return 64 * 1024;
 }
 
-// Override weakened Settings_MinHeapSize in libmtsc_rp2040.a so Immix unlocks all
-// pre-allocated blocks immediately at startup instead of starting at 16 KB (8 blocks).
-size_t Settings_MinHeapSize(void) {
-    return __scalanative_memory_size();
+static volatile void *last_thrown_obj = NULL;
+static volatile uintptr_t last_throw_caller = 0;
+
+extern void __real_scalanative_throw(void *obj);
+
+void __wrap_scalanative_throw(void *obj) {
+    last_thrown_obj = obj;
+    last_throw_caller = (uintptr_t)__builtin_return_address(0);
+    __real_scalanative_throw(obj);
+}
+
+static void print_scala_string_Inline(const void *str_obj) {
+    if (str_obj == NULL) {
+        printf("<null>");
+        return;
+    }
+    uintptr_t addr = (uintptr_t)str_obj;
+    if (addr < 0x20000000u || addr > 0x20041f00u || (addr & 3u) != 0u) {
+        printf("<invalid:0x%08lx>", (unsigned long)addr);
+        return;
+    }
+    pico_serial_print(str_obj);
 }
 
 // Override weak _exit in pico_runtime so _Exit(1) / abort() / OOM visibly blinks Red/Off and keeps USB alive
@@ -268,11 +229,22 @@ void __attribute__((noreturn)) _exit(int status) {
     uint led = pico_default_led_pin();
     while (true) {
         printf(
-            "\r\n[FATAL] _exit(%d) at boot_stage=%lu caller=0x%08lx\r\n",
+            "\r\n[FATAL] _exit(%d) at boot_stage=%lu caller=0x%08lx throw_caller=0x%08lx",
             status,
             (unsigned long)boot_stage,
-            (unsigned long)caller
+            (unsigned long)caller,
+            (unsigned long)last_throw_caller
         );
+        const void *obj = (const void *)last_thrown_obj;
+        if (obj != NULL && (uintptr_t)obj >= 0x20000000u && (uintptr_t)obj <= 0x20041f00u) {
+            const void * const *fields = (const void * const *)obj;
+            const void * const *rtti = (const void * const *)fields[0];
+            if ((uintptr_t)rtti >= 0x10000000u && (uintptr_t)rtti <= 0x20041f00u) {
+                printf(" exc=");
+                print_scala_string_Inline(rtti[4]);
+            }
+        }
+        printf("\r\n");
         pico_neopixel_set_rgb(80, 0, 0);
         pico_led_put(led, true);
         sleep_ms(250);

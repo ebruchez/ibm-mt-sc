@@ -37,22 +37,31 @@ final case class GalleyLine(
 class ComposerPaper {
 
   private val completedLines: ArrayBuffer[String] = ArrayBuffer.empty
-  private val completedGalleyLines: ArrayBuffer[GalleyLine] = ArrayBuffer.empty
+  // Each completed line stores a single packed `Array[Int]` where entry `i` encodes `(xUnits << 16) | (widthUnits & 0xffff)`.
+  // This avoids allocating per-character `GalleyGlyph` and `List[::]` objects on the heap during composition.
+  private val completedCoords: ArrayBuffer[Array[Int]] = ArrayBuffer.empty
   private val currentLine: StringBuilder = new StringBuilder
-  private val currentGlyphs: ArrayBuffer[GalleyGlyph] = ArrayBuffer.empty
+  private var currentCoords: Array[Int] = new Array[Int](128)
+  private var currentCoordsLen: Int = 0
   var currentXUnits: Int = 0
   var totalCharactersPrinted: Long = 0
 
-  /** Optional cap on retained completed lines (0 = unlimited; set e.g. to 24 on microcontroller targets). */
+  /** Optional cap on retained completed lines (0 = unlimited; set e.g. to 16 on microcontroller targets). */
   var maxRetainedLines: Int = 0
 
-  /** Whether to allocate per-character `GalleyGlyph` coordinates (set false on text-only MCU targets). */
+  /** Whether to record per-character horizontal escapement coordinates (`xUnits`, `widthUnits`). */
   var recordGlyphs: Boolean = true
 
   def printChar(ch: Char, escapementUnits: Int = 5): Unit = {
     currentLine.append(ch)
     if (recordGlyphs) {
-      currentGlyphs += GalleyGlyph(ch, currentXUnits, escapementUnits)
+      if (currentCoordsLen >= currentCoords.length) {
+        val next = new Array[Int](currentCoords.length * 2)
+        System.arraycopy(currentCoords, 0, next, 0, currentCoordsLen)
+        currentCoords = next
+      }
+      currentCoords(currentCoordsLen) = ((currentXUnits & 0xffff) << 16) | (escapementUnits & 0xffff)
+      currentCoordsLen += 1
     }
     currentXUnits += escapementUnits
     totalCharactersPrinted += 1
@@ -65,21 +74,55 @@ class ComposerPaper {
       completedLines.remove(0, completedLines.length - maxRetainedLines)
     }
     if (recordGlyphs) {
-      val glyphs = currentGlyphs.toList
-      val totalU = currentXUnits
-      val isJust = glyphs.exists(g => g.ch == ' ' && g.widthUnits != 4)
-      completedGalleyLines += GalleyLine(lineText, glyphs, totalU, isJust)
-      if (maxRetainedLines > 0 && completedGalleyLines.length > maxRetainedLines) {
-        completedGalleyLines.remove(0, completedGalleyLines.length - maxRetainedLines)
+      val lineCoords = new Array[Int](currentCoordsLen)
+      System.arraycopy(currentCoords, 0, lineCoords, 0, currentCoordsLen)
+      completedCoords += lineCoords
+      if (maxRetainedLines > 0 && completedCoords.length > maxRetainedLines) {
+        completedCoords.remove(0, completedCoords.length - maxRetainedLines)
       }
-      currentGlyphs.clear()
+      currentCoordsLen = 0
     }
     currentLine.clear()
     currentXUnits = 0
   }
 
+  private def buildGalleyLine(lineText: String, coords: Array[Int], count: Int): GalleyLine = {
+    val len = math.min(lineText.length, count)
+    val lb = List.newBuilder[GalleyGlyph]
+    var totalU = 0
+    var isJust = false
+    var i = 0
+    while (i < len) {
+      val ch = lineText.charAt(i)
+      val packed = coords(i)
+      val xU = (packed >>> 16) & 0xffff
+      val wU = packed & 0xffff
+      if (ch == ' ' && wU != 4) {
+        isJust = true
+      }
+      totalU = xU + wU
+      lb += GalleyGlyph(ch, xU, wU)
+      i += 1
+    }
+    GalleyLine(lineText, lb.result(), totalU, isJust)
+  }
+
   def completedLinesCount: Int = completedLines.length
   def completedLineAt(idx: Int): String = completedLines(idx)
+  def completedGalleyLinesCount: Int = completedCoords.length
+  def completedLineGlyphCount(lineIdx: Int): Int =
+    math.min(completedLines(lineIdx).length, completedCoords(lineIdx).length)
+  def completedLineGlyphXUnits(lineIdx: Int, glyphIdx: Int): Int =
+    (completedCoords(lineIdx)(glyphIdx) >>> 16) & 0xffff
+  def completedGalleyLineAt(idx: Int): GalleyLine =
+    buildGalleyLine(completedLines(idx), completedCoords(idx), completedCoords(idx).length)
+  def currentGlyphsCount: Int = math.min(currentLine.length, currentCoordsLen)
+  def currentGlyphCharAt(idx: Int): Char = currentLine.charAt(idx)
+  def currentGlyphXUnitsAt(idx: Int): Int = (currentCoords(idx) >>> 16) & 0xffff
+  def currentGlyphAt(idx: Int): GalleyGlyph = {
+    val packed = currentCoords(idx)
+    GalleyGlyph(currentLine.charAt(idx), (packed >>> 16) & 0xffff, packed & 0xffff)
+  }
   def currentLineBuilder: StringBuilder = currentLine
   def lineCount: Int = completedLines.length + (if (currentLine.nonEmpty) 1 else 0)
 
@@ -89,24 +132,39 @@ class ComposerPaper {
   }
 
   def galleyLines: List[GalleyLine] = {
-    val result = completedGalleyLines.toList
+    val lb = List.newBuilder[GalleyLine]
+    val count = math.min(completedLines.length, completedCoords.length)
+    var i = 0
+    while (i < count) {
+      val coords = completedCoords(i)
+      lb += buildGalleyLine(completedLines(i), coords, coords.length)
+      i += 1
+    }
     if (currentLine.nonEmpty) {
-      val isJust = currentGlyphs.exists(g => g.ch == ' ' && g.widthUnits != 4)
-      result :+ GalleyLine(currentLine.toString(), currentGlyphs.toList, currentXUnits, isJust)
-    } else result
+      lb += buildGalleyLine(currentLine.toString(), currentCoords, currentCoordsLen)
+    }
+    lb.result()
   }
 
-  def currentLineGlyphs: List[GalleyGlyph] =
-    currentGlyphs.toList
+  def currentLineGlyphs: List[GalleyGlyph] = {
+    val len = currentGlyphsCount
+    val lb = List.newBuilder[GalleyGlyph]
+    var i = 0
+    while (i < len) {
+      lb += currentGlyphAt(i)
+      i += 1
+    }
+    lb.result()
+  }
 
   def fullText: String =
     lines.mkString("\n")
 
   def clear(): Unit = {
     completedLines.clear()
-    completedGalleyLines.clear()
+    completedCoords.clear()
     currentLine.clear()
-    currentGlyphs.clear()
+    currentCoordsLen = 0
     currentXUnits = 0
     totalCharactersPrinted = 0
   }

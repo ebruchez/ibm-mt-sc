@@ -9,12 +9,12 @@ import mtsc.cli.Main
 import mtsc.console.{AnsiTerminal, CeConsoleState, CeConsoleView}
 import mtsc.cpu.{CcuEngineMode, StepResult}
 import mtsc.diag.{DiagnosticPrograms, EscapementRoutine}
-import mtsc.periph.{MtscSystem, TapeCartridge}
-import mtsc.types.{Device, Fmt}
+import mtsc.periph.{GalleyFont, MtscSystem, TapeCartridge}
+import mtsc.types.{Address, Device, Fmt, RegId, Word}
 
 /**
- * C wrappers for Pico SDK GPIO, PIO WS2812 NeoPixel, and non-blocking USB CDC / UART serial I/O
- * provided by `firmware/main.c`.
+ * C wrappers for Pico SDK GPIO, PIO WS2812 NeoPixel, SSD1680 eInk FeatherWing (#4777),
+ * and non-blocking USB CDC / UART serial I/O provided by `firmware/main.c` and `firmware/epd_ssd1680.c`.
  */
 @extern
 object PicoSdk {
@@ -31,6 +31,12 @@ object PicoSdk {
   def pico_serial_print_chars(chars: Object, count: CInt): Unit = extern
   def pico_serial_flush(): Unit = extern
   def sleep_ms(ms: CUnsignedInt): Unit = extern
+  def pico_epd_init(): Unit = extern
+  def pico_epd_is_busy(): CBool = extern
+  def pico_epd_set_controller(ctrlType: CUnsignedInt): Unit = extern
+  def pico_epd_upload_planes(bwPlane: Ptr[Byte], redPlane: Ptr[Byte], mode: CUnsignedInt): Unit = extern
+  def pico_epd_poll_buttons(): CUnsignedInt = extern
+  def pico_epd_get_diag(index: CUnsignedInt): CUnsignedInt = extern
 }
 
 /**
@@ -75,6 +81,72 @@ object Rp2040Main {
   private var systemRef: MtscSystem = null
   private var consoleStateRef: CeConsoleState = null
   private var terminalRef: AnsiTerminal = null
+
+  // Pre-allocated 296x128 SSD1680 eInk bitplanes (2 * 4,736 = 9,472 bytes) rooted in module fields
+  private val epdBwPlane: Array[Byte] = new Array[Byte](GalleyFont.PlaneBytes)
+  private val epdRedPlane: Array[Byte] = new Array[Byte](GalleyFont.PlaneBytes)
+  private var epdScrollOffsetLines: Int = 0
+  private var epdFlip180: Boolean = false
+  private var epdLastRenderedLines: Int = -1
+  private var epdLastRenderedChars: Long = -1L
+  private var epdLastStartLine: Int = 0
+  private var epdPendingMode: Int = -1 // -1 = none, 0 = Fast Mono, 1 = Full Mono, 2 = 4-Grayscale
+
+  private final val EpdModeFastMono: Int = 0
+  private final val EpdModeFullMono: Int = 1
+  private final val EpdModeGray4: Int = 2
+
+  private def currentTargetMeasure(system: MtscSystem): Int = {
+    val r30 = system.memory.readWord(Address(60)).unsigned
+    if (r30 >= 30 && r30 <= 240) r30
+    else if (system.operatorPanel.measure >= 30 && system.operatorPanel.measure <= 240) system.operatorPanel.measure
+    else 140
+  }
+
+  private def requestEpdRefresh(
+    system: MtscSystem,
+    mode: Int,
+    showCursor: Boolean = false,
+    forceNow: Boolean = false
+  ): Unit = {
+    if (mode > epdPendingMode) {
+      epdPendingMode = mode
+    }
+    servicePendingEpdRefresh(system, showCursor, forceNow)
+  }
+
+  private def servicePendingEpdRefresh(
+    system: MtscSystem,
+    showCursor: Boolean = false,
+    forceNow: Boolean = false
+  ): Boolean = {
+    if (epdPendingMode < 0 || (!forceNow && PicoSdk.pico_epd_is_busy())) {
+      return false
+    }
+    val totalLines = system.paper.lineCount
+    val newStartLine = GalleyFont.visibleStartLine(totalLines, epdScrollOffsetLines)
+    // Whenever the visible top line shifts (e.g. advancing to a new 8-line page or scrolling),
+    // promote FastMono to FullMono so the previous page's text is erased cleanly with zero ghosting.
+    val modeToRun =
+      if (epdPendingMode == EpdModeFastMono && newStartLine != epdLastStartLine) EpdModeFullMono
+      else epdPendingMode
+    epdPendingMode = -1
+    epdLastStartLine = newStartLine
+    epdLastRenderedLines = system.paper.completedLinesCount
+    epdLastRenderedChars = system.paper.totalCharactersPrinted
+
+    GalleyFont.renderGalleyToPlanes(
+      paper = system.paper,
+      targetMeasure = currentTargetMeasure(system),
+      bwPlane = epdBwPlane,
+      redPlane = epdRedPlane,
+      scrollOffsetLines = epdScrollOffsetLines,
+      showCursor = showCursor,
+      flip180 = epdFlip180
+    )
+    PicoSdk.pico_epd_upload_planes(epdBwPlane.at(0), epdRedPlane.at(0), modeToRun.toUInt)
+    true
+  }
 
   private def flushTerminal(terminal: AnsiTerminal, forceFull: Boolean = false): Int = {
     val rows = terminal.renderDirtyRowsChars(
@@ -130,9 +202,25 @@ object Rp2040Main {
     s"Heap: ${usedKb}KB/${maxKb}KB (GC #$collections)"
   }
 
+  private def hex32(v: CUnsignedInt): String =
+    java.lang.Integer.toHexString(v.toInt)
+
+  private def epdDiagSummary(): String = {
+    val sramSt = hex32(PicoSdk.pico_epd_get_diag(0.toUInt))
+    val sramRd = hex32(PicoSdk.pico_epd_get_diag(1.toUInt))
+    val pullM  = hex32(PicoSdk.pico_epd_get_diag(3.toUInt))
+    val stReg  = hex32(PicoSdk.pico_epd_get_diag(4.toUInt))
+    val cnt    = PicoSdk.pico_epd_get_diag(5.toUInt).toInt
+    val mode   = PicoSdk.pico_epd_get_diag(6.toUInt).toInt
+    val ctrl   = PicoSdk.pico_epd_get_diag(7.toUInt).toInt
+    val drv    = if (ctrl == 2) "IL0373" else "SSD1680"
+    s"SPI0[drv=$drv PU=0x$pullM ST=0x$stReg SRAM=0x$sramRd(st=0x$sramSt) up=$cnt m=$mode]"
+  }
+
   @exported
   def mtsc_rp2040_main(): Unit = {
     PicoSdk.pico_set_boot_stage(2.toUInt)
+    PicoSdk.pico_epd_init()
     ledPin = PicoSdk.pico_default_led_pin()
     PicoSdk.pico_led_init(ledPin)
     PicoSdk.pico_neopixel_init()
@@ -144,8 +232,8 @@ object Rp2040Main {
     // Stage 3: Initializing IldCcu lazy val and SRAM optimizations
     PicoSdk.pico_set_boot_stage(3.toUInt)
     system.cpu.ild.timingTrace.enabled = false
-    system.paper.maxRetainedLines = 24
-    system.paper.recordGlyphs = false
+    system.paper.maxRetainedLines = 16
+    system.paper.recordGlyphs = true
 
     // Stage 4: Constructing CeConsoleState & AnsiTerminal
     PicoSdk.pico_set_boot_stage(4.toUInt)
@@ -181,12 +269,14 @@ object Rp2040Main {
     system.loadTape(Device.RightTape, tape)
     consoleState.log("Mounted historical 4-paragraph MT cartridge on Right Tape Reader.")
 
-    // Stage 11: Formatting initial status message & updating lamps
+    // Stage 11: Formatting initial status message & updating lamps + eInk Galley
     PicoSdk.pico_set_boot_stage(11.toUInt)
     consoleState.log(s"Program '${initialProg.name}' loaded at 0x${Fmt.hex3(system.memory.psar.unsigned)}.")
-    consoleState.log(s"Adafruit Feather RP2040 Stage 1 (${system.engineMode.label}). ${heapSummary()}")
+    // Render initial 4-Grayscale camera-ready galley sheet with pica ruler
+    requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false)
+    consoleState.log(s"2.9\" SSD1680 eInk (#4777): ${epdDiagSummary()}")
     consoleState.statusMessage =
-      s"Feather RP2040 Ready (${heapSummary()}). Press [r] Run, [s] Step, [n] Engine, [b] Bench, [a] Pacing."
+      s"Ready (${heapSummary()}). [r/BtnA] Run, [s] Step, [e/BtnB] eInk/Scroll, [BtnC] Reset."
 
     var usbWasConnected = PicoSdk.pico_stdio_usb_connected()
     var needsRender = usbWasConnected
@@ -197,6 +287,7 @@ object Rp2040Main {
       try {
         PicoSdk.pico_set_boot_stage(12.toUInt)
         updateHardwareLamps(system, isRunningLoop = false)
+        servicePendingEpdRefresh(system, showCursor = false)
 
         val usbConnectedNow = PicoSdk.pico_stdio_usb_connected()
         if (usbConnectedNow && !usbWasConnected) {
@@ -206,6 +297,13 @@ object Rp2040Main {
           forceFullRender = true
         }
         usbWasConnected = usbConnectedNow
+
+        // Poll FeatherWing physical buttons A (D11), B (D12), C (D13)
+        val btnMask = PicoSdk.pico_epd_poll_buttons().toInt
+        if (btnMask != 0) {
+          handleFeatherWingButtons(btnMask, system, consoleState, terminal)
+          needsRender = true
+        }
 
         if (needsRender) {
           PicoSdk.pico_set_boot_stage(13.toUInt)
@@ -220,8 +318,13 @@ object Rp2040Main {
         val ch = PicoSdk.pico_getchar_timeout_us(10000.toUInt) // 10 ms poll
         if (ch >= 0) {
           PicoSdk.pico_set_boot_stage(16.toUInt)
+          val prevLines = system.paper.completedLinesCount
+          val prevChars = system.paper.totalCharactersPrinted
           val cmd = readSerialCommand(ch)
           handleRp2040Command(cmd, system, consoleState, terminal)
+          if (system.paper.completedLinesCount != prevLines || system.paper.totalCharactersPrinted != prevChars) {
+            requestEpdRefresh(system, mode = EpdModeFastMono, showCursor = true)
+          }
           needsRender = true
         }
       } catch {
@@ -273,13 +376,90 @@ object Rp2040Main {
     firstChar.toChar.toString
   }
 
+  /**
+   * Handles physical tactile buttons A (`D11`), B (`D12`), and C (`D13`) on the
+   * Adafruit 2.9" Grayscale eInk FeatherWing (#4777):
+   * - **Button A (`0x01`)**: Start / Resume composition (or restart if already halted)
+   * - **Button B (`0x02`)**: Scroll through completed galley lines (4 lines per press) or force 4-Grayscale refresh
+   * - **Button C (`0x04`)**: Master Reset CCU, rewind tape cartridge, and clear galley sheet
+   */
+  private def handleFeatherWingButtons(
+    btnMask: Int,
+    system: MtscSystem,
+    consoleState: CeConsoleState,
+    terminal: AnsiTerminal
+  ): Unit = {
+    if ((btnMask & 0x01) != 0) {
+      // Button A: Start / Resume Composition
+      epdScrollOffsetLines = 0
+      if (system.cpu.state.halted) {
+        system.reset()
+        EscapementRoutine.initializeTable(system.memory)
+        val tape = TapeCartridge.fromText(TapeCartridge.HistoricalSampleText, "Historical MT Tape")
+        system.loadTape(Device.RightTape, tape)
+        epdLastRenderedLines = 0
+        epdLastRenderedChars = 0L
+      }
+      consoleState.log("FeatherWing [Button A]: Starting composition...")
+      consoleState.statusMessage = "FeatherWing [Button A]: Composing to 2.9\" eInk Galley..."
+      runPacedRp2040(system, consoleState, terminal)
+    } else if ((btnMask & 0x02) != 0) {
+      // Button B: Scroll Galley or Force 4-Grayscale Proof Refresh
+      val totalLines = system.paper.lineCount
+      if (totalLines > GalleyFont.MaxVisibleLines) {
+        val maxScroll = totalLines - GalleyFont.MaxVisibleLines
+        if (epdScrollOffsetLines >= maxScroll) {
+          epdScrollOffsetLines = 0
+        } else {
+          epdScrollOffsetLines = math.min(maxScroll, epdScrollOffsetLines + 4)
+        }
+        // Use Gray4 when returning to the latest proof view (offset 0) and FullMono when scrolling back,
+        // so scrolled text is completely clean and free of partial-refresh ghosting.
+        val mode = if (epdScrollOffsetLines == 0) EpdModeGray4 else EpdModeFullMono
+        requestEpdRefresh(system, mode = mode, showCursor = false, forceNow = true)
+        val msg = s"FeatherWing [Button B]: Galley scroll offset = -$epdScrollOffsetLines lines (of $totalLines)."
+        consoleState.log(msg)
+        consoleState.statusMessage = msg
+      } else {
+        requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false)
+        val msg = "FeatherWing [Button B]: Triggered 4-Grayscale camera-ready eInk refresh."
+        consoleState.log(msg)
+        consoleState.statusMessage = msg
+      }
+    } else if ((btnMask & 0x04) != 0) {
+      // Button C: Master Reset & Rewind Tape
+      epdScrollOffsetLines = 0
+      system.reset()
+      EscapementRoutine.initializeTable(system.memory)
+      val tape = TapeCartridge.fromText(TapeCartridge.HistoricalSampleText, "Historical MT Tape")
+      system.loadTape(Device.RightTape, tape)
+      epdLastRenderedLines = 0
+      epdLastRenderedChars = 0L
+      requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false)
+      val msg = "FeatherWing [Button C]: Master Reset & tape rewound. Galley cleared."
+      consoleState.log(msg)
+      consoleState.statusMessage = msg
+    }
+  }
+
   private def handleRp2040Command(
     cmd: String,
     system: MtscSystem,
     consoleState: CeConsoleState,
     terminal: AnsiTerminal
   ): Unit = {
-    val lower = Fmt.asciiLower(cmd.trim)
+    val trimmed = cmd.trim
+    val lower = Fmt.asciiLower(trimmed)
+    if (trimmed == "E") {
+      val cur = PicoSdk.pico_epd_get_diag(7.toUInt).toInt
+      val next = if (cur == 2) 1.toUInt else 2.toUInt
+      PicoSdk.pico_epd_set_controller(next)
+      requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false, forceNow = true)
+      val msg = s"Switched eInk driver -> ${epdDiagSummary()}"
+      consoleState.log(msg)
+      consoleState.statusMessage = msg
+      return
+    }
     lower match {
       case "w" =>
         // Single-key convenience shortcut for 't prog' over raw USB serial
@@ -291,6 +471,39 @@ object Rp2040Main {
           rawMode = true,
           runFn = () => runPacedRp2040(system, consoleState, terminal)
         )
+
+      case "e" | "epd" | "epd gray" =>
+        requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false, forceNow = true)
+        val msg = s"4-Gray eInk refresh (${system.paper.lineCount} lines) — ${epdDiagSummary()}"
+        consoleState.log(msg)
+        consoleState.statusMessage = msg
+
+      case "epd il0373" | "il0373" =>
+        PicoSdk.pico_epd_set_controller(2.toUInt)
+        requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false, forceNow = true)
+        val msg = s"Switched to IL0373 (T5) 4-Gray eInk — ${epdDiagSummary()}"
+        consoleState.log(msg)
+        consoleState.statusMessage = msg
+
+      case "epd ssd1680" | "ssd1680" =>
+        PicoSdk.pico_epd_set_controller(1.toUInt)
+        requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false, forceNow = true)
+        val msg = s"Switched to SSD1680 4-Gray eInk — ${epdDiagSummary()}"
+        consoleState.log(msg)
+        consoleState.statusMessage = msg
+
+      case "epd mono" =>
+        requestEpdRefresh(system, mode = EpdModeFullMono, showCursor = false, forceNow = true)
+        val msg = s"Mono eInk refresh (${system.paper.lineCount} lines) — ${epdDiagSummary()}"
+        consoleState.log(msg)
+        consoleState.statusMessage = msg
+
+      case "epd flip" | "flip" =>
+        epdFlip180 = !epdFlip180
+        requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false, forceNow = true)
+        val msg = s"Toggled 2.9\" eInk Landscape 180° orientation (flip180=$epdFlip180)."
+        consoleState.log(msg)
+        consoleState.statusMessage = msg
 
       case "n" | "engine" =>
         val mode = system.toggleEngineMode()
@@ -386,6 +599,18 @@ object Rp2040Main {
           updateHardwareLamps(system, isRunningLoop = true, mtPulse = tapeMoved)
         }
 
+        // Progressive eInk update: whenever new characters are typed or a Carrier Return completes a line,
+        // queue a non-flashing differential fast monochrome update (~220 ms window).
+        if (
+          system.paper.totalCharactersPrinted != epdLastRenderedChars ||
+          system.paper.completedLinesCount != epdLastRenderedLines
+        ) {
+          epdScrollOffsetLines = 0
+          requestEpdRefresh(system, mode = EpdModeFastMono, showCursor = true)
+        } else if (epdPendingMode >= 0 && (steps & 0x3f) == 0) {
+          servicePendingEpdRefresh(system, showCursor = true)
+        }
+
         if (hasBreakpoints && consoleState.breakpoints.contains(system.memory.psar)) {
           hitBreakpoint = true
         }
@@ -395,8 +620,10 @@ object Rp2040Main {
           ledToggle = !ledToggle
           updateHardwareLamps(system, isRunningLoop = true, mtPulse = tapeMoved)
 
-          CeConsoleView.render(terminal, system.cpu, consoleState)
-          flushTerminal(terminal, forceFull = false)
+          if (PicoSdk.pico_stdio_usb_connected()) {
+            CeConsoleView.render(terminal, system.cpu, consoleState)
+            flushTerminal(terminal, forceFull = false)
+          }
 
           // Wall-clock deadline pacing: subtract render + USB flush + CCU execution time from target period
           val nowUs = PicoSdk.pico_time_us_32().toInt
@@ -409,11 +636,11 @@ object Rp2040Main {
             lastPrintDeadlineUs = nowUs
           }
 
-          if (PicoSdk.pico_getchar_timeout_us(0.toUInt) >= 0) {
+          if (PicoSdk.pico_getchar_timeout_us(0.toUInt) >= 0 || (PicoSdk.pico_epd_poll_buttons().toInt & 0x05) != 0) {
             interrupted = true
           }
         } else if ((steps & 0x1ff) == 0) {
-          if (PicoSdk.pico_getchar_timeout_us(0.toUInt) >= 0) {
+          if (PicoSdk.pico_getchar_timeout_us(0.toUInt) >= 0 || (PicoSdk.pico_epd_poll_buttons().toInt & 0x05) != 0) {
             interrupted = true
           }
         }
@@ -429,22 +656,29 @@ object Rp2040Main {
         PicoSdk.pico_serial_print("\u001b[?25h")
         PicoSdk.pico_serial_flush()
       }
+      System.gc()
     }
 
     val hexPsar = Fmt.hex3(system.memory.psar.unsigned)
     if (interrupted) {
+      requestEpdRefresh(system, mode = EpdModeFastMono, showCursor = true)
       consoleState.statusMessage =
         s"Paused by user at 0x$hexPsar after $steps steps (${heapSummary()})."
       consoleState.log(s"Execution paused at 0x$hexPsar.")
     } else if (hitBreakpoint) {
+      requestEpdRefresh(system, mode = EpdModeFastMono, showCursor = true)
       consoleState.statusMessage =
         s"Breakpoint hit at 0x$hexPsar after $steps steps."
       consoleState.log(s"Breakpoint hit at 0x$hexPsar.")
     } else if (res == StepResult.Halted) {
+      // Hybrid mode: trigger final crisp 4-Grayscale camera-ready proof refresh upon Halt!
+      epdScrollOffsetLines = 0
+      requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false, forceNow = true)
       consoleState.statusMessage =
-        s"Composition completed in $steps cycles (${system.paper.lineCount} lines, ${heapSummary()})."
-      consoleState.log(s"Program HALTED after $steps cycles. ${heapSummary()}")
+        s"Composition completed in $steps cycles (${system.paper.lineCount} lines -> 4-Gray eInk, ${heapSummary()})."
+      consoleState.log(s"Program HALTED after $steps cycles. 4-Gray eInk refreshed. ${heapSummary()}")
     } else {
+      requestEpdRefresh(system, mode = EpdModeFastMono, showCursor = true)
       consoleState.statusMessage = s"Ran $steps steps (${heapSummary()})."
     }
   }
