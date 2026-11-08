@@ -51,7 +51,8 @@ def runRp2040Lint(elfFile: File, log: sbt.util.Logger): Unit = {
     "_SM19mtsc.cpu.ild.IldCcuD15stepBitTimeFast",
     "_SM25mtsc.console.AnsiTerminalD20renderDirtyRowsChars",
     "_SM22mtsc.asm.Disassembler$D17writeDisassembled",
-    "_SM27mtsc.console.CeConsoleView$D"
+    "_SM27mtsc.console.CeConsoleView$D",
+    "_SM20mtsc.periph.OledView$D"
   )
   val allocRegex = """<(scalanative_alloc[^>]+)>""".r
   val hotAllocViolations = scala.collection.mutable.ArrayBuffer.empty[String]

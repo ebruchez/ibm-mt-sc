@@ -24,6 +24,7 @@ message(STATUS "Linking Scala Native static library: ${SCALA_NATIVE_LIB}")
 add_executable(mtsc_feather_rp2040
     main.c
     epd_ssd1680.c
+    oled_ssd1306.c
 )
 
 target_compile_definitions(mtsc_feather_rp2040 PRIVATE
@@ -47,5 +48,6 @@ target_link_libraries(mtsc_feather_rp2040
     hardware_pio
     hardware_clocks
     hardware_spi
+    hardware_i2c
     ${SCALA_NATIVE_LIB}
 )

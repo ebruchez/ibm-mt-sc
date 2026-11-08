@@ -9,12 +9,13 @@ import mtsc.cli.Main
 import mtsc.console.{AnsiTerminal, CeConsoleState, CeConsoleView}
 import mtsc.cpu.{CcuEngineMode, StepResult}
 import mtsc.diag.{DiagnosticPrograms, EscapementRoutine}
-import mtsc.periph.{GalleyFont, MtscSystem, TapeCartridge}
+import mtsc.periph.{GalleyFont, MtscSystem, OledView, TapeCartridge}
 import mtsc.types.{Address, Device, Fmt, RegId, Word}
 
 /**
- * C wrappers for Pico SDK GPIO, PIO WS2812 NeoPixel, SSD1680 eInk FeatherWing (#4777),
- * and non-blocking USB CDC / UART serial I/O provided by `firmware/main.c` and `firmware/epd_ssd1680.c`.
+ * C wrappers for Pico SDK GPIO, PIO WS2812 NeoPixel, SSD1680/IL0373 eInk FeatherWing (#4777),
+ * SSD1306 128x32 OLED FeatherWing (#2900), and non-blocking USB CDC / UART serial I/O provided by
+ * `firmware/main.c`, `firmware/epd_ssd1680.c`, and `firmware/oled_ssd1306.c`.
  */
 @extern
 object PicoSdk {
@@ -37,6 +38,11 @@ object PicoSdk {
   def pico_epd_upload_planes(bwPlane: Ptr[Byte], redPlane: Ptr[Byte], mode: CUnsignedInt): Unit = extern
   def pico_epd_poll_buttons(): CUnsignedInt = extern
   def pico_epd_get_diag(index: CUnsignedInt): CUnsignedInt = extern
+  def pico_oled_init(): Unit = extern
+  def pico_oled_is_present(): CBool = extern
+  def pico_oled_flush(frameBuf: Ptr[Byte]): Unit = extern
+  def pico_oled_set_flip(flip180: CBool): Unit = extern
+  def pico_oled_get_diag(index: CUnsignedInt): CUnsignedInt = extern
 }
 
 /**
@@ -95,6 +101,24 @@ object Rp2040Main {
   private final val EpdModeFastMono: Int = 0
   private final val EpdModeFullMono: Int = 1
   private final val EpdModeGray4: Int = 2
+
+  // Pre-allocated 128x32 SSD1306 OLED framebuffer (512 bytes) rooted in module field
+  private val oledFrameBuf: Array[Byte] = new Array[Byte](OledView.BufferBytes)
+  private var oledFlip180: Boolean = false
+  private var lastOledUpdateUs: Int = 0
+
+  private def updateOledDisplay(system: MtscSystem, consoleState: CeConsoleState): Unit = {
+    if (!PicoSdk.pico_oled_is_present()) {
+      return
+    }
+    OledView.renderToBuffer(
+      system = system,
+      consoleState = consoleState,
+      targetMeasure = currentTargetMeasure(system),
+      buf = oledFrameBuf
+    )
+    PicoSdk.pico_oled_flush(oledFrameBuf.at(0))
+  }
 
   private def currentTargetMeasure(system: MtscSystem): Int = {
     val r30 = system.memory.readWord(Address(60)).unsigned
@@ -217,10 +241,24 @@ object Rp2040Main {
     s"SPI0[drv=$drv PU=0x$pullM ST=0x$stReg SRAM=0x$sramRd(st=0x$sramSt) up=$cnt m=$mode]"
   }
 
+  private def oledDiagSummary(): String = {
+    val present = PicoSdk.pico_oled_get_diag(0.toUInt).toInt != 0
+    val frames  = PicoSdk.pico_oled_get_diag(1.toUInt).toInt
+    val lastRc  = PicoSdk.pico_oled_get_diag(2.toUInt).toInt
+    val rcStr =
+      if (lastRc > 0) s"ACK(${lastRc}B)"
+      else if (lastRc == -1) "NACK(absent)"
+      else if (lastRc == -2) "TIMEOUT"
+      else if (lastRc == -100) "BUS_LOW"
+      else lastRc.toString
+    s"I2C1[0x3C present=$present rc=$rcStr frames=$frames]"
+  }
+
   @exported
   def mtsc_rp2040_main(): Unit = {
     PicoSdk.pico_set_boot_stage(2.toUInt)
     PicoSdk.pico_epd_init()
+    PicoSdk.pico_oled_init()
     ledPin = PicoSdk.pico_default_led_pin()
     PicoSdk.pico_led_init(ledPin)
     PicoSdk.pico_neopixel_init()
@@ -269,14 +307,16 @@ object Rp2040Main {
     system.loadTape(Device.RightTape, tape)
     consoleState.log("Mounted historical 4-paragraph MT cartridge on Right Tape Reader.")
 
-    // Stage 11: Formatting initial status message & updating lamps + eInk Galley
+    // Stage 11: Formatting initial status message & updating lamps + eInk Galley + OLED
     PicoSdk.pico_set_boot_stage(11.toUInt)
     consoleState.log(s"Program '${initialProg.name}' loaded at 0x${Fmt.hex3(system.memory.psar.unsigned)}.")
     // Render initial 4-Grayscale camera-ready galley sheet with pica ruler
     requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false)
-    consoleState.log(s"2.9\" SSD1680 eInk (#4777): ${epdDiagSummary()}")
+    updateOledDisplay(system, consoleState)
+    consoleState.log(s"2.9\" eInk (#4777): ${epdDiagSummary()}")
+    consoleState.log(s"128x32 OLED (#2900): ${oledDiagSummary()}")
     consoleState.statusMessage =
-      s"Ready (${heapSummary()}). [r/BtnA] Run, [s] Step, [e/BtnB] eInk/Scroll, [BtnC] Reset."
+      s"Ready (${heapSummary()}). [r/BtnA] Run, [s] Step, [e/BtnB] eInk, [o] OLED, [BtnC] Reset."
 
     var usbWasConnected = PicoSdk.pico_stdio_usb_connected()
     var needsRender = usbWasConnected
@@ -298,15 +338,17 @@ object Rp2040Main {
         }
         usbWasConnected = usbConnectedNow
 
-        // Poll FeatherWing physical buttons A (D11), B (D12), C (D13)
+        // Poll FeatherWing physical buttons A (D11/D9), B (D12/D6), C (D13/D5)
         val btnMask = PicoSdk.pico_epd_poll_buttons().toInt
         if (btnMask != 0) {
           handleFeatherWingButtons(btnMask, system, consoleState, terminal)
+          updateOledDisplay(system, consoleState)
           needsRender = true
         }
 
         if (needsRender) {
           PicoSdk.pico_set_boot_stage(13.toUInt)
+          updateOledDisplay(system, consoleState)
           CeConsoleView.render(terminal, system.cpu, consoleState)
           PicoSdk.pico_set_boot_stage(14.toUInt)
           flushTerminal(terminal, forceFull = forceFullRender)
@@ -325,6 +367,7 @@ object Rp2040Main {
           if (system.paper.completedLinesCount != prevLines || system.paper.totalCharactersPrinted != prevChars) {
             requestEpdRefresh(system, mode = EpdModeFastMono, showCursor = true)
           }
+          updateOledDisplay(system, consoleState)
           needsRender = true
         }
       } catch {
@@ -505,6 +548,24 @@ object Rp2040Main {
         consoleState.log(msg)
         consoleState.statusMessage = msg
 
+      case "o" | "oled" =>
+        PicoSdk.pico_oled_init()
+        if (oledFlip180) {
+          PicoSdk.pico_oled_set_flip(true)
+        }
+        updateOledDisplay(system, consoleState)
+        val msg = s"128x32 SSD1306 OLED (#2900) — ${oledDiagSummary()}"
+        consoleState.log(msg)
+        consoleState.statusMessage = msg
+
+      case "oled flip" =>
+        oledFlip180 = !oledFlip180
+        PicoSdk.pico_oled_set_flip(oledFlip180)
+        updateOledDisplay(system, consoleState)
+        val msg = s"Toggled 128x32 OLED 180° orientation (flip180=$oledFlip180)."
+        consoleState.log(msg)
+        consoleState.statusMessage = msg
+
       case "n" | "engine" =>
         val mode = system.toggleEngineMode()
         consoleState.log(s"Switched CCU Engine to ${mode.label} (${mode.cliFlag}).")
@@ -550,8 +611,10 @@ object Rp2040Main {
   ): Unit = {
     if (system.memory.psar.unsigned >= 42 && system.memory.psar.unsigned <= 47) {
       updateHardwareLamps(system, isRunningLoop = true, mtPulse = true)
+      updateOledDisplay(system, consoleState)
       val bootRes = system.runBootLoader()
       updateHardwareLamps(system, isRunningLoop = false)
+      updateOledDisplay(system, consoleState)
       bootRes match {
         case StepResult.Normal =>
           val hexPsar = Fmt.hex3(system.memory.psar.unsigned)
@@ -597,6 +660,13 @@ object Rp2040Main {
 
         if ((steps & 0x3f) == 0 || tapeMoved) {
           updateHardwareLamps(system, isRunningLoop = true, mtPulse = tapeMoved)
+          if (PicoSdk.pico_oled_is_present()) {
+            val nowUs = PicoSdk.pico_time_us_32().toInt
+            if (nowUs - lastOledUpdateUs >= 40000) {
+              lastOledUpdateUs = nowUs
+              updateOledDisplay(system, consoleState)
+            }
+          }
         }
 
         // Progressive eInk update: whenever new characters are typed or a Carrier Return completes a line,
@@ -619,6 +689,13 @@ object Rp2040Main {
           lastPrintCount = system.translator.printCount
           ledToggle = !ledToggle
           updateHardwareLamps(system, isRunningLoop = true, mtPulse = tapeMoved)
+          if (PicoSdk.pico_oled_is_present()) {
+            val nowUs = PicoSdk.pico_time_us_32().toInt
+            if (nowUs - lastOledUpdateUs >= 30000) {
+              lastOledUpdateUs = nowUs
+              updateOledDisplay(system, consoleState)
+            }
+          }
 
           if (PicoSdk.pico_stdio_usb_connected()) {
             CeConsoleView.render(terminal, system.cpu, consoleState)
@@ -652,6 +729,7 @@ object Rp2040Main {
       }
     } finally {
       updateHardwareLamps(system, isRunningLoop = false)
+      updateOledDisplay(system, consoleState)
       if (consoleState.realTimePacing && delayMs > 0) {
         PicoSdk.pico_serial_print("\u001b[?25h")
         PicoSdk.pico_serial_flush()

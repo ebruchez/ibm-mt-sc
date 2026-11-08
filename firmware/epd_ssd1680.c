@@ -757,6 +757,17 @@ void pico_epd_init(void) {
     // 4b. Probe FeatherWing's onboard 23K640 SPI SRAM (SRCS = GPIO 8)
     epd_diag_probe_sram();
 
+    // Park SDCS (D5/GPIO7), SRCS (D6/GPIO8), and ECS (D9/GPIO9) as pulled-up inputs when SPI0 is idle.
+    // On the eInk FeatherWing (#4777), 100k external pull-ups (R1, R6, R7) + RP2040 internal pull-ups
+    // keep all three chip-selects deselected HIGH (3.3V), while avoiding any push-pull contention if stacked
+    // with the OLED FeatherWing (#2900) whose Buttons A/B/C are wired to D9/D6/D5.
+    gpio_set_dir(EPD_SDCS_PIN, GPIO_IN);
+    gpio_pull_up(EPD_SDCS_PIN);
+    gpio_set_dir(EPD_SRCS_PIN, GPIO_IN);
+    gpio_pull_up(EPD_SRCS_PIN);
+    gpio_set_dir(EPD_ECS_PIN, GPIO_IN);
+    gpio_pull_up(EPD_ECS_PIN);
+
     // 5. Configure FeatherWing Buttons A (D11/GPIO11), B (D12/GPIO12), C (D13/GPIO13)
     //    as inputs with internal pull-ups (active LOW when pressed).
     gpio_init(EPD_BTN_A_PIN);
@@ -811,11 +822,21 @@ void pico_epd_upload_planes(const uint8_t *bw_plane, const uint8_t *red_plane, u
     epd_diag_upload_count++;
     epd_diag_last_mode = mode;
 
+    // Activate ECS (D9/GPIO9) as push-pull output during the SPI0 transaction
+    gpio_put(EPD_ECS_PIN, true);
+    gpio_set_dir(EPD_ECS_PIN, GPIO_OUT);
+
     if (epd_controller_type == EPD_CTRL_IL0373) {
         il0373_upload_planes(bw_plane, red_plane, mode);
     } else {
         ssd1680_upload_planes(bw_plane, red_plane, mode);
     }
+
+    // Return ECS (D9/GPIO9) to pulled-up input when SPI0 transfer completes
+    gpio_put(EPD_ECS_PIN, true);
+    sleep_us(2);
+    gpio_set_dir(EPD_ECS_PIN, GPIO_IN);
+    gpio_pull_up(EPD_ECS_PIN);
 
     // Record non-blocking busy deadline based on waveform duration
     uint64_t duration_us = 1800000ULL;
@@ -848,13 +869,15 @@ uint32_t pico_epd_poll_buttons(void) {
 
     uint64_t now = time_us_64();
     uint8_t cur_mask = 0;
-    if (!gpio_get(EPD_BTN_A_PIN)) {
+    // Read Buttons A/B/C from both eInk FeatherWing (#4777: D11/D12/D13)
+    // and OLED FeatherWing (#2900: D9/D6/D5, safely parked as pulled-up inputs when SPI0 is idle)
+    if (!gpio_get(EPD_BTN_A_PIN) || !gpio_get(EPD_ECS_PIN)) {
         cur_mask |= MTSC_EPD_BTN_A_MASK;
     }
-    if (!gpio_get(EPD_BTN_B_PIN)) {
+    if (!gpio_get(EPD_BTN_B_PIN) || !gpio_get(EPD_SRCS_PIN)) {
         cur_mask |= MTSC_EPD_BTN_B_MASK;
     }
-    if (!gpio_get(EPD_BTN_C_PIN)) {
+    if (!gpio_get(EPD_BTN_C_PIN) || !gpio_get(EPD_SDCS_PIN)) {
         cur_mask |= MTSC_EPD_BTN_C_MASK;
     }
 

@@ -58,7 +58,7 @@ Optional CLI flags:
 - `--operator`: Start with the Operator faceplate installed over the CE console.
 - `<path-to-file>`: Mount a text file as a magnetic tape cartridge on the Right Tape Reader at startup.
 
-### 3. Bare-Metal Microcontroller (Adafruit Feather RP2040 + 2.9" eInk FeatherWing)
+### 3. Bare-Metal Microcontroller (Adafruit Feather RP2040 + 2.9" eInk + 128×32 OLED FeatherWings)
 
 Compile the emulator with Scala Native freestanding (`thumbv6m-none-eabi`, Cortex-M0+, Immix GC) and link the `.uf2` firmware image via the Pico SDK:
 
@@ -68,14 +68,21 @@ sbt buildFeatherRp2040
 
 This produces `firmware/build-feather-rp2040/mtsc_feather_rp2040.uf2` (and `.elf`):
 - **USB-C Serial ANSI Console**: Connect over USB CDC (`screen /dev/tty.usbmodem* 115200` or `minicom`) for the live interactive Customer Engineer & Operator console.
-- **Adafruit 2.9" Grayscale eInk FeatherWing (`PID 4777`, `SSD1680`, `296×128`)**:
+- **Adafruit 2.9" Grayscale eInk FeatherWing (`PID 4777`, `IL0373 / SSD1680`, `296×128`)**:
   - Plugs directly onto the Feather RP2040 (`SPI0`: `SCK=GPIO18`, `MOSI=GPIO19`, `ECS=D9/GPIO9`, `D/C=D10/GPIO10`, `SRCS=D6/GPIO8`, `SDCS=D5/GPIO7`).
   - **Proportional Press Roman Serif Galley Output**: Renders the Selectric Composer galley sheet in Landscape (`296×128`) at `2 px = 1 escapement unit` (`6–18 px` character widths matching the `3–9 unit` escapement table), complete with a top pica ruler (`0p`–`12p`), target measure pointer (`▼ 140u`), vertical margin guideline, and 2-digit non-repro line numbers.
-  - **Hybrid eInk Refresh**: Fast non-flashing monochrome updates (~420 ms) at each Carrier Return while composing, followed by a 4-level grayscale camera-ready proof refresh when composition halts (or via `[e]` / `epd` and `epd flip` in the console).
+  - **Progressive & Hybrid eInk Refresh**: Progressive non-flashing differential updates (`450 ms`) as characters and words are composed, automatic clean 8-line page turns, and a 4-level grayscale camera-ready proof refresh when composition halts (or via `[e]` / `epd` and `epd flip` in the console).
   - **FeatherWing Tactile Buttons (`A` = `D11/GPIO11`, `B` = `D12/GPIO12`, `C` = `D13/GPIO13`)**:
     - **Button A**: Start / Pause / Restart composition.
     - **Button B**: Scroll through completed galley lines or trigger a 4-grayscale proof refresh.
     - **Button C**: Master Reset CCU, rewind tape cartridge, and clear galley sheet.
+- **Adafruit 128×32 Monochrome OLED FeatherWing (`PID 2900`, `SSD1306`, `I2C1` `0x3C`)**:
+  - Can be stacked simultaneously alongside the 2.9" eInk FeatherWing (`SDA=GPIO2`, `SCL=GPIO3` on `I2C1`; zero bus conflict with `SPI0`) or omitted entirely (auto-detected via bounded-timeout I2C probe with internal pull-up verification).
+  - **High-Speed Live Telemetry (`128×32`)**:
+    - **Top Band**: Active console display mode (`CLK`, `DP1`–`DP4`, `OPR`), all 11 incandescent CE Console / Operator lamps (`LITE 11..1`), and machine status badge (`RUN`, `INH`, `MPX`, `HLT`, or inverted `ERR`).
+    - **Middle Band**: Current line number (`L01`..`L99`), graphical escapement/justification progress bar (`0..targetMeasure`), and numeric unit counter (`084/140U`).
+    - **Bottom Band**: Live `PC:hex3` (`PSAR`), `MT:dec4` (`6310` magnetic tape head frame), `GL:xxL` (completed lines), and `C:xxxx` (total characters composed).
+  - **Stacked Button Safety**: `SDCS (D5/GPIO7)`, `SRCS (D6/GPIO8)`, and `ECS (D9/GPIO9)` are parked as `GPIO_IN` with pull-ups whenever `SPI0` is idle, preventing any push-pull contention with OLED Buttons A/B/C (`D9`, `D6`, `D5`) and allowing Buttons A/B/C on *both* FeatherWings to control the emulator. Use `[o]` / `:oled` to re-probe or `:oled flip` to rotate 180°.
 - **Onboard `WS2812` NeoPixel (`GPIO 16`) Status Lamps**:
   - **Green (`+RUN`)**: `240 kHz` oscillator / CCU clock running.
   - **Amber (`LITE 11`)**: Waiting for Operator (`Inhibit` latch or Setup prompt active).
