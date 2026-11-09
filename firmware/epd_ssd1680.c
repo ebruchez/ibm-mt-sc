@@ -1,4 +1,5 @@
 #include "epd_ssd1680.h"
+#include "oled_ssd1306.h"
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
 #include "hardware/spi.h"
@@ -163,20 +164,24 @@ static const uint8_t il0373_gray4_lut_ww[42] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
+// (DTM1=1, DTM2=0) -> ShadeLightGray (1): font anti-aliasing ('.') & ruler accents
+// Group 3: 18f White anchor (0b01), then 2f monotonic Black drive (0b10) -> ~25% Light Gray
 static const uint8_t il0373_gray4_lut_bw[42] = {
     0x40, 0x0A, 0x00, 0x00, 0x00, 0x01,
     0x90, 0x14, 0x14, 0x00, 0x00, 0x01,
     0x00, 0x14, 0x0A, 0x00, 0x00, 0x01,
-    0x99, 0x0C, 0x01, 0x03, 0x04, 0x01,
+    0x60, 0x12, 0x02, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
+// (DTM1=0, DTM2=1) -> ShadeDarkGray (2): non-repro line numbers, pica ticks & margin guide
+// Group 3: 14f White anchor (0b01), then 6f monotonic Black drive (0b10) -> ~60% Dark Gray
 static const uint8_t il0373_gray4_lut_wb[42] = {
     0x40, 0x0A, 0x00, 0x00, 0x00, 0x01,
     0x90, 0x14, 0x14, 0x00, 0x00, 0x01,
     0x00, 0x14, 0x0A, 0x00, 0x00, 0x01,
-    0x99, 0x0B, 0x04, 0x04, 0x01, 0x01,
+    0x60, 0x0E, 0x06, 0x00, 0x00, 0x01,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00
@@ -192,27 +197,27 @@ static const uint8_t il0373_gray4_lut_bb[42] = {
 };
 
 static const uint8_t il0373_fastmono_lut_vcom[42] = {
-    0x00, 0x12, 0x00, 0x00, 0x00, 0x01,
+    0x00, 0x0C, 0x00, 0x00, 0x00, 0x01,
     0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0
 };
-// (0 -> 0) Black -> Black: reinforce Black (0x80 in L0 = level 2 = Black) so characters never fade or skip
+// (DTM1=0, DTM2=0) Black -> Black: 0V hold so existing black text stays completely still
 static const uint8_t il0373_fastmono_lut_ww[42] = {
-    0x80, 0x0E, 0x00, 0x00, 0x00, 0x01,
+    0x00, 0x0C, 0x00, 0x00, 0x00, 0x01,
     0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0
 };
-// (0 -> 1) Black -> White: drive White (0x40 in L0 = level 1 = White) to erase advancing cursor
+// (DTM1=1, DTM2=0) White -> Black: drive Black (0x80 in L0 = level 2 = Black) for newly typed characters!
 static const uint8_t il0373_fastmono_lut_bw[42] = {
-    0x40, 0x12, 0x00, 0x00, 0x00, 0x01,
+    0x80, 0x0C, 0x00, 0x00, 0x00, 0x01,
     0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0
 };
-// (1 -> 0) White -> Black: drive Black (0x80 in L0 = level 2 = Black) for newly typed characters
+// (DTM1=0, DTM2=1) Black -> White: drive White (0x40 in L0 = level 1 = White) for any erased pixels!
 static const uint8_t il0373_fastmono_lut_wb[42] = {
-    0x80, 0x12, 0x00, 0x00, 0x00, 0x01,
+    0x40, 0x0C, 0x00, 0x00, 0x00, 0x01,
     0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0
 };
-// (1 -> 1) White -> White: 0V (0x00) so the white background never flashes during progressive typing
+// (DTM1=1, DTM2=1) White -> White: 0V hold so the white background never flashes
 static const uint8_t il0373_fastmono_lut_bb[42] = {
-    0x00, 0x12, 0x00, 0x00, 0x00, 0x01,
+    0x00, 0x0C, 0x00, 0x00, 0x00, 0x01,
     0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0
 };
 
@@ -579,10 +584,9 @@ static void il0373_upload_planes(const uint8_t *bw_plane, const uint8_t *red_pla
         }
         epd_cs_high();
 
-        for (uint32_t i = 0; i < MTSC_EPD_PLANE_BYTES; i++) {
-            prev_mono_ram[i] = (uint8_t)~red_plane[i];
-        }
-        has_prev_mono_frame = true;
+        // After a 4-Grayscale render (e.g. initial splash screen), force the first update of a new
+        // composition to run FULL_MONO so the 4-Grayscale splash screen is cleanly wiped to white.
+        has_prev_mono_frame = false;
 
         il0373_write_cmd(IL0373_DISPLAY_REFRESH);
     } else if (mode == MTSC_EPD_MODE_FAST_MONO) {
@@ -597,8 +601,12 @@ static void il0373_upload_planes(const uint8_t *bw_plane, const uint8_t *red_pla
 
         il0373_write_cmd_u8(IL0373_PANEL_SETTING, 0x3F);
         il0373_write_cmd_u8(IL0373_PLL, 0x3C);
-        il0373_write_cmd_u8(IL0373_VCM_DC_SETTING, 0x12);
-        il0373_write_cmd_u8(IL0373_CDI, 0x97);
+        // Set VCM_DC_SETTING = 0x00 (-0.1V ~ 0V) during unipolar partial refresh so unchanged
+        // White background pixels (V_source = 0V) do not see a 1.0V bias against VCOM_DC (-1.0V)
+        // that temporarily dims the screen during each partial refresh.
+        il0373_write_cmd_u8(IL0373_VCM_DC_SETTING, 0x00);
+        // Set CDI = 0xD7 (VBD = 11b floating border) so the display border does not dim either.
+        il0373_write_cmd_u8(IL0373_CDI, 0xD7);
 
         il0373_write_cmd_data(IL0373_LUT_VCOM, il0373_fastmono_lut_vcom, sizeof(il0373_fastmono_lut_vcom));
         il0373_write_cmd_data(IL0373_LUT_WW,   il0373_fastmono_lut_ww,   sizeof(il0373_fastmono_lut_ww));
@@ -679,6 +687,31 @@ static void il0373_upload_planes(const uint8_t *bw_plane, const uint8_t *red_pla
 // Public FFI Entry Points for Scala Native
 // ============================================================================
 
+// Configures SDCS (D5/GPIO7), SRCS (D6/GPIO8), and ECS (D9/GPIO9) when SPI0 is idle.
+// - When the OLED FeatherWing (#2900) is detected on I2C1, parks D5/D6/D9 as pulled-up inputs so
+//   pressing the OLED FeatherWing's physical Buttons A/B/C (wired to D9/D6/D5) never contends with
+//   push-pull HIGH outputs, while 100k external pull-ups (R1, R6, R7) + RP2040 pull-ups keep CS HIGH.
+// - When no OLED FeatherWing is connected, keeps D5/D6/D9 actively driven HIGH as push-pull outputs
+//   so the long eInk FPC ribbon cable cannot pick up ambient EMI/ESD spikes on D9.
+static void epd_park_cs_pins(void) {
+    gpio_put(EPD_SDCS_PIN, true);
+    gpio_put(EPD_SRCS_PIN, true);
+    gpio_put(EPD_ECS_PIN, true);
+    if (pico_oled_is_present()) {
+        sleep_us(2);
+        gpio_set_dir(EPD_SDCS_PIN, GPIO_IN);
+        gpio_pull_up(EPD_SDCS_PIN);
+        gpio_set_dir(EPD_SRCS_PIN, GPIO_IN);
+        gpio_pull_up(EPD_SRCS_PIN);
+        gpio_set_dir(EPD_ECS_PIN, GPIO_IN);
+        gpio_pull_up(EPD_ECS_PIN);
+    } else {
+        gpio_set_dir(EPD_SDCS_PIN, GPIO_OUT);
+        gpio_set_dir(EPD_SRCS_PIN, GPIO_OUT);
+        gpio_set_dir(EPD_ECS_PIN, GPIO_OUT);
+    }
+}
+
 // Checks if an external pull-up resistor (such as R1=100k on ECS/D9) pulls the pin HIGH
 // after discharging pad capacitance LOW for 2 us.
 static bool epd_probe_external_pullup(uint pin) {
@@ -757,16 +790,8 @@ void pico_epd_init(void) {
     // 4b. Probe FeatherWing's onboard 23K640 SPI SRAM (SRCS = GPIO 8)
     epd_diag_probe_sram();
 
-    // Park SDCS (D5/GPIO7), SRCS (D6/GPIO8), and ECS (D9/GPIO9) as pulled-up inputs when SPI0 is idle.
-    // On the eInk FeatherWing (#4777), 100k external pull-ups (R1, R6, R7) + RP2040 internal pull-ups
-    // keep all three chip-selects deselected HIGH (3.3V), while avoiding any push-pull contention if stacked
-    // with the OLED FeatherWing (#2900) whose Buttons A/B/C are wired to D9/D6/D5.
-    gpio_set_dir(EPD_SDCS_PIN, GPIO_IN);
-    gpio_pull_up(EPD_SDCS_PIN);
-    gpio_set_dir(EPD_SRCS_PIN, GPIO_IN);
-    gpio_pull_up(EPD_SRCS_PIN);
-    gpio_set_dir(EPD_ECS_PIN, GPIO_IN);
-    gpio_pull_up(EPD_ECS_PIN);
+    // Park SDCS (D5/GPIO7), SRCS (D6/GPIO8), and ECS (D9/GPIO9) according to whether OLED is stacked
+    epd_park_cs_pins();
 
     // 5. Configure FeatherWing Buttons A (D11/GPIO11), B (D12/GPIO12), C (D13/GPIO13)
     //    as inputs with internal pull-ups (active LOW when pressed).
@@ -832,20 +857,24 @@ void pico_epd_upload_planes(const uint8_t *bw_plane, const uint8_t *red_plane, u
         ssd1680_upload_planes(bw_plane, red_plane, mode);
     }
 
-    // Return ECS (D9/GPIO9) to pulled-up input when SPI0 transfer completes
-    gpio_put(EPD_ECS_PIN, true);
-    sleep_us(2);
-    gpio_set_dir(EPD_ECS_PIN, GPIO_IN);
-    gpio_pull_up(EPD_ECS_PIN);
+    // Return ECS/SRCS/SDCS to their idle state when SPI0 transfer completes
+    epd_park_cs_pins();
 
     // Record non-blocking busy deadline based on waveform duration
-    uint64_t duration_us = 1800000ULL;
+    uint64_t duration_us = 2400000ULL;
     if (mode == MTSC_EPD_MODE_FAST_MONO) {
-        duration_us = 450000ULL;
-    } else if (mode == MTSC_EPD_MODE_GRAY4) {
-        duration_us = 2400000ULL;
+        duration_us = 300000ULL;
     }
     epd_busy_until_us = time_us_64() + duration_us;
+
+    // When performing a full-screen monochrome page wipe (start of Page 1, Page 2, etc.),
+    // wait for the page wipe to finish so the first line of the new page types progressively
+    // onto the fresh sheet instead of being swallowed while the panel is busy wiping.
+    if (mode == MTSC_EPD_MODE_FULL_MONO) {
+        while (time_us_64() < epd_busy_until_us) {
+            sleep_ms(10);
+        }
+    }
 }
 
 uint32_t pico_epd_get_diag(uint32_t index) {
@@ -862,25 +891,39 @@ uint32_t pico_epd_get_diag(uint32_t index) {
     }
 }
 
+static uint8_t epd_sample_raw_buttons(bool oled_btns) {
+    uint8_t mask = 0;
+    if (!gpio_get(EPD_BTN_A_PIN) || (oled_btns && !gpio_get(EPD_ECS_PIN))) {
+        mask |= MTSC_EPD_BTN_A_MASK;
+    }
+    if (!gpio_get(EPD_BTN_B_PIN) || (oled_btns && !gpio_get(EPD_SRCS_PIN))) {
+        mask |= MTSC_EPD_BTN_B_MASK;
+    }
+    if (!gpio_get(EPD_BTN_C_PIN) || (oled_btns && !gpio_get(EPD_SDCS_PIN))) {
+        mask |= MTSC_EPD_BTN_C_MASK;
+    }
+    return mask;
+}
+
 uint32_t pico_epd_poll_buttons(void) {
     if (!epd_initialized) {
         return 0;
     }
 
-    uint64_t now = time_us_64();
-    uint8_t cur_mask = 0;
-    // Read Buttons A/B/C from both eInk FeatherWing (#4777: D11/D12/D13)
-    // and OLED FeatherWing (#2900: D9/D6/D5, safely parked as pulled-up inputs when SPI0 is idle)
-    if (!gpio_get(EPD_BTN_A_PIN) || !gpio_get(EPD_ECS_PIN)) {
-        cur_mask |= MTSC_EPD_BTN_A_MASK;
-    }
-    if (!gpio_get(EPD_BTN_B_PIN) || !gpio_get(EPD_SRCS_PIN)) {
-        cur_mask |= MTSC_EPD_BTN_B_MASK;
-    }
-    if (!gpio_get(EPD_BTN_C_PIN) || !gpio_get(EPD_SDCS_PIN)) {
-        cur_mask |= MTSC_EPD_BTN_C_MASK;
+    bool oled_btns = pico_oled_is_present();
+    uint8_t cur_mask = epd_sample_raw_buttons(oled_btns);
+
+    // Multi-sample glitch rejection filter: if any button pin reads LOW, verify that it remains
+    // continuously LOW across 8 consecutive samples spaced by 500 us (4 ms total hold verification).
+    // Costs 0 us when no button is pressed (cur_mask == 0), and rejects single-sample EMI/ESD spikes.
+    if (cur_mask != 0) {
+        for (int s = 0; s < 8 && cur_mask != 0; s++) {
+            sleep_us(500);
+            cur_mask &= epd_sample_raw_buttons(oled_btns);
+        }
     }
 
+    uint64_t now = time_us_64();
     uint32_t pressed_edges = 0;
     const uint8_t masks[3] = {MTSC_EPD_BTN_A_MASK, MTSC_EPD_BTN_B_MASK, MTSC_EPD_BTN_C_MASK};
     for (int i = 0; i < 3; i++) {

@@ -48,18 +48,32 @@ object GalleyFont {
   private val glyphRedMasks: Array[Int] = new Array[Int](NumChars * GlyphHeightPx)
   private val glyphWidths: Array[Int] = new Array[Int](NumChars)
 
-  // Compact 3x5 digits ('0'..'9', 'p', 'u') for pica ruler and non-repro line numbers
-  private val tinyDigits3x5: Array[Int] = Array(
-    0x7B6F, // 0: 111 / 101 / 101 / 101 / 111
-    0x2647, // 1: 010 / 110 / 010 / 010 / 111
-    0x73E7, // 2: 111 / 001 / 111 / 100 / 111
-    0x73CF, // 3: 111 / 001 / 111 / 001 / 111
-    0x5BC9, // 4: 101 / 101 / 111 / 001 / 001
-    0x79CF, // 5: 111 / 100 / 111 / 001 / 111
-    0x79EF, // 6: 111 / 100 / 111 / 101 / 111
-    0x7249, // 7: 111 / 001 / 010 / 010 / 010
-    0x7BEF, // 8: 111 / 101 / 111 / 101 / 111
-    0x7BCF  // 9: 111 / 101 / 111 / 001 / 111
+  // Open-counter 4x7 digits ('0'..'9', 28 bits each: 7 rows of 4 bits) for left-gutter line numbers
+  private val tinyDigits4x7: Array[Int] = Array(
+    0x6999996, // 0: 0110 / 1001 / 1001 / 1001 / 1001 / 1001 / 0110
+    0x2622227, // 1: 0010 / 0110 / 0010 / 0010 / 0010 / 0010 / 0111
+    0x691248F, // 2: 0110 / 1001 / 0001 / 0010 / 0100 / 1000 / 1111
+    0xE11611E, // 3: 1110 / 0001 / 0001 / 0110 / 0001 / 0001 / 1110
+    0x999F111, // 4: 1001 / 1001 / 1001 / 1111 / 0001 / 0001 / 0001
+    0xF88E11E, // 5: 1111 / 1000 / 1000 / 1110 / 0001 / 0001 / 1110
+    0x688E996, // 6: 0110 / 1000 / 1000 / 1110 / 1001 / 1001 / 0110
+    0xF122444, // 7: 1111 / 0001 / 0010 / 0010 / 0100 / 0100 / 0100
+    0x6996996, // 8: 0110 / 1001 / 1001 / 0110 / 1001 / 1001 / 0110
+    0x6997116  // 9: 0110 / 1001 / 1001 / 0111 / 0001 / 0001 / 0110
+  )
+
+  // Open-counter 5x7 digits ('0'..'9', 7 bytes per digit, 5-bit rows) for high-legibility pica ruler labels
+  private val rulerDigits5x7: Array[Byte] = Array(
+    0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E, // 0
+    0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E, // 1
+    0x0E, 0x11, 0x01, 0x06, 0x08, 0x10, 0x1F, // 2
+    0x1E, 0x01, 0x01, 0x0E, 0x01, 0x01, 0x1E, // 3
+    0x12, 0x12, 0x12, 0x1F, 0x02, 0x02, 0x02, // 4
+    0x1F, 0x10, 0x10, 0x1E, 0x01, 0x01, 0x1E, // 5
+    0x0E, 0x10, 0x10, 0x1E, 0x11, 0x11, 0x0E, // 6
+    0x1F, 0x01, 0x02, 0x04, 0x04, 0x04, 0x04, // 7
+    0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E, // 8
+    0x0E, 0x11, 0x11, 0x0F, 0x01, 0x01, 0x0E  // 9
   )
 
   /**
@@ -196,13 +210,13 @@ object GalleyFont {
     flip180: Boolean
   ): Unit = {
     if (digit < 0 || digit > 9) return
-    val bitmap = tinyDigits3x5(digit)
+    val bitmap = tinyDigits4x7(digit)
     var r = 0
-    while (r < 5) {
-      val rowBits = (bitmap >> ((4 - r) * 3)) & 0x7
+    while (r < 7) {
+      val rowBits = (bitmap >> ((6 - r) * 4)) & 0xF
       var c = 0
-      while (c < 3) {
-        if (((rowBits >> (2 - c)) & 1) != 0) {
+      while (c < 4) {
+        if (((rowBits >> (3 - c)) & 1) != 0) {
           setPixelInPlanes(bwPlane, redPlane, x0 + c, y0 + r, shade, flip180)
         }
         c += 1
@@ -211,7 +225,32 @@ object GalleyFont {
     }
   }
 
-  private def drawTinyP(
+  private def drawRulerDigit(
+    bwPlane: Array[Byte],
+    redPlane: Array[Byte],
+    digit: Int,
+    x0: Int,
+    y0: Int,
+    shade: Int,
+    flip180: Boolean
+  ): Unit = {
+    if (digit < 0 || digit > 9) return
+    val base = digit * 7
+    var r = 0
+    while (r < 7) {
+      val rowBits = rulerDigits5x7(base + r).toInt & 0x1F
+      var c = 0
+      while (c < 5) {
+        if (((rowBits >> (4 - c)) & 1) != 0) {
+          setPixelInPlanes(bwPlane, redPlane, x0 + c, y0 + r, shade, flip180)
+        }
+        c += 1
+      }
+      r += 1
+    }
+  }
+
+  private def drawRulerP(
     bwPlane: Array[Byte],
     redPlane: Array[Byte],
     x0: Int,
@@ -219,14 +258,17 @@ object GalleyFont {
     shade: Int,
     flip180: Boolean
   ): Unit = {
-    // 3x5 lowercase 'p': 110 / 101 / 110 / 100 / 100
-    val bits = 0x6B44
-    var r = 0
-    while (r < 5) {
-      val rowBits = (bits >> ((4 - r) * 3)) & 0x7
+    // 5x7 open-counter lowercase 'p':
+    // ..... (0x00) / ####. (0x1E) / #...# (0x11) / #...# (0x11) / ####. (0x1E) / #.... (0x10) / #.... (0x10)
+    var r = 1
+    while (r < 7) {
+      val rowBits =
+        if (r == 1 || r == 4) 0x1E
+        else if (r == 2 || r == 3) 0x11
+        else 0x10
       var c = 0
-      while (c < 3) {
-        if (((rowBits >> (2 - c)) & 1) != 0) {
+      while (c < 5) {
+        if (((rowBits >> (4 - c)) & 1) != 0) {
           setPixelInPlanes(bwPlane, redPlane, x0 + c, y0 + r, shade, flip180)
         }
         c += 1
@@ -235,7 +277,7 @@ object GalleyFont {
     }
   }
 
-  private def drawTinyNumber(
+  private def drawRulerNumber(
     bwPlane: Array[Byte],
     redPlane: Array[Byte],
     value: Int,
@@ -246,15 +288,15 @@ object GalleyFont {
   ): Int = {
     var x = x0
     if (value >= 100) {
-      drawTinyDigit(bwPlane, redPlane, (value / 100) % 10, x, y0, shade, flip180)
-      x += 4
+      drawRulerDigit(bwPlane, redPlane, (value / 100) % 10, x, y0, shade, flip180)
+      x += 6
     }
     if (value >= 10) {
-      drawTinyDigit(bwPlane, redPlane, (value / 10) % 10, x, y0, shade, flip180)
-      x += 4
+      drawRulerDigit(bwPlane, redPlane, (value / 10) % 10, x, y0, shade, flip180)
+      x += 6
     }
-    drawTinyDigit(bwPlane, redPlane, value % 10, x, y0, shade, flip180)
-    x + 3
+    drawRulerDigit(bwPlane, redPlane, value % 10, x, y0, shade, flip180)
+    x + 5
   }
 
   /**
@@ -297,37 +339,32 @@ object GalleyFont {
     val leftMargin = leftMarginForMeasure(clampedMeasure)
     val measureX = math.min(WidthPx - 2, leftMargin + clampedMeasure * PixelsPerUnit)
 
-    // 1. Top Pica Ruler Bar (y = 0..12)
+    // 1. Top Pica Ruler Bar (y = 0..12): clean White background with solid Black baseline rule at y = 12
     var x = 0
     while (x < WidthPx) {
-      // Subtle LightGray background band on top 11 rows (renders LightGray in 4-Gray, White in Mono)
-      var hy = 0
-      while (hy < 11) {
-        if (((x + hy) & 1) == 0) {
-          setPixelInPlanes(bwPlane, redPlane, x, hy, ShadeLightGray, flip180)
-        }
-        hy += 1
-      }
-      // Solid baseline rule at y = 12
       setPixelInPlanes(bwPlane, redPlane, x, 12, ShadeBlack, flip180)
       x += 1
     }
 
-    // Pica ticks every 1 pica (12 units = 24 px), labeled every 3 picas (0p, 3p, 6p, 9p, 12p)
+    // Measure numeric label next to triangle (`140` = 17 px wide, placed to the left of `▼`)
+    val badgeX = math.max(2, measureX - 21)
+
+    // Pica ticks every 1 pica (12 units = 24 px), labeled every 3 picas (0p, 3p, 6p, 9p, 12p) in 5x7 open-counter font
     var pica = 0
     while (pica <= 12) {
       val tickX = leftMargin + pica * 12 * PixelsPerUnit
       if (tickX < WidthPx - 1) {
         val isMajor = (pica % 3) == 0
-        val tickTop = if (isMajor) 8 else 10
+        val tickTop = if (isMajor) 6 else 9
+        val tickShade = if (isMajor) ShadeBlack else ShadeDarkGray
         var ty = tickTop
         while (ty <= 12) {
-          setPixelInPlanes(bwPlane, redPlane, tickX, ty, ShadeDarkGray, flip180)
+          setPixelInPlanes(bwPlane, redPlane, tickX, ty, tickShade, flip180)
           ty += 1
         }
-        if (isMajor && (tickX + 8 < measureX - 10 || pica == 0)) {
-          val endX = drawTinyNumber(bwPlane, redPlane, pica, tickX + 1, 2, ShadeDarkGray, flip180)
-          drawTinyP(bwPlane, redPlane, endX + 1, 2, ShadeDarkGray, flip180)
+        if (isMajor && (tickX + 16 < badgeX - 2 || pica == 0)) {
+          val endX = drawRulerNumber(bwPlane, redPlane, pica, tickX + 3, 2, ShadeBlack, flip180)
+          drawRulerP(bwPlane, redPlane, endX + 1, 2, ShadeBlack, flip180)
         }
       }
       pica += 1
@@ -344,9 +381,7 @@ object GalleyFont {
     setPixelInPlanes(bwPlane, redPlane, measureX + 1, 9, ShadeBlack, flip180)
     setPixelInPlanes(bwPlane, redPlane, measureX + 2, 9, ShadeBlack, flip180)
 
-    // Measure numeric label next to triangle
-    val badgeX = math.max(2, measureX - 13)
-    val _ = drawTinyNumber(bwPlane, redPlane, clampedMeasure, badgeX, 2, ShadeBlack, flip180)
+    val _ = drawRulerNumber(bwPlane, redPlane, clampedMeasure, badgeX, 2, ShadeBlack, flip180)
 
     // 2. Vertical dotted right-margin measure guideline (y = 14..127)
     var gy = HeaderHeightPx
@@ -380,10 +415,10 @@ object GalleyFont {
       val lineTopY = HeaderHeightPx + visIdx * LinePitchPx
       val lineNum = lineIdx + 1
 
-      // Draw 2-digit non-repro line number in left gutter if margin permits
-      if (leftMargin >= 10) {
-        drawTinyDigit(bwPlane, redPlane, (lineNum / 10) % 10, 1, lineTopY + 4, ShadeDarkGray, flip180)
-        drawTinyDigit(bwPlane, redPlane, lineNum % 10, 5, lineTopY + 4, ShadeDarkGray, flip180)
+      // Draw 2-digit non-repro line number in left gutter (4x7 open-counter digits at x=1 and x=6)
+      if (leftMargin >= 11) {
+        drawTinyDigit(bwPlane, redPlane, (lineNum / 10) % 10, 1, lineTopY + 3, ShadeDarkGray, flip180)
+        drawTinyDigit(bwPlane, redPlane, lineNum % 10, 6, lineTopY + 3, ShadeDarkGray, flip180)
       }
 
       if (lineIdx < completedCount) {

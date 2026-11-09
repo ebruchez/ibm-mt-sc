@@ -107,7 +107,12 @@ class TapeReader(
       case Some(cart) =>
         // Backstep to the previous Carrier Return or track 0
         var pos = math.max(0, headPosition - 1)
-        while (pos > 0 && cart.getFrame(pos - 1).exists(f => f.data7 != TapeCartridge.CarrierReturn && f.rawByte != TapeCartridge.EndOfBlock)) {
+        while (
+          pos > 0 &&
+          (pos - 1) < cart.length &&
+          cart.data7At(pos - 1) != TapeCartridge.CarrierReturn &&
+          cart.rawByteAt(pos - 1) != TapeCartridge.EndOfBlock
+        ) {
           pos -= 1
         }
         headPosition = pos
@@ -125,9 +130,10 @@ class TapeReader(
       case None => 0
       case Some(cart) =>
         while (headPosition < cart.length) {
-          val frame = cart.getFrame(headPosition).get
+          val d7 = cart.data7At(headPosition)
+          val raw = cart.rawByteAt(headPosition)
           headPosition += 1
-          if (frame.data7 == TapeCartridge.CarrierReturn || frame.rawByte == TapeCartridge.EndOfBlock) {
+          if (d7 == TapeCartridge.CarrierReturn || raw == TapeCartridge.EndOfBlock) {
             return headPosition
           }
         }
@@ -149,7 +155,10 @@ class TapeReader(
   def isTapeLoaded: Boolean = mountedCartridge.isDefined && isLoadedOnHub
 
   def isAtEnd: Boolean =
-    mountedCartridge.forall(_.isAtEnd(headPosition))
+    mountedCartridge match {
+      case Some(cart) => cart.isAtEnd(headPosition)
+      case None       => true
+    }
 
   /**
    * Corrupts the parity of the current track under the read head for diagnostic verification.
@@ -203,23 +212,24 @@ class TapeReader(
           // End of recorded tracks -> delivers EndOfBlock sentinel
           IoResult.Ready(TapeCartridge.EndOfBlock)
         } else {
-          val frame = cartridge.getFrame(headPosition).get
+          val is8Bit = cartridge.is8BitAt(headPosition)
+          val rawByte = cartridge.rawByteAt(headPosition)
 
           // Sentinel 0xFF (on 7-bit text tape) is handled as EndOfBlock without parity fault
-          if (!frame.is8Bit && frame.rawByte == TapeCartridge.EndOfBlock) {
+          if (!is8Bit && rawByte == TapeCartridge.EndOfBlock) {
             headPosition += 1
             readCount += 1
             dataLatches = TapeCartridge.EndOfBlock
             cycleRemaining = cycleDelay
             IoResult.Ready(TapeCartridge.EndOfBlock)
-          } else if (!frame.hasOddParity) {
+          } else if (!cartridge.hasOddParityAt(headPosition)) {
             // Parity Fault: Turn on error latch and refuse to increment tape
             parityError = true
             IoResult.Busy
           } else {
             // Odd Parity Satisfied: Increment tape and latch data
             parityError = false
-            dataLatches = frame.dataByte
+            dataLatches = cartridge.dataByteAt(headPosition)
             headPosition += 1
             readCount += 1
             cycleRemaining = cycleDelay

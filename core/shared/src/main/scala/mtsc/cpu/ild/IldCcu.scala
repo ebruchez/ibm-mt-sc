@@ -1294,7 +1294,7 @@ final class IldCcu(
         val b = byte & 0xff
         if (isMagTape) {
           if (!ioBus.isInstanceOf[SystemIoBus]) {
-            Ild0301To0302MagneticTape.sweepFrame(s, TapeFrame.encodeByte8WithOddParity(b))
+            Ild0301To0302MagneticTape.sweepFrame(s, TapeFrame.encode8Raw(b), is8Bit = true)
           }
           Ild0301To0302MagneticTape.evaluateCombinational(s)
         } else {

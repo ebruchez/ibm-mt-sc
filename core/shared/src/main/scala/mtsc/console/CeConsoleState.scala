@@ -216,7 +216,28 @@ class CeConsoleState {
 
   // Legacy mode property synchronized with slide switches
   var mode: CeConsoleMode = CeConsoleMode.Process
-  var breakpoints: Set[Address] = Set.empty
+  private var _breakpoints: Set[Address] = Set.empty
+  private val breakpointBits: Array[Int] = new Array[Int](64)
+
+  def breakpoints: Set[Address] = _breakpoints
+  def breakpoints_=(s: Set[Address]): Unit = {
+    _breakpoints = s
+    var i = 0
+    while (i < 64) {
+      breakpointBits(i) = 0
+      i += 1
+    }
+    val it = s.iterator
+    while (it.hasNext) {
+      val a = it.next().unsigned & 0x7ff
+      breakpointBits(a >>> 5) |= (1 << (a & 31))
+    }
+  }
+
+  @inline def hasBreakpointAt(addrRaw: Int): Boolean = {
+    val a = addrRaw & 0x7ff
+    (breakpointBits(a >>> 5) & (1 << (a & 31))) != 0
+  }
   var memoryInspectionAddress: Address = Address(0)
   var statusMessage: String = "Ready. Press [s] to step, [r] to run, [f] to toggle Operator/CE faceplate."
   var powerOn: Boolean = true

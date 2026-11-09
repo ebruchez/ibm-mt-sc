@@ -131,4 +131,17 @@ class GalleyFontSuite extends FunSuite {
     }
     assert(tInkPixels > 10, s"Expected 'T' at right margin to have >10 black pixels, got $tInkPixels")
   }
+
+  test("renderGalleyToPlanes renders clean 5x7 open-counter pica ruler numbers on White ruler background") {
+    val paper = new ComposerPaper()
+    val bw = new Array[Byte](GalleyFont.PlaneBytes)
+    val red = new Array[Byte](GalleyFont.PlaneBytes)
+    GalleyFont.renderGalleyToPlanes(paper, targetMeasure = 140, bwPlane = bw, redPlane = red)
+
+    // Ruler background above baseline rule (y = 0..11) is clean White
+    assertEquals(GalleyFont.getPixelShade(bw, red, 40, 1), GalleyFont.ShadeWhite)
+    // Top-of-'0' in "0p" (at x = leftMargin + 3 = 15, y = 2: row 0 = .###. -> x = 16, 17, 18 are Black; interior (17, 5) is White)
+    assertEquals(GalleyFont.getPixelShade(bw, red, 17, 2), GalleyFont.ShadeBlack)
+    assertEquals(GalleyFont.getPixelShade(bw, red, 17, 5), GalleyFont.ShadeWhite)
+  }
 }

@@ -5,6 +5,24 @@ import mtsc.types.*
 sealed trait IoResult[+A]
 object IoResult {
   final case class Ready[A](value: A) extends IoResult[A]
+  object Ready {
+    private val unitInstance: Ready[Unit] = new Ready[Unit](())
+    private val byteCache: Array[Ready[Int]] = {
+      val arr = new Array[Ready[Int]](256)
+      var i = 0
+      while (i < 256) {
+        arr(i) = new Ready[Int](i)
+        i += 1
+      }
+      arr
+    }
+
+    @inline def apply(value: Int): Ready[Int] =
+      if (value >= 0 && value < 256) byteCache(value) else new Ready[Int](value)
+
+    @inline def apply(value: Unit): Ready[Unit] =
+      unitInstance
+  }
   case object Busy extends IoResult[Nothing]
 }
 

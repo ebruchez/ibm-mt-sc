@@ -24,6 +24,17 @@ object CeConsoleView {
 
   private val emptyPaper = new mtsc.periph.ComposerPaper()
 
+  // Pre-allocated Option[AnsiColor] singletons for zero-allocation rendering
+  private val SomeCyan: Option[AnsiColor]         = Some(AnsiColor.Cyan)
+  private val SomeBrightCyan: Option[AnsiColor]   = Some(AnsiColor.BrightCyan)
+  private val SomeWhite: Option[AnsiColor]        = Some(AnsiColor.White)
+  private val SomeBrightWhite: Option[AnsiColor]  = Some(AnsiColor.BrightWhite)
+  private val SomeGray: Option[AnsiColor]         = Some(AnsiColor.Gray)
+  private val SomeRed: Option[AnsiColor]          = Some(AnsiColor.Red)
+  private val SomeBrightRed: Option[AnsiColor]    = Some(AnsiColor.BrightRed)
+  private val SomeBrightGreen: Option[AnsiColor]  = Some(AnsiColor.BrightGreen)
+  private val SomeBrightYellow: Option[AnsiColor] = Some(AnsiColor.BrightYellow)
+
   def render(
     terminal: AnsiTerminal,
     cpu: Ccu,
@@ -60,7 +71,7 @@ object CeConsoleView {
     cpu: Ccu,
     state: CeConsoleState
   ): Unit = {
-    val cyan = Some(AnsiColor.Cyan)
+    val cyan = SomeCyan
     terminal.drawBox(0, 0, terminal.width, 3, "", cyan)
     var tx = terminal.writeText(2, 0, " IBM 72 COMPOSER CONTROL UNIT (CCU) MODEL 6320 ─ CE CONSOLE [", cyan, bold = true)
     tx = terminal.writeText(tx, 0, state.stepGranularity.label, cyan, bold = true)
@@ -74,7 +85,7 @@ object CeConsoleView {
     val awRaw = cpu.memory.aWordRaw
     val bwRaw = cpu.memory.bWordRaw
     val cycles = cpu.state.cycleCount
-    val white = Some(AnsiColor.BrightWhite)
+    val white = SomeBrightWhite
 
     // " MODE: [PROCESS]   " (19 chars starting at x = 2 -> ends at x = 21)
     var hx = terminal.writeText(2, 1, " MODE: [", white, bold = true)
@@ -113,7 +124,7 @@ object CeConsoleView {
     cpu: Ccu,
     state: CeConsoleState
   ): Unit = {
-    val cyan = Some(AnsiColor.Cyan)
+    val cyan = SomeCyan
     terminal.drawBox(0, 3, terminal.width, 3, "", cyan)
     var tx = terminal.writeText(2, 3, " CE DISPLAY LAMPS ─ [", cyan, bold = true)
     tx = terminal.writeText(tx, 3, state.displayMode.rowLabel, cyan, bold = true)
@@ -131,17 +142,17 @@ object CeConsoleView {
       val spec = allSpecs(idx)
       val isOn = ((lampsMask >> idx) & 1) != 0
       val modeLbl = dispMode match {
-        case CeDisplayMode.Display1     => spec.ceDisplay1
-        case CeDisplayMode.Display2     => spec.ceDisplay2
-        case CeDisplayMode.Display3     => spec.ceDisplay3
-        case CeDisplayMode.Display4     => spec.ceDisplay4
-        case CeDisplayMode.ClockDefault => spec.ceTopLip
+        case CeDisplayMode.Display1 => spec.ceDisplay1
+        case CeDisplayMode.Display2 => spec.ceDisplay2
+        case CeDisplayMode.Display3 => spec.ceDisplay3
+        case CeDisplayMode.Display4 => spec.ceDisplay4
+        case _                      => spec.ceTopLip
       }
       val rawLbl = if (modeLbl.nonEmpty) modeLbl else spec.ceTopLip
       val fg = if (isOn) {
-        Some(if (spec.isRedLens) AnsiColor.BrightRed else AnsiColor.BrightYellow)
+        if (spec.isRedLens) SomeBrightRed else SomeBrightYellow
       } else {
-        Some(if (spec.isRedLens) AnsiColor.Red else AnsiColor.Gray)
+        if (spec.isRedLens) SomeRed else SomeGray
       }
       terminal.writeChar(x, 4, '[', fg, bold = isOn, inverse = isOn)
       terminal.writePadded(x + 1, 4, rawLbl, 4, leftAlign = false, fg, bold = isOn, inverse = isOn)
@@ -155,14 +166,14 @@ object CeConsoleView {
     }
 
     // Core status badges on the right of the lamp bar (LO, INH, RUN, PWR)
-    @inline def writeBadge(bx: Int, label: String, on: Boolean, activeColor: AnsiColor): Unit = {
-      val fg = if (on) Some(activeColor) else Some(AnsiColor.Gray)
+    @inline def writeBadge(bx: Int, label: String, on: Boolean, activeFg: Option[AnsiColor]): Unit = {
+      val fg = if (on) activeFg else SomeGray
       terminal.writeText(bx, 4, label, fg, bold = on, inverse = on)
     }
-    writeBadge(72, "[  LO]", cpu.state.low, AnsiColor.BrightYellow)
-    writeBadge(79, "[ INH]", cpu.state.inhibit, AnsiColor.BrightRed)
-    writeBadge(86, "[ RUN]", !cpu.state.halted, AnsiColor.BrightGreen)
-    writeBadge(93, "[ PWR]", state.powerOn, AnsiColor.BrightGreen)
+    writeBadge(72, "[  LO]", cpu.state.low, SomeBrightYellow)
+    writeBadge(79, "[ INH]", cpu.state.inhibit, SomeBrightRed)
+    writeBadge(86, "[ RUN]", !cpu.state.halted, SomeBrightGreen)
+    writeBadge(93, "[ PWR]", state.powerOn, SomeBrightGreen)
   }
 
   private def renderRegisters(
@@ -170,7 +181,7 @@ object CeConsoleView {
     cpu: Ccu,
     state: CeConsoleState
   ): Unit = {
-    val cyan = Some(AnsiColor.Cyan)
+    val cyan = SomeCyan
     terminal.drawBox(0, 6, terminal.width, 10, "", cyan)
     var tx = terminal.writeText(2, 6, " 32 WORKING REGISTERS (BYTES 0..63) ─ Sliders: [", cyan, bold = true)
     tx = terminal.writeText(tx, 6, state.stepGranularity.label, cyan, bold = true)
@@ -190,7 +201,7 @@ object CeConsoleView {
         val byteAddr = regIdx << 1
         val w = mem.readByteAt(byteAddr) | (mem.readByteAt(byteAddr + 1) << 8)
         val x = 2 + col * colWidth
-        val fg = if (w != 0) Some(AnsiColor.BrightWhite) else Some(AnsiColor.Gray)
+        val fg = if (w != 0) SomeBrightWhite else SomeGray
         terminal.writeChar(x, y, 'R', fg)
         terminal.writeDec(x + 1, y, regIdx, 2, '0', fg)
         terminal.writeText(x + 3, y, ": 0x", fg)
@@ -211,7 +222,7 @@ object CeConsoleView {
   ): Unit = {
     val boxW = 50
     val boxH = 11
-    terminal.drawBox(0, 16, boxW, boxH, "DISASSEMBLY", Some(AnsiColor.Cyan))
+    terminal.drawBox(0, 16, boxW, boxH, "DISASSEMBLY", SomeCyan)
 
     val currentPsar = cpu.memory.psarRaw
     // Show 9 instructions around current PSAR (e.g. 4 before, current, 4 after)
@@ -223,16 +234,14 @@ object CeConsoleView {
       val addrRaw = (startAddrRaw + (row << 1)) & 0x7ff
       val rawWordInt = cpu.memory.readByteAt(addrRaw) | (cpu.memory.readByteAt((addrRaw + 1) & 0x7ff) << 8)
       val isCurrent = addrRaw == currentPsar
-      val hasBp = hasAnyBp && state.breakpoints.contains(Address(addrRaw))
+      val hasBp = hasAnyBp && state.hasBreakpointAt(addrRaw)
 
       val marker = if (isCurrent) ">>> " else if (hasBp) " *  " else "    "
-      val (fg, bold) = if (isCurrent) {
-        (Some(AnsiColor.BrightYellow), true)
-      } else if (hasBp) {
-        (Some(AnsiColor.BrightRed), true)
-      } else {
-        (Some(AnsiColor.White), false)
-      }
+      val fg =
+        if (isCurrent) SomeBrightYellow
+        else if (hasBp) SomeBrightRed
+        else SomeWhite
+      val bold = isCurrent || hasBp
 
       val y = 17 + row
       var cx = terminal.writeText(2, y, marker, fg, bold = bold)
@@ -257,7 +266,7 @@ object CeConsoleView {
 
     val baseAddr = state.memoryInspectionAddress.unsigned & 0x7f0
     val regionName = getMemoryRegionName(baseAddr)
-    val cyan = Some(AnsiColor.Cyan)
+    val cyan = SomeCyan
     terminal.drawBox(boxX, 16, boxW, boxH, "", cyan)
     var tx = terminal.writeText(boxX + 2, 16, " CORE MEMORY (0x", cyan, bold = true)
     tx = terminal.writeHex3(tx, 16, baseAddr, cyan, bold = true)
@@ -265,7 +274,7 @@ object CeConsoleView {
     tx = terminal.writeText(tx, 16, regionName, cyan, bold = true)
     terminal.writeText(tx, 16, ") ", cyan, bold = true)
 
-    val white = Some(AnsiColor.White)
+    val white = SomeWhite
     val mem = cpu.memory
     var row = 0
     while (row < 9) {
@@ -306,19 +315,19 @@ object CeConsoleView {
     val boxH = 11
 
     val title = "SELECTRIC COMPOSER ─ CAMERA-READY GALLEY PROOF"
-    terminal.drawBox(boxX, 16, boxW, boxH, title, Some(AnsiColor.BrightGreen))
+    terminal.drawBox(boxX, 16, boxW, boxH, title, SomeBrightGreen)
 
     val totalLines = paper.lineCount
     if (totalLines == 0) {
-      terminal.writeText(boxX + 2, 18, "[Galley blank - no text printed yet]", Some(AnsiColor.Gray))
-      terminal.writeText(boxX + 2, 20, "Output from TRANSLATOR (OUT / OUTM) will", Some(AnsiColor.Gray))
-      terminal.writeText(boxX + 2, 21, "appear here as camera-ready justified copy.", Some(AnsiColor.Gray))
-      terminal.writeText(boxX + 2, 23, "Press [v] to toggle back to Core Memory view.", Some(AnsiColor.BrightYellow))
+      terminal.writeText(boxX + 2, 18, "[Galley blank - no text printed yet]", SomeGray)
+      terminal.writeText(boxX + 2, 20, "Output from TRANSLATOR (OUT / OUTM) will", SomeGray)
+      terminal.writeText(boxX + 2, 21, "appear here as camera-ready justified copy.", SomeGray)
+      terminal.writeText(boxX + 2, 23, "Press [v] to toggle back to Core Memory view.", SomeBrightYellow)
     } else {
       val startIdx = math.max(0, totalLines - 9)
       val count = totalLines - startIdx
       val completedCount = paper.completedLinesCount
-      val white = Some(AnsiColor.BrightWhite)
+      val white = SomeBrightWhite
       val maxTextLen = boxW - 8
       var i = 0
       while (i < count) {
@@ -349,7 +358,7 @@ object CeConsoleView {
   def renderLogBox(terminal: AnsiTerminal, state: CeConsoleState): Unit = {
     val boxH = 7
     val boxY = 27
-    terminal.drawBox(0, boxY, terminal.width, boxH, "CONSOLE LOG & PERIPHERAL EVENTS", Some(AnsiColor.Cyan))
+    terminal.drawBox(0, boxY, terminal.width, boxH, "CONSOLE LOG & PERIPHERAL EVENTS", SomeCyan)
 
     val logs = state.eventLog
     val total = logs.length
@@ -358,7 +367,7 @@ object CeConsoleView {
     val maxLen = terminal.width - 4
     var i = 0
     while (i < count) {
-      terminal.writeText(2, boxY + 1 + i, logs(start + i), Some(AnsiColor.BrightWhite), maxLen = maxLen)
+      terminal.writeText(2, boxY + 1 + i, logs(start + i), SomeBrightWhite, maxLen = maxLen)
       i += 1
     }
   }
@@ -366,12 +375,12 @@ object CeConsoleView {
   private def renderFooter(terminal: AnsiTerminal, state: CeConsoleState): Unit = {
     val boxY = 34
     val boxH = 4
-    terminal.drawBox(0, boxY, terminal.width, boxH, "STATUS & COMMANDS", Some(AnsiColor.Cyan))
+    terminal.drawBox(0, boxY, terminal.width, boxH, "STATUS & COMMANDS", SomeCyan)
 
     val cmds = "[f] Faceplate(Op)  [1-4/0] Display  [s] Step  [r] Run  [g/m] Sliders  [i] InitLdr  [v] Galley/Mem  [q] Quit"
-    terminal.writeText(2, boxY + 1, cmds, Some(AnsiColor.BrightCyan), bold = true, maxLen = terminal.width - 4)
+    terminal.writeText(2, boxY + 1, cmds, SomeBrightCyan, bold = true, maxLen = terminal.width - 4)
 
-    val yellow = Some(AnsiColor.BrightYellow)
+    val yellow = SomeBrightYellow
     val sx = terminal.writeText(2, boxY + 2, "Status: ", yellow)
     terminal.writeText(sx, boxY + 2, state.statusMessage, yellow, maxLen = terminal.width - 4 - 8)
   }

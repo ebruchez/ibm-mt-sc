@@ -3,7 +3,6 @@ package mtsc.rp2040
 import scala.scalanative.libc.stdio
 import scala.scalanative.runtime.GC
 import scala.scalanative.unsafe.*
-import scala.scalanative.unsigned.*
 
 import mtsc.cli.Main
 import mtsc.console.{AnsiTerminal, CeConsoleState, CeConsoleView}
@@ -16,33 +15,36 @@ import mtsc.types.{Address, Device, Fmt, RegId, Word}
  * C wrappers for Pico SDK GPIO, PIO WS2812 NeoPixel, SSD1680/IL0373 eInk FeatherWing (#4777),
  * SSD1306 128x32 OLED FeatherWing (#2900), and non-blocking USB CDC / UART serial I/O provided by
  * `firmware/main.c`, `firmware/epd_ssd1680.c`, and `firmware/oled_ssd1306.c`.
+ *
+ * Note: Uses `CInt` (`Int`) instead of `CUnsignedInt` (`UInt`) across all FFI signatures so Scala 3.3.8
+ * never emits `Boxes.boxToUInt` heap allocations in the 10 ms polling or emulation loops.
  */
 @extern
 object PicoSdk {
-  def pico_default_led_pin(): CUnsignedInt = extern
-  def pico_led_init(pin: CUnsignedInt): Unit = extern
-  def pico_led_put(pin: CUnsignedInt, value: CBool): Unit = extern
+  def pico_default_led_pin(): CInt = extern
+  def pico_led_init(pin: CInt): Unit = extern
+  def pico_led_put(pin: CInt, value: CBool): Unit = extern
   def pico_neopixel_init(): Unit = extern
-  def pico_neopixel_set_rgb(r: CUnsignedInt, g: CUnsignedInt, b: CUnsignedInt): Unit = extern
-  def pico_set_boot_stage(stage: CUnsignedInt): Unit = extern
-  def pico_getchar_timeout_us(timeoutUs: CUnsignedInt): CInt = extern
+  def pico_neopixel_set_rgb(r: CInt, g: CInt, b: CInt): Unit = extern
+  def pico_set_boot_stage(stage: CInt): Unit = extern
+  def pico_getchar_timeout_us(timeoutUs: CInt): CInt = extern
   def pico_stdio_usb_connected(): CBool = extern
-  def pico_time_us_32(): CUnsignedInt = extern
+  def pico_time_us_32(): CInt = extern
   def pico_serial_print(s: Object): Unit = extern
   def pico_serial_print_chars(chars: Object, count: CInt): Unit = extern
   def pico_serial_flush(): Unit = extern
-  def sleep_ms(ms: CUnsignedInt): Unit = extern
+  def sleep_ms(ms: CInt): Unit = extern
   def pico_epd_init(): Unit = extern
   def pico_epd_is_busy(): CBool = extern
-  def pico_epd_set_controller(ctrlType: CUnsignedInt): Unit = extern
-  def pico_epd_upload_planes(bwPlane: Ptr[Byte], redPlane: Ptr[Byte], mode: CUnsignedInt): Unit = extern
-  def pico_epd_poll_buttons(): CUnsignedInt = extern
-  def pico_epd_get_diag(index: CUnsignedInt): CUnsignedInt = extern
+  def pico_epd_set_controller(ctrlType: CInt): Unit = extern
+  def pico_epd_upload_planes(bwPlane: Ptr[Byte], redPlane: Ptr[Byte], mode: CInt): Unit = extern
+  def pico_epd_poll_buttons(): CInt = extern
+  def pico_epd_get_diag(index: CInt): CInt = extern
   def pico_oled_init(): Unit = extern
   def pico_oled_is_present(): CBool = extern
   def pico_oled_flush(frameBuf: Ptr[Byte]): Unit = extern
   def pico_oled_set_flip(flip180: CBool): Unit = extern
-  def pico_oled_get_diag(index: CUnsignedInt): CUnsignedInt = extern
+  def pico_oled_get_diag(index: CInt): CInt = extern
 }
 
 /**
@@ -65,7 +67,7 @@ object PicoSdk {
  */
 object Rp2040Main {
 
-  private var ledPin: CUnsignedInt = 13.toUInt
+  private var ledPin: Int = 13
   private var ledToggle: Boolean = false
   private var lastNeoPackedRgb: Int = -1
   private var lastLedOn: Int = -1
@@ -74,7 +76,7 @@ object Rp2040Main {
     val packed = (r << 16) | (g << 8) | b
     if (packed != lastNeoPackedRgb) {
       lastNeoPackedRgb = packed
-      PicoSdk.pico_neopixel_set_rgb(r.toUInt, g.toUInt, b.toUInt)
+      PicoSdk.pico_neopixel_set_rgb(r, g, b)
     }
     val ledBit = if (ledOn) 1 else 0
     if (ledBit != lastLedOn) {
@@ -87,6 +89,7 @@ object Rp2040Main {
   private var systemRef: MtscSystem = null
   private var consoleStateRef: CeConsoleState = null
   private var terminalRef: AnsiTerminal = null
+  private var defaultTapeRef: TapeCartridge = null
 
   // Pre-allocated 296x128 SSD1680 eInk bitplanes (2 * 4,736 = 9,472 bytes) rooted in module fields
   private val epdBwPlane: Array[Byte] = new Array[Byte](GalleyFont.PlaneBytes)
@@ -168,15 +171,15 @@ object Rp2040Main {
       showCursor = showCursor,
       flip180 = epdFlip180
     )
-    PicoSdk.pico_epd_upload_planes(epdBwPlane.at(0), epdRedPlane.at(0), modeToRun.toUInt)
+    PicoSdk.pico_epd_upload_planes(epdBwPlane.at(0), epdRedPlane.at(0), modeToRun)
     true
   }
 
+  private val serialPrintCharsFn: (Array[Char], Int) => Unit =
+    (buf, len) => PicoSdk.pico_serial_print_chars(buf, len)
+
   private def flushTerminal(terminal: AnsiTerminal, forceFull: Boolean = false): Int = {
-    val rows = terminal.renderDirtyRowsChars(
-      forceFull,
-      (buf, len) => PicoSdk.pico_serial_print_chars(buf, len)
-    )
+    val rows = terminal.renderDirtyRowsChars(forceFull, serialPrintCharsFn)
     PicoSdk.pico_serial_flush()
     rows
   }
@@ -226,25 +229,25 @@ object Rp2040Main {
     s"Heap: ${usedKb}KB/${maxKb}KB (GC #$collections)"
   }
 
-  private def hex32(v: CUnsignedInt): String =
-    java.lang.Integer.toHexString(v.toInt)
+  private def hex32(v: Int): String =
+    java.lang.Integer.toHexString(v)
 
   private def epdDiagSummary(): String = {
-    val sramSt = hex32(PicoSdk.pico_epd_get_diag(0.toUInt))
-    val sramRd = hex32(PicoSdk.pico_epd_get_diag(1.toUInt))
-    val pullM  = hex32(PicoSdk.pico_epd_get_diag(3.toUInt))
-    val stReg  = hex32(PicoSdk.pico_epd_get_diag(4.toUInt))
-    val cnt    = PicoSdk.pico_epd_get_diag(5.toUInt).toInt
-    val mode   = PicoSdk.pico_epd_get_diag(6.toUInt).toInt
-    val ctrl   = PicoSdk.pico_epd_get_diag(7.toUInt).toInt
+    val sramSt = hex32(PicoSdk.pico_epd_get_diag(0))
+    val sramRd = hex32(PicoSdk.pico_epd_get_diag(1))
+    val pullM  = hex32(PicoSdk.pico_epd_get_diag(3))
+    val stReg  = hex32(PicoSdk.pico_epd_get_diag(4))
+    val cnt    = PicoSdk.pico_epd_get_diag(5)
+    val mode   = PicoSdk.pico_epd_get_diag(6)
+    val ctrl   = PicoSdk.pico_epd_get_diag(7)
     val drv    = if (ctrl == 2) "IL0373" else "SSD1680"
     s"SPI0[drv=$drv PU=0x$pullM ST=0x$stReg SRAM=0x$sramRd(st=0x$sramSt) up=$cnt m=$mode]"
   }
 
   private def oledDiagSummary(): String = {
-    val present = PicoSdk.pico_oled_get_diag(0.toUInt).toInt != 0
-    val frames  = PicoSdk.pico_oled_get_diag(1.toUInt).toInt
-    val lastRc  = PicoSdk.pico_oled_get_diag(2.toUInt).toInt
+    val present = PicoSdk.pico_oled_get_diag(0) != 0
+    val frames  = PicoSdk.pico_oled_get_diag(1)
+    val lastRc  = PicoSdk.pico_oled_get_diag(2)
     val rcStr =
       if (lastRc > 0) s"ACK(${lastRc}B)"
       else if (lastRc == -1) "NACK(absent)"
@@ -256,25 +259,25 @@ object Rp2040Main {
 
   @exported
   def mtsc_rp2040_main(): Unit = {
-    PicoSdk.pico_set_boot_stage(2.toUInt)
-    PicoSdk.pico_epd_init()
+    PicoSdk.pico_set_boot_stage(2)
     PicoSdk.pico_oled_init()
+    PicoSdk.pico_epd_init()
     ledPin = PicoSdk.pico_default_led_pin()
     PicoSdk.pico_led_init(ledPin)
     PicoSdk.pico_neopixel_init()
     // Stage 2 (White): Entered mtsc_rp2040_main, constructing MtscSystem
-    PicoSdk.pico_neopixel_set_rgb(24.toUInt, 24.toUInt, 24.toUInt)
+    PicoSdk.pico_neopixel_set_rgb(24, 24, 24)
 
     val system = new MtscSystem(initialEngineMode = CcuEngineMode.Ild)
     systemRef = system
     // Stage 3: Initializing IldCcu lazy val and SRAM optimizations
-    PicoSdk.pico_set_boot_stage(3.toUInt)
+    PicoSdk.pico_set_boot_stage(3)
     system.cpu.ild.timingTrace.enabled = false
-    system.paper.maxRetainedLines = 16
+    system.paper.maxRetainedLines = 64
     system.paper.recordGlyphs = true
 
     // Stage 4: Constructing CeConsoleState & AnsiTerminal
-    PicoSdk.pico_set_boot_stage(4.toUInt)
+    PicoSdk.pico_set_boot_stage(4)
     val consoleState = new CeConsoleState()
     consoleStateRef = consoleState
     consoleState.viewGalley = true
@@ -282,33 +285,34 @@ object Rp2040Main {
     terminalRef = terminal
 
     // Stage 5: Loading DiagnosticPrograms.AllPrograms(0)
-    PicoSdk.pico_set_boot_stage(5.toUInt)
-    PicoSdk.pico_neopixel_set_rgb(32.toUInt, 32.toUInt, 0.toUInt)
+    PicoSdk.pico_set_boot_stage(5)
+    PicoSdk.pico_neopixel_set_rgb(32, 32, 0)
     val initialProg = DiagnosticPrograms.AllPrograms(0)
 
     // Stage 6: initialProg.assemble()
-    PicoSdk.pico_set_boot_stage(6.toUInt)
+    PicoSdk.pico_set_boot_stage(6)
     val img = initialProg.assemble()
 
     // Stage 7: system.loadProgram(img)
-    PicoSdk.pico_set_boot_stage(7.toUInt)
+    PicoSdk.pico_set_boot_stage(7)
     system.loadProgram(img)
 
     // Stage 8: EscapementRoutine.initializeTable(system.memory)
-    PicoSdk.pico_set_boot_stage(8.toUInt)
+    PicoSdk.pico_set_boot_stage(8)
     EscapementRoutine.initializeTable(system.memory)
 
     // Stage 9: TapeCartridge.fromText(HistoricalSampleText)
-    PicoSdk.pico_set_boot_stage(9.toUInt)
+    PicoSdk.pico_set_boot_stage(9)
     val tape = TapeCartridge.fromText(TapeCartridge.HistoricalSampleText, "Historical MT Tape")
+    defaultTapeRef = tape
 
     // Stage 10: system.loadTape(Device.RightTape, tape)
-    PicoSdk.pico_set_boot_stage(10.toUInt)
+    PicoSdk.pico_set_boot_stage(10)
     system.loadTape(Device.RightTape, tape)
     consoleState.log("Mounted historical 4-paragraph MT cartridge on Right Tape Reader.")
 
     // Stage 11: Formatting initial status message & updating lamps + eInk Galley + OLED
-    PicoSdk.pico_set_boot_stage(11.toUInt)
+    PicoSdk.pico_set_boot_stage(11)
     consoleState.log(s"Program '${initialProg.name}' loaded at 0x${Fmt.hex3(system.memory.psar.unsigned)}.")
     // Render initial 4-Grayscale camera-ready galley sheet with pica ruler
     requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false)
@@ -325,21 +329,21 @@ object Rp2040Main {
     // Stage 12..16: Interactive loop
     while (true) {
       try {
-        PicoSdk.pico_set_boot_stage(12.toUInt)
+        PicoSdk.pico_set_boot_stage(12)
         updateHardwareLamps(system, isRunningLoop = false)
         servicePendingEpdRefresh(system, showCursor = false)
 
         val usbConnectedNow = PicoSdk.pico_stdio_usb_connected()
         if (usbConnectedNow && !usbWasConnected) {
           // Fresh USB CDC terminal connection detected: brief settle delay then redraw console
-          PicoSdk.sleep_ms(120.toUInt)
+          PicoSdk.sleep_ms(120)
           needsRender = true
           forceFullRender = true
         }
         usbWasConnected = usbConnectedNow
 
         // Poll FeatherWing physical buttons A (D11/D9), B (D12/D6), C (D13/D5)
-        val btnMask = PicoSdk.pico_epd_poll_buttons().toInt
+        val btnMask = PicoSdk.pico_epd_poll_buttons()
         if (btnMask != 0) {
           handleFeatherWingButtons(btnMask, system, consoleState, terminal)
           updateOledDisplay(system, consoleState)
@@ -347,19 +351,19 @@ object Rp2040Main {
         }
 
         if (needsRender) {
-          PicoSdk.pico_set_boot_stage(13.toUInt)
+          PicoSdk.pico_set_boot_stage(13)
           updateOledDisplay(system, consoleState)
           CeConsoleView.render(terminal, system.cpu, consoleState)
-          PicoSdk.pico_set_boot_stage(14.toUInt)
+          PicoSdk.pico_set_boot_stage(14)
           flushTerminal(terminal, forceFull = forceFullRender)
           needsRender = false
           forceFullRender = false
         }
 
-        PicoSdk.pico_set_boot_stage(15.toUInt)
-        val ch = PicoSdk.pico_getchar_timeout_us(10000.toUInt) // 10 ms poll
+        PicoSdk.pico_set_boot_stage(15)
+        val ch = PicoSdk.pico_getchar_timeout_us(10000) // 10 ms poll
         if (ch >= 0) {
-          PicoSdk.pico_set_boot_stage(16.toUInt)
+          PicoSdk.pico_set_boot_stage(16)
           val prevLines = system.paper.completedLinesCount
           val prevChars = system.paper.totalCharactersPrinted
           val cmd = readSerialCommand(ch)
@@ -377,7 +381,7 @@ object Rp2040Main {
           PicoSdk.pico_serial_flush()
           consoleState.log(s"ERR: ${t.getClass.getSimpleName}: ${t.getMessage}")
           consoleState.statusMessage = s"Exception: ${t.getClass.getSimpleName} (${heapSummary()})"
-          PicoSdk.sleep_ms(500.toUInt)
+          PicoSdk.sleep_ms(500)
       }
     }
   }
@@ -396,7 +400,7 @@ object Rp2040Main {
       val sb = new java.lang.StringBuilder()
       var done = false
       while (!done) {
-        val c = PicoSdk.pico_getchar_timeout_us(1000000.toUInt)
+        val c = PicoSdk.pico_getchar_timeout_us(1000000)
         if (c == '\r' || c == '\n') {
           done = true
         } else if (c == 27) { // ESC cancels command entry
@@ -438,8 +442,10 @@ object Rp2040Main {
       if (system.cpu.state.halted) {
         system.reset()
         EscapementRoutine.initializeTable(system.memory)
-        val tape = TapeCartridge.fromText(TapeCartridge.HistoricalSampleText, "Historical MT Tape")
-        system.loadTape(Device.RightTape, tape)
+        if (!system.rightTape.isTapeLoaded && defaultTapeRef != null) {
+          system.loadTape(Device.RightTape, defaultTapeRef)
+        }
+        System.gc()
         epdLastRenderedLines = 0
         epdLastRenderedChars = 0L
       }
@@ -456,10 +462,9 @@ object Rp2040Main {
         } else {
           epdScrollOffsetLines = math.min(maxScroll, epdScrollOffsetLines + 4)
         }
-        // Use Gray4 when returning to the latest proof view (offset 0) and FullMono when scrolling back,
-        // so scrolled text is completely clean and free of partial-refresh ghosting.
-        val mode = if (epdScrollOffsetLines == 0) EpdModeGray4 else EpdModeFullMono
-        requestEpdRefresh(system, mode = mode, showCursor = false, forceNow = true)
+        // Always use 4-Grayscale (EpdModeGray4) when scrolling via Button B so scrolled pages
+        // render with full Press Roman grayscale anti-aliasing, gray line numbers, and zero ghosting.
+        requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false, forceNow = true)
         val msg = s"FeatherWing [Button B]: Galley scroll offset = -$epdScrollOffsetLines lines (of $totalLines)."
         consoleState.log(msg)
         consoleState.statusMessage = msg
@@ -474,8 +479,10 @@ object Rp2040Main {
       epdScrollOffsetLines = 0
       system.reset()
       EscapementRoutine.initializeTable(system.memory)
-      val tape = TapeCartridge.fromText(TapeCartridge.HistoricalSampleText, "Historical MT Tape")
-      system.loadTape(Device.RightTape, tape)
+      if (!system.rightTape.isTapeLoaded && defaultTapeRef != null) {
+        system.loadTape(Device.RightTape, defaultTapeRef)
+      }
+      System.gc()
       epdLastRenderedLines = 0
       epdLastRenderedChars = 0L
       requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false)
@@ -494,8 +501,8 @@ object Rp2040Main {
     val trimmed = cmd.trim
     val lower = Fmt.asciiLower(trimmed)
     if (trimmed == "E") {
-      val cur = PicoSdk.pico_epd_get_diag(7.toUInt).toInt
-      val next = if (cur == 2) 1.toUInt else 2.toUInt
+      val cur = PicoSdk.pico_epd_get_diag(7)
+      val next = if (cur == 2) 1 else 2
       PicoSdk.pico_epd_set_controller(next)
       requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false, forceNow = true)
       val msg = s"Switched eInk driver -> ${epdDiagSummary()}"
@@ -522,14 +529,14 @@ object Rp2040Main {
         consoleState.statusMessage = msg
 
       case "epd il0373" | "il0373" =>
-        PicoSdk.pico_epd_set_controller(2.toUInt)
+        PicoSdk.pico_epd_set_controller(2)
         requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false, forceNow = true)
         val msg = s"Switched to IL0373 (T5) 4-Gray eInk — ${epdDiagSummary()}"
         consoleState.log(msg)
         consoleState.statusMessage = msg
 
       case "epd ssd1680" | "ssd1680" =>
-        PicoSdk.pico_epd_set_controller(1.toUInt)
+        PicoSdk.pico_epd_set_controller(1)
         requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false, forceNow = true)
         val msg = s"Switched to SSD1680 4-Gray eInk — ${epdDiagSummary()}"
         consoleState.log(msg)
@@ -644,9 +651,9 @@ object Rp2040Main {
       var lastLeftHead = system.leftTape.headPosition
       val hasBreakpoints = consoleState.breakpoints.nonEmpty
       val targetPeriodUs = delayMs.toInt * 1000
-      var lastPrintDeadlineUs = PicoSdk.pico_time_us_32().toInt
+      var lastPrintDeadlineUs = PicoSdk.pico_time_us_32()
 
-      while (res == StepResult.Normal && !hitBreakpoint && !interrupted && steps < 100000) {
+      while (res == StepResult.Normal && !hitBreakpoint && !interrupted && steps < 500000) {
         val prevPsar = system.memory.psarRaw
         res = system.step()
         steps += 1
@@ -661,7 +668,7 @@ object Rp2040Main {
         if ((steps & 0x3f) == 0 || tapeMoved) {
           updateHardwareLamps(system, isRunningLoop = true, mtPulse = tapeMoved)
           if (PicoSdk.pico_oled_is_present()) {
-            val nowUs = PicoSdk.pico_time_us_32().toInt
+            val nowUs = PicoSdk.pico_time_us_32()
             if (nowUs - lastOledUpdateUs >= 40000) {
               lastOledUpdateUs = nowUs
               updateOledDisplay(system, consoleState)
@@ -670,18 +677,18 @@ object Rp2040Main {
         }
 
         // Progressive eInk update: whenever new characters are typed or a Carrier Return completes a line,
-        // queue a non-flashing differential fast monochrome update (~220 ms window).
+        // queue a non-flashing differential fast monochrome update.
         if (
           system.paper.totalCharactersPrinted != epdLastRenderedChars ||
           system.paper.completedLinesCount != epdLastRenderedLines
         ) {
           epdScrollOffsetLines = 0
-          requestEpdRefresh(system, mode = EpdModeFastMono, showCursor = true)
+          requestEpdRefresh(system, mode = EpdModeFastMono, showCursor = false)
         } else if (epdPendingMode >= 0 && (steps & 0x3f) == 0) {
-          servicePendingEpdRefresh(system, showCursor = true)
+          servicePendingEpdRefresh(system, showCursor = false)
         }
 
-        if (hasBreakpoints && consoleState.breakpoints.contains(system.memory.psar)) {
+        if (hasBreakpoints && consoleState.hasBreakpointAt(system.memory.psarRaw)) {
           hitBreakpoint = true
         }
 
@@ -690,7 +697,7 @@ object Rp2040Main {
           ledToggle = !ledToggle
           updateHardwareLamps(system, isRunningLoop = true, mtPulse = tapeMoved)
           if (PicoSdk.pico_oled_is_present()) {
-            val nowUs = PicoSdk.pico_time_us_32().toInt
+            val nowUs = PicoSdk.pico_time_us_32()
             if (nowUs - lastOledUpdateUs >= 30000) {
               lastOledUpdateUs = nowUs
               updateOledDisplay(system, consoleState)
@@ -703,21 +710,21 @@ object Rp2040Main {
           }
 
           // Wall-clock deadline pacing: subtract render + USB flush + CCU execution time from target period
-          val nowUs = PicoSdk.pico_time_us_32().toInt
+          val nowUs = PicoSdk.pico_time_us_32()
           val targetUs = lastPrintDeadlineUs + targetPeriodUs
           val remainingUs = targetUs - nowUs
-          if (remainingUs > 1000) {
-            PicoSdk.sleep_ms((remainingUs / 1000).toUInt)
+          if (remainingUs > 1000 && remainingUs <= targetPeriodUs) {
+            PicoSdk.sleep_ms(remainingUs / 1000)
             lastPrintDeadlineUs = targetUs
           } else {
             lastPrintDeadlineUs = nowUs
           }
 
-          if (PicoSdk.pico_getchar_timeout_us(0.toUInt) >= 0 || (PicoSdk.pico_epd_poll_buttons().toInt & 0x05) != 0) {
+          if (PicoSdk.pico_getchar_timeout_us(0) >= 0 || (PicoSdk.pico_epd_poll_buttons() & 0x05) != 0) {
             interrupted = true
           }
         } else if ((steps & 0x1ff) == 0) {
-          if (PicoSdk.pico_getchar_timeout_us(0.toUInt) >= 0 || (PicoSdk.pico_epd_poll_buttons().toInt & 0x05) != 0) {
+          if (PicoSdk.pico_getchar_timeout_us(0) >= 0 || (PicoSdk.pico_epd_poll_buttons() & 0x05) != 0) {
             interrupted = true
           }
         }
@@ -773,15 +780,15 @@ object Rp2040Main {
     terminal: AnsiTerminal
   ): Unit = {
     // 1. Measure CeConsoleView.render
-    val t0 = PicoSdk.pico_time_us_32().toInt
+    val t0 = PicoSdk.pico_time_us_32()
     CeConsoleView.render(terminal, system.cpu, consoleState)
-    val t1 = PicoSdk.pico_time_us_32().toInt
+    val t1 = PicoSdk.pico_time_us_32()
     val renderUs = t1 - t0
 
     // 2. Measure full 38-row USB serial flush
-    val t2 = PicoSdk.pico_time_us_32().toInt
+    val t2 = PicoSdk.pico_time_us_32()
     val fullRows = flushTerminal(terminal, forceFull = true)
-    val t3 = PicoSdk.pico_time_us_32().toInt
+    val t3 = PicoSdk.pico_time_us_32()
     val flushFullUs = t3 - t2
 
     // 3. Measure 1,000 gate-level ILD bit-times on a self-contained non-destructive loop at 0x7f8
@@ -815,13 +822,13 @@ object Rp2040Main {
     system.cpu.ild.syncAllCombinational()
 
     system.cpu.ild.timingTrace.enabled = false
-    val t4 = PicoSdk.pico_time_us_32().toInt
+    val t4 = PicoSdk.pico_time_us_32()
     var bt = 0
     while (bt < 1000) {
       val _ = system.cpu.ild.stepBitTime()
       bt += 1
     }
-    val t5 = PicoSdk.pico_time_us_32().toInt
+    val t5 = PicoSdk.pico_time_us_32()
     val ild1000BtUs = t5 - t4
     val usPerBt = ild1000BtUs / 1000
     val effKhz = if (ild1000BtUs > 0) 1000000 / ild1000BtUs else 0

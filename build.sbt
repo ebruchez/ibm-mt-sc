@@ -45,16 +45,20 @@ def runRp2040Lint(elfFile: File, log: sbt.util.Logger): Unit = {
     )
   }
 
-  // 2. Zero-allocation hot-path verification (emulation bit-time loop + console rendering)
+  // 2. Zero-allocation hot-path verification (emulation bit-time loop + console rendering + idle polling)
   val objdumpOut = Seq("arm-none-eabi-objdump", "-d", elfFile.getAbsolutePath).!!
   val hotFunctionMarkers = Seq(
     "_SM19mtsc.cpu.ild.IldCcuD15stepBitTimeFast",
     "_SM25mtsc.console.AnsiTerminalD20renderDirtyRowsChars",
     "_SM22mtsc.asm.Disassembler$D17writeDisassembled",
     "_SM27mtsc.console.CeConsoleView$D",
-    "_SM20mtsc.periph.OledView$D"
+    "_SM20mtsc.periph.OledView$D",
+    "_SM23mtsc.rp2040.Rp2040Main$D19updateHardwareLamps",
+    "_SM23mtsc.rp2040.Rp2040Main$D24servicePendingEpdRefresh",
+    "_SM23mtsc.rp2040.Rp2040Main$D17updateOledDisplay",
+    "_SM23mtsc.rp2040.Rp2040Main$D13flushTerminal"
   )
-  val allocRegex = """<(scalanative_alloc[^>]+)>""".r
+  val allocRegex = """<(scalanative_(?:GC_)?alloc[^>]+|_SM32scala\.scalanative\.runtime\.Boxes\$D\d+boxTo[^>]+)>""".r
   val hotAllocViolations = scala.collection.mutable.ArrayBuffer.empty[String]
   for (block <- objdumpOut.split("\n\n")) {
     val lines = block.linesIterator.toVector
@@ -163,6 +167,7 @@ lazy val rp2040 = project
             s"--sysroot=$armSysroot",
             "-mcpu=cortex-m0plus",
             "-O2",
+            "-funwind-tables",
             "-fshort-enums",
             "-ffunction-sections",
             "-fdata-sections"

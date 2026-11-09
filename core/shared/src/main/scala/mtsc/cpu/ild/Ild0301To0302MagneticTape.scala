@@ -340,10 +340,11 @@ object Ild0301To0302MagneticTape {
    * - `Count 8`: Track `CK` (Parity Check Only) -> `DATA LATCH 9`
    * - `Count 9`: Track `SHIFT` (`MT BIT 7`, mask `0x40`) -> `DATA LATCH 7`
    */
-  def trackBitForCount(frame: TapeFrame, count: Int): Boolean = {
+  def trackBitForCount(rawByte: Int, is8Bit: Boolean, count: Int): Boolean = {
     // 7-bit EndOfBlock (0xFF) sentinel is treated as all-ones with odd parity (9 ones)
-    val isEobSentinel = !frame.is8Bit && frame.rawByte == TapeCartridge.EndOfBlock
-    val b = if (isEobSentinel) 0xff else frame.dataByte
+    val isEobSentinel = !is8Bit && rawByte == TapeCartridge.EndOfBlock
+    val b = if (isEobSentinel) 0xff else if (is8Bit) rawByte & 0xff else rawByte & 0x7f
+    val parityBit = if (is8Bit) (rawByte & 0x100) != 0 else (rawByte & 0x80) != 0
     count match {
       case 1 => (b & 0x10) != 0
       case 2 => (b & 0x02) != 0
@@ -352,17 +353,20 @@ object Ild0301To0302MagneticTape {
       case 5 => (b & 0x80) != 0
       case 6 => (b & 0x04) != 0
       case 7 => (b & 0x08) != 0
-      case 8 => if (isEobSentinel) true else frame.parityBit
+      case 8 => if (isEobSentinel) true else parityBit
       case 9 => (b & 0x40) != 0
       case _ => false
     }
   }
 
+  def trackBitForCount(frame: TapeFrame, count: Int): Boolean =
+    trackBitForCount(frame.rawByte, frame.is8Bit, count)
+
   /**
    * Pulses a single emitter coil (`MPS A` for odd counts `1, 3, 5, 7, 9`, or `MPS B` for even counts `2, 4, 6, 8, 10`)
    * and samples the corresponding track of `frame` into `DATA LATCH 1..9`.
    */
-  def stepEmitterPulse(s: BackplaneSignals, isMpsA: Boolean, frameOpt: Option[TapeFrame] = None): Unit = {
+  def stepEmitterPulseRaw(s: BackplaneSignals, isMpsA: Boolean, hasFrame: Boolean, rawByte: Int, is8Bit: Boolean): Unit = {
     // Once emitter sweep begins, the read head has left HOME
     s.mtHome = false
     s.mpsA = isMpsA
@@ -372,7 +376,7 @@ object Ild0301To0302MagneticTape {
     s.mpsB = false
 
     val count = s.mtCounterNumber
-    s.mtBit = frameOpt.exists(f => trackBitForCount(f, count))
+    s.mtBit = hasFrame && trackBitForCount(rawByte, is8Bit, count)
     s.mtSchBit = if (count == 5) s.mtBit else false
     updateDataLatches(s)
     s.mtBit = false
@@ -384,11 +388,18 @@ object Ild0301To0302MagneticTape {
     }
   }
 
+  def stepEmitterPulse(s: BackplaneSignals, isMpsA: Boolean, frameOpt: Option[TapeFrame] = None): Unit =
+    frameOpt match {
+      case Some(f) => stepEmitterPulseRaw(s, isMpsA, hasFrame = true, f.rawByte, f.is8Bit)
+      case None    => stepEmitterPulseRaw(s, isMpsA, hasFrame = false, 0, is8Bit = false)
+    }
+
   /**
    * Executes one complete 10-step Magnetic Tape read head sweep (`Count 0 -> Count 1 .. Count 9 -> Count 10`)
-   * across `frame` via alternating `MPS A` and `MPS B` emitter pulses (`MDM 0401` & `0403`).
+   * across `(rawByte, is8Bit)` via alternating `MPS A` and `MPS B` emitter pulses (`MDM 0401` & `0403`).
+   * Zero-allocation fast path used by `IldCcu.stepBitTimeFast`.
    */
-  def sweepFrame(s: BackplaneSignals, frame: TapeFrame): Unit = {
+  def sweepFrame(s: BackplaneSignals, rawByte: Int, is8Bit: Boolean): Unit = {
     if (!(s.mtSch && !s.mtRd) && !s.mtEotOrUnld && !s.masterReset && !s.mtLdRt && !s.mtLdLf && !s.mtSchKey) {
       // Fast path for normal 10-step read sweep (Count 0 -> Count 10):
       s.mtHome = false
@@ -407,8 +418,9 @@ object Ild0301To0302MagneticTape {
       s.mtCtrE = true
 
       // Latch all 9 tracks into DATA LATCH 1..9 per MDM 0403 track mapping
-      val isEobSentinel = !frame.is8Bit && frame.rawByte == TapeCartridge.EndOfBlock
-      val b = if (isEobSentinel) 0xff else frame.dataByte
+      val isEobSentinel = !is8Bit && rawByte == TapeCartridge.EndOfBlock
+      val b = if (isEobSentinel) 0xff else if (is8Bit) rawByte & 0xff else rawByte & 0x7f
+      val parityBit = if (is8Bit) (rawByte & 0x100) != 0 else (rawByte & 0x80) != 0
       s.mtData1 = (b & 0x10) != 0
       s.mtData2 = (b & 0x02) != 0
       s.mtData3 = (b & 0x20) != 0 && !(!s.mtSchPos && s.mtSch && s.mtStaLeft)
@@ -417,7 +429,7 @@ object Ild0301To0302MagneticTape {
       s.mtData6 = (b & 0x08) != 0
       s.mtData7 = (b & 0x40) != 0
       s.mtData8 = (b & 0x80) != 0
-      s.mtData9 = if (isEobSentinel) true else frame.parityBit
+      s.mtData9 = if (isEobSentinel) true else parityBit
 
       if (!s.y8 && !s.y10 && s.inStrb && s.b13_16) {
         s.setLo = false
@@ -444,11 +456,14 @@ object Ild0301To0302MagneticTape {
     // 2. Sweep the 5 emitter coil pairs (MPS A #1..5, MPS B #1..5) from Count 0 to Count 10
     var pair = 0
     while (pair < 5) {
-      stepEmitterPulse(s, isMpsA = true, Some(frame))
-      stepEmitterPulse(s, isMpsA = false, Some(frame))
+      stepEmitterPulseRaw(s, isMpsA = true, hasFrame = true, rawByte, is8Bit)
+      stepEmitterPulseRaw(s, isMpsA = false, hasFrame = true, rawByte, is8Bit)
       pair += 1
     }
   }
+
+  def sweepFrame(s: BackplaneSignals, frame: TapeFrame): Unit =
+    sweepFrame(s, frame.rawByte, frame.is8Bit)
 
   /**
    * Synchronizes the mechanical station sensor contacts (`RT PP UP`, `LF PP UP`, `LDR SEN LF E`)
@@ -493,13 +508,26 @@ object Ild0301To0302MagneticTape {
         evaluateCombinational(s)
 
       case Some(cart) =>
-        val frame =
-          if (cart.isAtEnd(reader.headPosition)) TapeFrame(TapeCartridge.EndOfBlock, is8Bit = false)
-          else cart.getFrame(reader.headPosition).get
-        sweepFrame(s, frame)
+        val pos = reader.headPosition
+        if (cart.isAtEnd(pos)) {
+          sweepFrame(s, TapeCartridge.EndOfBlock, is8Bit = false)
+        } else {
+          sweepFrame(s, cart.rawByteAt(pos), cart.is8BitAt(pos))
+        }
         if (!s.mtOddParity) {
           reader.parityError = true
         }
+    }
+  }
+
+  private def sweepReaderCurrentHead(s: BackplaneSignals, reader: TapeReader): Unit = {
+    reader.mountedCartridge match {
+      case Some(cart) =>
+        val pos = reader.headPosition
+        if (pos >= 0 && pos < cart.length) {
+          sweepFrame(s, cart.rawByteAt(pos), cart.is8BitAt(pos))
+        }
+      case None => ()
     }
   }
 
@@ -534,14 +562,12 @@ object Ild0301To0302MagneticTape {
     updateDataLatches(s)
 
     // Step 3: Sweep leader Carrier Return / Feed code (DL3=1, DL6=0, ODD=1 -> CAR RET resets MT RD)
-    sweepFrame(s, TapeFrame.encodeWithOddParity(0x20))
+    sweepFrame(s, TapeFrame.encode7Raw(0x20), is8Bit = false)
     updateTransportLatches(s)
 
     // Step 4: Sweep first frame of the newly loaded cartridge to 10 Count
     val reader = if (rightStation) ioBus.rightTape else ioBus.leftTape
-    reader.mountedCartridge.flatMap(_.getFrame(reader.headPosition)).foreach { firstFrame =>
-      sweepFrame(s, firstFrame)
-    }
+    sweepReaderCurrentHead(s, reader)
   }
 
   /**
@@ -592,7 +618,7 @@ object Ild0301To0302MagneticTape {
     s.mtSchBit = false
     s.mtHome = true
     updateCounter(s)
-    sweepFrame(s, TapeFrame.encodeWithOddParity(0x20)) // CAR RET resets MT RD
+    sweepFrame(s, TapeFrame.encode7Raw(0x20), is8Bit = false) // CAR RET resets MT RD
     updateTransportLatches(s)
 
     // Step 3: If TRF SCH STA was set (dual-station search), transfer to Left Station and search Left
@@ -609,15 +635,13 @@ object Ild0301To0302MagneticTape {
       s.mtSchBit = false
       s.mtHome = true
       updateCounter(s)
-      sweepFrame(s, TapeFrame.encodeWithOddParity(0x20)) // CAR RET resets MT RD
+      sweepFrame(s, TapeFrame.encode7Raw(0x20), is8Bit = false) // CAR RET resets MT RD
       updateTransportLatches(s)
     }
 
     // Sweep the frame at the new head position into DATA LATCH 1..9
     val active = if (ioBus.leftTape.isTapeLoaded && !ioBus.rightTape.isTapeLoaded) ioBus.leftTape else ioBus.rightTape
-    active.mountedCartridge.flatMap(_.getFrame(active.headPosition)).foreach { frame =>
-      sweepFrame(s, frame)
-    }
+    sweepReaderCurrentHead(s, active)
   }
 
   /**
@@ -637,9 +661,7 @@ object Ild0301To0302MagneticTape {
     val active = if (!s.mtStaRight && ioBus.leftTape.isTapeLoaded) ioBus.leftTape
       else if (ioBus.rightTape.isTapeLoaded) ioBus.rightTape
       else ioBus.leftTape
-    active.mountedCartridge.flatMap(_.getFrame(active.headPosition)).foreach { frame =>
-      sweepFrame(s, frame)
-    }
+    sweepReaderCurrentHead(s, active)
   }
 
   /**
@@ -661,9 +683,7 @@ object Ild0301To0302MagneticTape {
     val active = if (!s.mtStaRight && ioBus.leftTape.isTapeLoaded) ioBus.leftTape
       else if (ioBus.rightTape.isTapeLoaded) ioBus.rightTape
       else ioBus.leftTape
-    active.mountedCartridge.flatMap(_.getFrame(active.headPosition)).foreach { frame =>
-      sweepFrame(s, frame)
-    }
+    sweepReaderCurrentHead(s, active)
     s.mtSkip = false
     evaluateCombinational(s)
   }

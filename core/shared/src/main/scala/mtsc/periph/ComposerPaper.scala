@@ -71,14 +71,16 @@ class ComposerPaper {
     val lineText = currentLine.toString()
     completedLines += lineText
     if (maxRetainedLines > 0 && completedLines.length > maxRetainedLines) {
-      completedLines.remove(0, completedLines.length - maxRetainedLines)
+      val drop = math.max(8, completedLines.length - maxRetainedLines)
+      completedLines.remove(0, math.min(drop, completedLines.length))
     }
     if (recordGlyphs) {
       val lineCoords = new Array[Int](currentCoordsLen)
       System.arraycopy(currentCoords, 0, lineCoords, 0, currentCoordsLen)
       completedCoords += lineCoords
       if (maxRetainedLines > 0 && completedCoords.length > maxRetainedLines) {
-        completedCoords.remove(0, completedCoords.length - maxRetainedLines)
+        val drop = math.max(8, completedCoords.length - maxRetainedLines)
+        completedCoords.remove(0, math.min(drop, completedCoords.length))
       }
       currentCoordsLen = 0
     }

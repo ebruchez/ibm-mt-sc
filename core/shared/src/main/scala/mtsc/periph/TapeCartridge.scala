@@ -3,7 +3,6 @@ package mtsc.periph
 import mtsc.isa.{Encoder, Instruction}
 import mtsc.memory.{CoreImage, CoreMemory}
 import mtsc.types.{Address, Condition}
-import scala.collection.mutable.ArrayBuffer
 
 /**
  * Single recorded character on an IBM MT/ST magnetic tape track.
@@ -21,61 +20,141 @@ final case class TapeFrame(rawByte: Int, is8Bit: Boolean = false) {
 
 object TapeFrame {
   /**
-   * Encodes a 7-bit character code with an odd parity bit in bit 7 (0x80).
+   * Returns raw 8-bit frame value (7 data bits + odd parity in bit 7).
    */
-  def encodeWithOddParity(char7: Int): TapeFrame = {
+  @inline def encode7Raw(char7: Int): Int = {
     val b7 = char7 & 0x7f
     val ones = Integer.bitCount(b7)
-    val raw = if (ones % 2 == 0) b7 | 0x80 else b7
-    TapeFrame(raw)
+    if ((ones & 1) == 0) b7 | 0x80 else b7
   }
+
+  /**
+   * Returns raw 9-bit frame value (8 data bits + odd parity in bit 8).
+   */
+  @inline def encode8Raw(byte8: Int): Int = {
+    val b8 = byte8 & 0xff
+    val ones = Integer.bitCount(b8)
+    if ((ones & 1) == 0) b8 | 0x100 else b8
+  }
+
+  @inline def pack(rawByte: Int, is8Bit: Boolean): Int =
+    (rawByte & 0x1ff) | (if (is8Bit) 0x200 else 0)
+
+  @inline def encode7Packed(char7: Int): Int =
+    encode7Raw(char7)
+
+  @inline def encode8Packed(byte8: Int): Int =
+    encode8Raw(byte8) | 0x200
+
+  /**
+   * Encodes a 7-bit character code with an odd parity bit in bit 7 (0x80).
+   */
+  def encodeWithOddParity(char7: Int): TapeFrame =
+    TapeFrame(encode7Raw(char7))
 
   /**
    * Encodes an 8-bit program byte with a 9th-track odd parity bit in bit 8 (0x100).
    */
-  def encodeByte8WithOddParity(byte8: Int): TapeFrame = {
-    val b8 = byte8 & 0xff
-    val ones = Integer.bitCount(b8)
-    val raw = if (ones % 2 == 0) b8 | 0x100 else b8
-    TapeFrame(raw, is8Bit = true)
-  }
+  def encodeByte8WithOddParity(byte8: Int): TapeFrame =
+    TapeFrame(encode8Raw(byte8), is8Bit = true)
 
   /**
    * Creates an invalid frame with intentional even parity for diagnostics.
    */
-  def encodeWithCorruptParity(char7: Int): TapeFrame = {
-    val valid = encodeWithOddParity(char7)
-    TapeFrame(valid.rawByte ^ 0x80) // Flip parity bit to make it even
-  }
+  def encodeWithCorruptParity(char7: Int): TapeFrame =
+    TapeFrame(encode7Raw(char7) ^ 0x80) // Flip parity bit to make it even
 }
 
 /**
  * Model of an IBM MT/ST magnetic tape cartridge.
  *
- * Contains sequential tape frames, support for left/right reader stations,
- * feed codes, carrier return codes, and end-of-record sentinels.
+ * Stores frames in fixed-size 512-element primitive `Array[Short]` chunks (1,036 bytes per chunk)
+ * so that even a 2,083-frame Factory Program Tape fits entirely within single-block Immix allocations
+ * with zero boxed `TapeFrame` objects and zero multi-block superblock requests.
+ *
+ * Each packed `Short` encodes:
+ * - bits `0..8` (`0x1ff`): `rawByte` (7-bit + parity or 8-bit + parity)
+ * - bit `9` (`0x200`): `1` if `is8Bit`, `0` if 7-bit
  */
-class TapeCartridge(val label: String, private val frames: ArrayBuffer[TapeFrame]) {
+class TapeCartridge private (
+  val label: String,
+  val length: Int,
+  private val chunks: Array[Array[Short]]
+) {
+  import TapeCartridge.{ChunkMask, ChunkShift}
 
-  def length: Int = frames.length
+  def this(label: String, totalLength: Int) =
+    this(label, totalLength, TapeCartridge.allocateChunks(totalLength))
+
+  @inline private[periph] def getPacked(index: Int): Int =
+    chunks(index >>> ChunkShift)(index & ChunkMask) & 0xffff
+
+  @inline private[periph] def setPacked(index: Int, packed: Int): Unit =
+    chunks(index >>> ChunkShift)(index & ChunkMask) = packed.toShort
+
+  @inline def rawByteAt(index: Int): Int =
+    getPacked(index) & 0x1ff
+
+  @inline def is8BitAt(index: Int): Boolean =
+    (getPacked(index) & 0x200) != 0
+
+  @inline def data7At(index: Int): Int =
+    getPacked(index) & 0x7f
+
+  @inline def dataByteAt(index: Int): Int = {
+    val p = getPacked(index)
+    if ((p & 0x200) != 0) p & 0xff else p & 0x7f
+  }
+
+  @inline def hasOddParityAt(index: Int): Boolean = {
+    val p = getPacked(index)
+    val mask = if ((p & 0x200) != 0) 0x1ff else 0xff
+    (Integer.bitCount(p & mask) & 1) != 0
+  }
 
   def getFrame(index: Int): Option[TapeFrame] =
-    if (index >= 0 && index < frames.length) Some(frames(index)) else None
+    if (index >= 0 && index < length) {
+      val p = getPacked(index)
+      Some(TapeFrame(p & 0x1ff, is8Bit = (p & 0x200) != 0))
+    } else {
+      None
+    }
 
-  def isAtEnd(index: Int): Boolean = index >= frames.length
+  def isAtEnd(index: Int): Boolean = index >= length
 
   /**
    * Injects an intentional parity error at a given index.
    */
   def corruptParityAt(index: Int): Unit =
-    if (index >= 0 && index < frames.length) {
-      val cur = frames(index)
-      val parityMask = if (cur.is8Bit) 0x100 else 0x80
-      frames(index) = TapeFrame(cur.rawByte ^ parityMask, is8Bit = cur.is8Bit)
+    if (index >= 0 && index < length) {
+      val p = getPacked(index)
+      val parityMask = if ((p & 0x200) != 0) 0x100 else 0x80
+      setPacked(index, p ^ parityMask)
     }
 }
 
 object TapeCartridge {
+
+  private final val ChunkShift: Int = 9
+  private final val ChunkSize: Int  = 1 << ChunkShift // 512 shorts = 1,036 bytes (< 1 Immix 2KB block)
+  private final val ChunkMask: Int  = ChunkSize - 1
+
+  private def allocateChunks(totalLength: Int): Array[Array[Short]] = {
+    if (totalLength <= 0) {
+      new Array[Array[Short]](0)
+    } else {
+      val numChunks = (totalLength + ChunkMask) >>> ChunkShift
+      val chunks = new Array[Array[Short]](numChunks)
+      var c = 0
+      while (c < numChunks) {
+        val rem = totalLength - (c << ChunkShift)
+        val sz = if (rem < ChunkSize) rem else ChunkSize
+        chunks(c) = new Array[Short](sz)
+        c += 1
+      }
+      chunks
+    }
+  }
 
   // MT/SC Control Codes (IBM Manual 241-5429-0)
   val FeedCode: Int         = 0x00 // Leader / Feed code
@@ -86,13 +165,15 @@ object TapeCartridge {
   val EndOfBlock: Int       = 0xFF // End of Record / Block sentinel
 
   def empty(label: String = "Blank Tape"): TapeCartridge =
-    new TapeCartridge(label, ArrayBuffer.empty)
+    new TapeCartridge(label, 0)
 
   val HistoricalSampleText: String =
-    "The IBM Magnetic Tape Selectric Composer is a system for preparing camera-ready copy for publication.\n\n" +
-      "Input data recorded on magnetic tape cartridges is read by the tape reader. Each tape cartridge holds approximately 4,000 words.\n\n" +
-      "The Composer Control Unit houses coincident-current magnetic core storage and Solid Logic Dense circuitry. Characters are read at 20 characters per second.\n\n" +
-      "Font escapement values are looked up automatically and line deficits are divided across inter-word space bands. The single-element spherical typing head prints camera-ready proofs at 14 characters per second."
+    "The IBM Magnetic Tape Selectric Composer (MT/SC) is a system for preparing camera-ready copy for publication.\n\n" +
+    "Input data recorded on magnetic tape cartridges is read by the tape reader. Each tape cartridge holds approximately 4,000 words. Characters are read at 20 characters per second.\n\n" +
+    "The Composer Control Unit (CCU) is a simple computer build with IBM SLD (Solid Logic Dense) modules and 2KB of core memory. " +
+    "Its purpose is to read the tape, compute justification spaces, and output the result to a modified IBM Composer at 14 characters per second.\n\n" +
+    "There is only one instance of the system known to have survived, including an input station with tape recorder, typewriter, and desk; and an output station with tape reader, control unit, Composer, and desk.\n\n" +
+    "You are looking at a software simulation at the gate level of the CCU. It is implemented in Scala, running on an RP2040 microcontroller, and outputting results to an eInk display."
 
   val HistoricalMergeSampleText: String =
     "CORRECTION MERGE TAPE:\n\n" +
@@ -102,43 +183,115 @@ object TapeCartridge {
   /**
    * Creates a tape cartridge from plain text.
    * Normalizes newlines, prepends a FeedCode, and appends EndOfBlock sentinel.
+   * Implemented with direct primitive loops (zero temporary Strings, zero ArrayBuffers, zero Lambdas).
    */
   def fromText(text: String, label: String = "Text Tape"): TapeCartridge = {
-    val buf = ArrayBuffer.empty[TapeFrame]
-    // Leader feed code
-    buf += TapeFrame.encodeWithOddParity(FeedCode)
-
-    val normalized = text.replace("\r\n", "\n").replace('\r', '\n')
-    for (ch <- normalized) {
-      val code = if (ch == '\n') CarrierReturn else ch.toInt & 0x7f
-      buf += TapeFrame.encodeWithOddParity(code)
+    val n = text.length
+    var normLen = 0
+    var i = 0
+    while (i < n) {
+      val ch = text.charAt(i)
+      if (ch == '\r' && i + 1 < n && text.charAt(i + 1) == '\n') {
+        i += 1
+      }
+      normLen += 1
+      i += 1
     }
 
-    // End-of-block sentinel
-    buf += TapeFrame(EndOfBlock) // 0xFF has 8 ones, but handled as hardware sentinel
-    new TapeCartridge(label, buf)
+    val totalFrames = normLen + 2
+    val cart = new TapeCartridge(label, totalFrames)
+    cart.setPacked(0, TapeFrame.encode7Packed(FeedCode))
+
+    var outIdx = 1
+    i = 0
+    while (i < n) {
+      val ch = text.charAt(i)
+      if (ch == '\r') {
+        if (i + 1 < n && text.charAt(i + 1) == '\n') {
+          i += 1
+        }
+        cart.setPacked(outIdx, TapeFrame.encode7Packed(CarrierReturn))
+      } else if (ch == '\n') {
+        cart.setPacked(outIdx, TapeFrame.encode7Packed(CarrierReturn))
+      } else {
+        cart.setPacked(outIdx, TapeFrame.encode7Packed(ch.toInt & 0x7f))
+      }
+      outIdx += 1
+      i += 1
+    }
+
+    // End-of-block sentinel (0xFF has 8 ones, handled as hardware sentinel)
+    cart.setPacked(outIdx, EndOfBlock & 0x1ff)
+    cart
   }
 
   /**
    * Creates a tape from raw bytes.
    */
   def fromRawBytes(bytes: Seq[Int], label: String = "Raw Tape"): TapeCartridge = {
-    val buf = ArrayBuffer.empty[TapeFrame]
-    for (b <- bytes) {
-      buf += TapeFrame(b & 0xff)
+    val n = bytes.length
+    val cart = new TapeCartridge(label, n)
+    var i = 0
+    while (i < n) {
+      cart.setPacked(i, bytes(i) & 0xff)
+      i += 1
     }
-    new TapeCartridge(label, buf)
+    cart
   }
 
   /**
    * Creates a binary program tape where each 8-bit byte has a 9th-track odd parity bit.
    */
   def fromProgramBytes(bytes: Seq[Int], label: String = "Program Tape"): TapeCartridge = {
-    val buf = ArrayBuffer.empty[TapeFrame]
-    for (b <- bytes) {
-      buf += TapeFrame.encodeByte8WithOddParity(b & 0xff)
+    val n = bytes.length
+    val cart = new TapeCartridge(label, n)
+    var i = 0
+    while (i < n) {
+      cart.setPacked(i, TapeFrame.encode8Packed(bytes(i) & 0xff))
+      i += 1
     }
-    new TapeCartridge(label, buf)
+    cart
+  }
+
+  private val preferredTrampolineAddrs: Array[Int] = Array(194, 192, 196)
+
+  private def findTrampolineSlot(bytes: Array[Byte], lowB: Int, highB: Int): Int = {
+    // 1. Check if an existing word in 48..254 already contains the exact JMP instruction
+    var i = 0
+    while (i < preferredTrampolineAddrs.length) {
+      val a = preferredTrampolineAddrs(i)
+      if ((bytes(a) & 0xff) == lowB && (bytes(a + 1) & 0xff) == highB) return a
+      i += 1
+    }
+    var a = 198
+    while (a <= 254) {
+      if ((bytes(a) & 0xff) == lowB && (bytes(a + 1) & 0xff) == highB) return a
+      a += 2
+    }
+    a = 48
+    while (a <= 190) {
+      if ((bytes(a) & 0xff) == lowB && (bytes(a + 1) & 0xff) == highB) return a
+      a += 2
+    }
+
+    // 2. Otherwise pick the first zero word in preferred order (194, 192, 196, 198..254, 48..190)
+    i = 0
+    while (i < preferredTrampolineAddrs.length) {
+      val addr = preferredTrampolineAddrs(i)
+      if (bytes(addr) == 0 && bytes(addr + 1) == 0) return addr
+      i += 1
+    }
+    a = 198
+    while (a <= 254) {
+      if (bytes(a) == 0 && bytes(a + 1) == 0) return a
+      a += 2
+    }
+    a = 48
+    while (a <= 190) {
+      if (bytes(a) == 0 && bytes(a + 1) == 0) return a
+      a += 2
+    }
+    194
   }
 
   /**
@@ -168,57 +321,50 @@ object TapeCartridge {
     )
 
     val jmpWord = Encoder.encode(Instruction.Branch(Condition.Unconditional, link = false, entryPoint))
-    val trampolineOpt: Option[Int] =
-      if (entryPoint.unsigned < 256) {
-        None
-      } else {
-        val candidates = Seq(194, 192, 196) ++ (198 to 254 by 2) ++ (48 to 190 by 2)
-        val existing = candidates.find { addr =>
-          (image.bytes(addr) & 0xff) == jmpWord.lowByte &&
-          (image.bytes(addr + 1) & 0xff) == jmpWord.highByte
-        }
-        val zeroSlot = candidates.find { addr =>
-          image.bytes(addr) == 0 && image.bytes(addr + 1) == 0
-        }
-        Some(existing.orElse(zeroSlot).getOrElse(194))
-      }
+    val trampolineAddr: Int =
+      if (entryPoint.unsigned < 256) -1
+      else findTrampolineSlot(image.bytes, jmpWord.lowByte, jmpWord.highByte)
 
-    val stream = ArrayBuffer.empty[Int]
-    stream.sizeHint(2083)
+    val cart = new TapeCartridge(label, 2083)
+    var outIdx = 0
 
     // 1. Pass 1 over 0..39 (40 bytes) -> R20 advances to 40
     var i = 0
     while (i < 40) {
-      stream += (image.bytes(i) & 0xff)
+      cart.setPacked(outIdx, TapeFrame.encode8Packed(image.bytes(i) & 0xff))
+      outIdx += 1
       i += 1
     }
 
     // 2. Redirect R20 at byte 40 to 48 (0x30), preserving live Initial Loader at 42..47
-    stream += 48
+    cart.setPacked(outIdx, TapeFrame.encode8Packed(48))
+    outIdx += 1
 
     // 3. Upper Core 48..2047 (2,000 bytes) -> R20 wraps (2047 + 1) & 0x7FF -> 0
     var addr = 48
     while (addr < CoreMemory.Size) {
-      val b = trampolineOpt match {
-        case Some(tAddr) if addr == tAddr     => jmpWord.lowByte
-        case Some(tAddr) if addr == tAddr + 1 => jmpWord.highByte
-        case _                                => image.bytes(addr) & 0xff
-      }
-      stream += b
+      val b =
+        if (trampolineAddr >= 0 && addr == trampolineAddr) jmpWord.lowByte
+        else if (trampolineAddr >= 0 && addr == trampolineAddr + 1) jmpWord.highByte
+        else image.bytes(addr) & 0xff
+      cart.setPacked(outIdx, TapeFrame.encode8Packed(b))
+      outIdx += 1
       addr += 1
     }
 
     // 4. Pass 2 over 0..39 (40 bytes) -> restores R0 and R2..R19; R20 advances to 40
     i = 0
     while (i < 40) {
-      stream += (image.bytes(i) & 0xff)
+      cart.setPacked(outIdx, TapeFrame.encode8Packed(image.bytes(i) & 0xff))
+      outIdx += 1
       i += 1
     }
 
     // 5. Redirect R20 at byte 40 to 46, then patch byte 46 of `JMP 0x02A` to jump out
-    stream += 46
-    stream += trampolineOpt.getOrElse(jmpWord.lowByte)
-
-    fromProgramBytes(stream.toSeq, label)
+    cart.setPacked(outIdx, TapeFrame.encode8Packed(46))
+    outIdx += 1
+    val exitLowByte = if (trampolineAddr >= 0) trampolineAddr else jmpWord.lowByte
+    cart.setPacked(outIdx, TapeFrame.encode8Packed(exitLowByte))
+    cart
   }
 }
