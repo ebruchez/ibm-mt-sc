@@ -7,9 +7,13 @@
 #include "hardware/gpio.h"
 #include "hardware/pio.h"
 #include "hardware/clocks.h"
+#include "hardware/pll.h"
+#include "hardware/sync.h"
 #include "hardware/timer.h"
+#include "hardware/xosc.h"
 #include "hardware/structs/clocks.h"
 #include "hardware/structs/scb.h"
+#include "hardware/structs/usb.h"
 #include "ws2812.pio.h"
 #include "epd_ssd1680.h"
 #include "oled_ssd1306.h"
@@ -81,7 +85,100 @@ void pico_neopixel_set_rgb(uint r, uint g, uint b) {
     if (grb != last_neopixel_grb) {
         last_neopixel_grb = grb;
         pio_sm_put_blocking(pio0, 0, grb << 8u);
+        if (grb == 0u) {
+            // Wait for PIO0 to finish shifting all 24 bits (30 us @ 800 kHz) plus WS2812 latch time
+            // before pico_getchar_timeout_us() gates off CLK_SYS_PIO0 in SLEEPDEEP mode.
+            busy_wait_us_32(80);
+        }
     }
+}
+
+static uint8_t low_clock_mode = 0; // 0 = 125 MHz (pll_sys), 1 = 48 MHz (pll_usb), 2 = 12 MHz (XOSC)
+
+static void on_stdio_chars_available(void *param) {
+    (void)param;
+    __sev();
+}
+
+static bool pico_usb_bus_active(void) {
+    uint32_t st = usb_hw->sie_status;
+    return (st & USB_SIE_STATUS_CONNECTED_BITS) != 0u &&
+           (st & USB_SIE_STATUS_SUSPENDED_BITS) == 0u;
+}
+
+// Switch clk_sys and clk_peri off the 125 MHz pll_sys and power down pll_sys (1.5 GHz VCO):
+// - If a USB host bus is active (enumerated/SOF active, even without a serial terminal open),
+//   clock clk_sys at 48 MHz from pll_usb so USB EP0/CDC control transfers remain instantaneous.
+// - If running standalone on battery / USB power brick (no active USB host), drop clk_sys and
+//   clk_peri all the way down to the 12 MHz crystal oscillator (XOSC).
+static void pico_enter_low_clock_mode(void) {
+    uint8_t target_mode = pico_usb_bus_active() ? 1u : 2u;
+    if (low_clock_mode == target_mode) {
+        return;
+    }
+    // Glitchlessly switch clk_sys SRC to clk_ref (12 MHz XOSC) BEFORE touching AUXSRC or pll_sys.
+    // Note: Do not use clock_configure_undivided(clk_sys, 0, 0, XOSC_HZ) here because Pico SDK's
+    // clock_configure_internal() writes AUXSRC=0 (pll_sys) before clearing SRC, which would stall
+    // the glitchless mux if pll_sys is already powered down.
+    hw_clear_bits(&clocks_hw->clk[clk_sys].ctrl, CLOCKS_CLK_SYS_CTRL_SRC_BITS);
+    while (clocks_hw->clk[clk_sys].selected != 0x1u) {
+        tight_loop_contents();
+    }
+    clock_set_reported_hz(clk_sys, XOSC_HZ);
+
+    if (target_mode == 1u) {
+        clock_configure_undivided(
+            clk_sys,
+            CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLKSRC_CLK_SYS_AUX,
+            CLOCKS_CLK_SYS_CTRL_AUXSRC_VALUE_CLKSRC_PLL_USB,
+            USB_CLK_HZ
+        );
+        clock_configure_undivided(
+            clk_peri,
+            0,
+            CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLKSRC_PLL_USB,
+            USB_CLK_HZ
+        );
+    } else {
+        clock_configure_undivided(
+            clk_peri,
+            0,
+            CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_XOSC_CLKSRC,
+            XOSC_HZ
+        );
+    }
+    if (low_clock_mode == 0u) {
+        pll_deinit(pll_sys);
+    }
+    low_clock_mode = target_mode;
+}
+
+// Relock pll_sys to 125 MHz and glitchlessly switch clk_sys and clk_peri back to full speed.
+static void pico_restore_full_clock(void) {
+    if (low_clock_mode == 0u) {
+        return;
+    }
+    // Glitchlessly switch clk_sys SRC to clk_ref (12 MHz XOSC) without altering AUXSRC
+    hw_clear_bits(&clocks_hw->clk[clk_sys].ctrl, CLOCKS_CLK_SYS_CTRL_SRC_BITS);
+    while (clocks_hw->clk[clk_sys].selected != 0x1u) {
+        tight_loop_contents();
+    }
+    clock_set_reported_hz(clk_sys, XOSC_HZ);
+
+    pll_init(pll_sys, PLL_SYS_REFDIV, PLL_SYS_VCO_FREQ_HZ, PLL_SYS_POSTDIV1, PLL_SYS_POSTDIV2);
+    clock_configure_undivided(
+        clk_sys,
+        CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLKSRC_CLK_SYS_AUX,
+        CLOCKS_CLK_SYS_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS,
+        SYS_CLK_HZ
+    );
+    clock_configure_undivided(
+        clk_peri,
+        0,
+        CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLK_SYS,
+        SYS_CLK_HZ
+    );
+    low_clock_mode = 0u;
 }
 
 // Gate off RP2040 peripherals that are never used by the MT/SC firmware
@@ -104,40 +201,72 @@ static void pico_power_init_clocks(void) {
     );
     clocks_hw->sleep_en0 = clocks_hw->wake_en0;
     clocks_hw->sleep_en1 = clocks_hw->wake_en1;
+    stdio_set_chars_available_callback(on_stdio_chars_available, NULL);
 }
 
 int pico_getchar_timeout_us(uint32_t timeout_us) {
-    if (timeout_us >= 1000u && !pico_epd_is_busy()) {
-        // Gate off SRAM0..5, XIP flash, ROM, SIO, PIO0, SPI0, I2C1, and DMA clocks whenever
-        // the Cortex-M0+ core enters WFE inside getchar_timeout_us(), keeping only Timer,
-        // USB CDC, UART0, IO/Pads, PLLs, and SWD debug clocks running during idle sleep.
-        uint32_t wake0 = clocks_hw->wake_en0;
-        uint32_t wake1 = clocks_hw->wake_en1;
-        clocks_hw->sleep_en0 = wake0 & ~(
-            CLOCKS_SLEEP_EN0_CLK_SYS_SRAM3_BITS |
-            CLOCKS_SLEEP_EN0_CLK_SYS_SRAM2_BITS |
-            CLOCKS_SLEEP_EN0_CLK_SYS_SRAM1_BITS |
-            CLOCKS_SLEEP_EN0_CLK_SYS_SRAM0_BITS |
-            CLOCKS_SLEEP_EN0_CLK_SYS_SPI0_BITS  |
-            CLOCKS_SLEEP_EN0_CLK_PERI_SPI0_BITS |
-            CLOCKS_SLEEP_EN0_CLK_SYS_SIO_BITS   |
-            CLOCKS_SLEEP_EN0_CLK_SYS_ROM_BITS   |
-            CLOCKS_SLEEP_EN0_CLK_SYS_PIO0_BITS  |
-            CLOCKS_SLEEP_EN0_CLK_SYS_I2C1_BITS  |
-            CLOCKS_SLEEP_EN0_CLK_SYS_DMA_BITS
-        );
-        clocks_hw->sleep_en1 = wake1 & ~(
-            CLOCKS_SLEEP_EN1_CLK_SYS_XIP_BITS   |
-            CLOCKS_SLEEP_EN1_CLK_SYS_SRAM5_BITS |
-            CLOCKS_SLEEP_EN1_CLK_SYS_SRAM4_BITS
-        );
-        scb_hw->scr |= M0PLUS_SCR_SLEEPDEEP_BITS;
-        int ch = getchar_timeout_us(timeout_us);
-        scb_hw->scr &= ~M0PLUS_SCR_SLEEPDEEP_BITS;
-        clocks_hw->sleep_en0 = wake0;
-        clocks_hw->sleep_en1 = wake1;
+    int ch = getchar_timeout_us(0);
+    if (ch >= 0) {
+        pico_restore_full_clock();
         return ch;
     }
+    if (timeout_us == 0) {
+        return PICO_ERROR_TIMEOUT;
+    }
+    if (pico_epd_any_button_low()) {
+        pico_restore_full_clock();
+        return PICO_ERROR_TIMEOUT;
+    }
+
+    if (timeout_us >= 1000u && !pico_epd_is_busy()) {
+        bool can_downclock = (timeout_us >= 50000u) && !stdio_usb_connected();
+        uint32_t effective_wait_us = can_downclock ? 250000u : timeout_us;
+        if (can_downclock) {
+            pico_enter_low_clock_mode();
+        } else {
+            pico_restore_full_clock();
+        }
+
+        pico_epd_set_button_wake_irq(true);
+
+        // Gate off SPI0, PIO0, I2C1, and DMA peripheral clocks whenever the Cortex-M0+ core
+        // enters WFE inside best_effort_wfe_or_timeout(), while keeping SRAM0..5, XIP, ROM,
+        // SIO, Timer, USB CDC, UART0, IO/Pads (for GPIO button wake IRQ), and SWD debug clocks
+        // enabled so waking from WFE and SWD/USB bus access have zero AHB-Lite synchronization stall.
+        uint32_t wake0 = clocks_hw->wake_en0;
+        uint32_t gate0 =
+            CLOCKS_SLEEP_EN0_CLK_SYS_SPI0_BITS  |
+            CLOCKS_SLEEP_EN0_CLK_PERI_SPI0_BITS |
+            CLOCKS_SLEEP_EN0_CLK_SYS_PIO0_BITS  |
+            CLOCKS_SLEEP_EN0_CLK_SYS_I2C1_BITS  |
+            CLOCKS_SLEEP_EN0_CLK_SYS_DMA_BITS;
+        if (low_clock_mode != 0u) {
+            gate0 |= CLOCKS_SLEEP_EN0_CLK_SYS_PLL_SYS_BITS;
+        }
+        clocks_hw->sleep_en0 = wake0 & ~gate0;
+        scb_hw->scr |= M0PLUS_SCR_SLEEPDEEP_BITS;
+
+        absolute_time_t until = make_timeout_time_us(effective_wait_us);
+        do {
+            ch = getchar_timeout_us(0);
+            if (ch >= 0 || pico_epd_any_button_low()) {
+                break;
+            }
+            if (low_clock_mode != 0u && stdio_usb_connected()) {
+                break;
+            }
+        } while (!best_effort_wfe_or_timeout(until));
+
+        scb_hw->scr &= ~M0PLUS_SCR_SLEEPDEEP_BITS;
+        clocks_hw->sleep_en0 = wake0;
+        pico_epd_set_button_wake_irq(false);
+
+        if (ch >= 0 || pico_epd_any_button_low() || stdio_usb_connected() || !can_downclock) {
+            pico_restore_full_clock();
+        }
+        return ch;
+    }
+    pico_restore_full_clock();
     return getchar_timeout_us(timeout_us);
 }
 

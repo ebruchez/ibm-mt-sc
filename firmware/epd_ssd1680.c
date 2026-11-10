@@ -3,6 +3,7 @@
 #include "pico/stdlib.h"
 #include "hardware/gpio.h"
 #include "hardware/spi.h"
+#include "hardware/sync.h"
 #include "hardware/timer.h"
 
 // ============================================================================
@@ -932,6 +933,45 @@ static uint8_t epd_sample_raw_buttons(bool oled_btns) {
         mask |= MTSC_EPD_BTN_C_MASK;
     }
     return mask;
+}
+
+static bool epd_wake_irq_registered = false;
+
+static void epd_button_gpio_irq_callback(uint gpio, uint32_t events) {
+    (void)gpio;
+    (void)events;
+    __sev();
+}
+
+bool pico_epd_any_button_low(void) {
+    if (!epd_initialized) {
+        return false;
+    }
+    return epd_sample_raw_buttons(pico_oled_is_present()) != 0;
+}
+
+void pico_epd_set_button_wake_irq(bool enable) {
+    if (!epd_initialized) {
+        return;
+    }
+    if (enable && !epd_wake_irq_registered) {
+        gpio_set_irq_enabled_with_callback(
+            EPD_BTN_A_PIN,
+            GPIO_IRQ_EDGE_FALL,
+            true,
+            &epd_button_gpio_irq_callback
+        );
+        epd_wake_irq_registered = true;
+    } else {
+        gpio_set_irq_enabled(EPD_BTN_A_PIN, GPIO_IRQ_EDGE_FALL, enable);
+    }
+    gpio_set_irq_enabled(EPD_BTN_B_PIN, GPIO_IRQ_EDGE_FALL, enable);
+    gpio_set_irq_enabled(EPD_BTN_C_PIN, GPIO_IRQ_EDGE_FALL, enable);
+    if (pico_oled_is_present()) {
+        gpio_set_irq_enabled(EPD_ECS_PIN,  GPIO_IRQ_EDGE_FALL, enable);
+        gpio_set_irq_enabled(EPD_SRCS_PIN, GPIO_IRQ_EDGE_FALL, enable);
+        gpio_set_irq_enabled(EPD_SDCS_PIN, GPIO_IRQ_EDGE_FALL, enable);
+    }
 }
 
 uint32_t pico_epd_poll_buttons(void) {

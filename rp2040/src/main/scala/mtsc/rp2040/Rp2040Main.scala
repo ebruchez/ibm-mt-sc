@@ -200,13 +200,19 @@ object Rp2040Main {
     isRunningLoop: Boolean = false,
     mtPulse: Boolean = false
   ): Unit = {
+    if (oledAsleep && !isRunningLoop) {
+      // Low-power inactivity sleep: turn off both WS2812 NeoPixel and status LED
+      setNeoAndLed(0, 0, 0, ledOn = false)
+      return
+    }
+
     val s = system.cpu.ild.signals
     val hasError =
       s.errorLite || s.lite9 || system.rightTape.parityError || system.leftTape.parityError
     val isInhibit =
       s.inh || s.lite11 || system.cpu.state.inhibit || system.operatorPanel.activeSetupParam.isDefined
     val isMtActive = mtPulse || s.mtRd || s.mtSch || s.mtCycClutch || s.mtStepMags
-    val isRun = isRunningLoop || (s.start && !s.halt && !system.cpu.state.halted)
+    val isRun = isRunningLoop
 
     if (hasError) {
       // Red (LITE 9 / +RESET): Parity or Instruction Check Error
@@ -220,9 +226,6 @@ object Rp2040Main {
     } else if (isRun) {
       // Bright Green (+RUN): 240 kHz Clock Running
       setNeoAndLed(0, 64, 0, ledOn = ledToggle)
-    } else if (oledAsleep) {
-      // Low-power inactivity sleep: turn off both WS2812 NeoPixel and status LED
-      setNeoAndLed(0, 0, 0, ledOn = false)
     } else if (PicoSdk.pico_stdio_usb_connected()) {
       // Dim Green: USB Serial connected & Ready in Customer Engineer console
       setNeoAndLed(0, 16, 0, ledOn = false)
