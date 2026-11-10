@@ -78,6 +78,15 @@ final class IldCcu(
     signals.mtSkip = false
     signals.mtReread = false
     signals.mtEotOrUnld = false
+    signals.mtData1 = false
+    signals.mtData2 = false
+    signals.mtData3 = false
+    signals.mtData4 = false
+    signals.mtData5 = false
+    signals.mtData6 = false
+    signals.mtData7 = false
+    signals.mtData8 = false
+    signals.mtData9 = false
     signals.setMalValue(0)
     signals.setOutputByte(0)
     inProgressInstruction = false
@@ -89,8 +98,14 @@ final class IldCcu(
     signals.edit = signals.editSwitch != CeEditSelector.Proc
     timingTrace.clear()
     ioBus match {
-      case sysBus: SystemIoBus => Ild0301To0302MagneticTape.syncStationSensors(signals, sysBus)
-      case _                   => ()
+      case sysBus: SystemIoBus =>
+        Ild0301To0302MagneticTape.syncStationSensors(signals, sysBus)
+        if (sysBus.rightTape.isTapeLoaded) {
+          Ild0301To0302MagneticTape.pressLoad(signals, rightStation = true, sysBus)
+        } else if (sysBus.leftTape.isTapeLoaded) {
+          Ild0301To0302MagneticTape.pressLoad(signals, rightStation = false, sysBus)
+        }
+      case _ => ()
     }
     syncAllCombinational()
     syncStateFromSignals()

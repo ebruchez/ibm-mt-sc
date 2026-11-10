@@ -224,6 +224,7 @@ static const uint8_t il0373_fastmono_lut_bb[42] = {
 static bool epd_initialized = false;
 static uint64_t epd_busy_until_us = 0;
 static bool il0373_fast_mono_active = false;
+static bool epd_power_is_on = false;
 
 // Shadow of previous monochrome frame for differential fast updates (stored non-inverted: 0=White, 1=Black)
 static uint8_t prev_mono_ram[MTSC_EPD_PLANE_BYTES];
@@ -818,8 +819,35 @@ bool pico_epd_buttons_active(void) {
     return epd_initialized;
 }
 
+void pico_epd_power_off(void) {
+    if (!epd_initialized || !epd_power_is_on) {
+        return;
+    }
+    while (time_us_64() < epd_busy_until_us) {
+        sleep_ms(5);
+    }
+    gpio_put(EPD_ECS_PIN, true);
+    gpio_set_dir(EPD_ECS_PIN, GPIO_OUT);
+    if (epd_controller_type == EPD_CTRL_IL0373) {
+        il0373_write_cmd(IL0373_POWER_OFF);
+    } else {
+        epd_write_cmd_u8(SSD1680_DISP_CTRL2, 0x83);
+        epd_write_cmd(SSD1680_MASTER_ACTIVATE);
+    }
+    epd_park_cs_pins();
+    epd_power_is_on = false;
+    il0373_fast_mono_active = false;
+}
+
 bool pico_epd_is_busy(void) {
-    return time_us_64() < epd_busy_until_us;
+    if (time_us_64() < epd_busy_until_us) {
+        return true;
+    }
+    // Automatically shut down the eInk +/-15V charge pump once a full or 4-gray refresh finishes
+    if (epd_power_is_on && !il0373_fast_mono_active) {
+        pico_epd_power_off();
+    }
+    return false;
 }
 
 void pico_epd_set_controller(uint32_t ctrl_type) {
@@ -859,6 +887,7 @@ void pico_epd_upload_planes(const uint8_t *bw_plane, const uint8_t *red_plane, u
 
     // Return ECS/SRCS/SDCS to their idle state when SPI0 transfer completes
     epd_park_cs_pins();
+    epd_power_is_on = true;
 
     // Record non-blocking busy deadline based on waveform duration
     uint64_t duration_us = 2400000ULL;

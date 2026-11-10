@@ -46,5 +46,13 @@ class ContinuousComposerSuite extends munit.FunSuite {
     // Check exact space band allocation for first line: 25 deficit across 3 spaces = [13, 12, 12] units
     val firstLineSpaces = galleyLines.head.glyphs.filter(_.ch == ' ').map(_.widthUnits)
     assertEquals(firstLineSpaces, List(13, 12, 12), "Spaces should be expanded to [13, 12, 12] units summing to 37 units")
+
+    // Verify that resetting after EOT Halt rewinds the tape and sweeps track 0 into MT Data Latches
+    // so a second run composes the full document again instead of halting on stale 0xFF EndOfBlock latches.
+    system.reset()
+    EscapementRoutine.initializeTable(system.memory)
+    val res2 = system.run(maxCycles = 50000)
+    assertEquals(res2, StepResult.Halted)
+    assertEquals(system.paper.lines, printedLines)
   }
 }

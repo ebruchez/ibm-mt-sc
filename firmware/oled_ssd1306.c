@@ -142,8 +142,9 @@ void pico_oled_set_power(bool on) {
         return;
     }
     if (on) {
-        const uint8_t wake_cmds[3] = {
+        const uint8_t wake_cmds[5] = {
             SSD1306_CHARGEPUMP, 0x14,
+            SSD1306_MEMORYMODE, 0x00,
             SSD1306_DISPLAYON
         };
         if (!oled_write_cmd_list(wake_cmds, sizeof(wake_cmds))) {
@@ -153,11 +154,8 @@ void pico_oled_set_power(bool on) {
         }
         oled_awake = true;
     } else {
-        const uint8_t sleep_cmds[3] = {
-            SSD1306_DISPLAYOFF,
-            SSD1306_CHARGEPUMP, 0x10
-        };
-        if (!oled_write_cmd_list(sleep_cmds, sizeof(sleep_cmds))) {
+        const uint8_t sleep_cmd = SSD1306_DISPLAYOFF;
+        if (!oled_write_cmd_list(&sleep_cmd, 1)) {
             oled_present = false;
             oled_awake = false;
             return;

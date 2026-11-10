@@ -8,8 +8,11 @@
 #include "hardware/pio.h"
 #include "hardware/clocks.h"
 #include "hardware/timer.h"
+#include "hardware/structs/clocks.h"
+#include "hardware/structs/scb.h"
 #include "ws2812.pio.h"
 #include "epd_ssd1680.h"
+#include "oled_ssd1306.h"
 
 // Scala Native library initialization and exported Stage 1 entry point
 extern int ScalaNativeInit(void);
@@ -81,7 +84,60 @@ void pico_neopixel_set_rgb(uint r, uint g, uint b) {
     }
 }
 
+// Gate off RP2040 peripherals that are never used by the MT/SC firmware
+// (ADC, PWM, RTC, PIO1, SPI1, I2C0, UART1) in both active and sleep modes.
+static void pico_power_init_clocks(void) {
+    clocks_hw->wake_en0 &= ~(
+        CLOCKS_WAKE_EN0_CLK_ADC_ADC_BITS  |
+        CLOCKS_WAKE_EN0_CLK_SYS_ADC_BITS  |
+        CLOCKS_WAKE_EN0_CLK_SYS_PWM_BITS  |
+        CLOCKS_WAKE_EN0_CLK_RTC_RTC_BITS  |
+        CLOCKS_WAKE_EN0_CLK_SYS_RTC_BITS  |
+        CLOCKS_WAKE_EN0_CLK_SYS_PIO1_BITS |
+        CLOCKS_WAKE_EN0_CLK_PERI_SPI1_BITS |
+        CLOCKS_WAKE_EN0_CLK_SYS_SPI1_BITS |
+        CLOCKS_WAKE_EN0_CLK_SYS_I2C0_BITS
+    );
+    clocks_hw->wake_en1 &= ~(
+        CLOCKS_WAKE_EN1_CLK_PERI_UART1_BITS |
+        CLOCKS_WAKE_EN1_CLK_SYS_UART1_BITS
+    );
+    clocks_hw->sleep_en0 = clocks_hw->wake_en0;
+    clocks_hw->sleep_en1 = clocks_hw->wake_en1;
+}
+
 int pico_getchar_timeout_us(uint32_t timeout_us) {
+    if (timeout_us >= 1000u && !pico_epd_is_busy()) {
+        // Gate off SRAM0..5, XIP flash, ROM, SIO, PIO0, SPI0, I2C1, and DMA clocks whenever
+        // the Cortex-M0+ core enters WFE inside getchar_timeout_us(), keeping only Timer,
+        // USB CDC, UART0, IO/Pads, PLLs, and SWD debug clocks running during idle sleep.
+        uint32_t wake0 = clocks_hw->wake_en0;
+        uint32_t wake1 = clocks_hw->wake_en1;
+        clocks_hw->sleep_en0 = wake0 & ~(
+            CLOCKS_SLEEP_EN0_CLK_SYS_SRAM3_BITS |
+            CLOCKS_SLEEP_EN0_CLK_SYS_SRAM2_BITS |
+            CLOCKS_SLEEP_EN0_CLK_SYS_SRAM1_BITS |
+            CLOCKS_SLEEP_EN0_CLK_SYS_SRAM0_BITS |
+            CLOCKS_SLEEP_EN0_CLK_SYS_SPI0_BITS  |
+            CLOCKS_SLEEP_EN0_CLK_PERI_SPI0_BITS |
+            CLOCKS_SLEEP_EN0_CLK_SYS_SIO_BITS   |
+            CLOCKS_SLEEP_EN0_CLK_SYS_ROM_BITS   |
+            CLOCKS_SLEEP_EN0_CLK_SYS_PIO0_BITS  |
+            CLOCKS_SLEEP_EN0_CLK_SYS_I2C1_BITS  |
+            CLOCKS_SLEEP_EN0_CLK_SYS_DMA_BITS
+        );
+        clocks_hw->sleep_en1 = wake1 & ~(
+            CLOCKS_SLEEP_EN1_CLK_SYS_XIP_BITS   |
+            CLOCKS_SLEEP_EN1_CLK_SYS_SRAM5_BITS |
+            CLOCKS_SLEEP_EN1_CLK_SYS_SRAM4_BITS
+        );
+        scb_hw->scr |= M0PLUS_SCR_SLEEPDEEP_BITS;
+        int ch = getchar_timeout_us(timeout_us);
+        scb_hw->scr &= ~M0PLUS_SCR_SLEEPDEEP_BITS;
+        clocks_hw->sleep_en0 = wake0;
+        clocks_hw->sleep_en1 = wake1;
+        return ch;
+    }
     return getchar_timeout_us(timeout_us);
 }
 
@@ -383,6 +439,7 @@ void __attribute__((naked)) isr_hardfault(void) {
 
 int main(void) {
     stdio_init_all();
+    pico_power_init_clocks();
 
     uint led = pico_default_led_pin();
     pico_led_init(led);

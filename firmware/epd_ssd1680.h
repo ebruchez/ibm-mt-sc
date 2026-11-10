@@ -21,6 +21,7 @@
 
 void pico_epd_init(void);
 bool pico_epd_is_busy(void);
+void pico_epd_power_off(void);
 void pico_epd_upload_planes(const uint8_t *bw_plane, const uint8_t *red_plane, uint32_t mode);
 uint32_t pico_epd_poll_buttons(void);
 bool pico_epd_buttons_active(void);

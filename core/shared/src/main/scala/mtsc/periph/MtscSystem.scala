@@ -373,8 +373,8 @@ class MtscSystem(
   }
 
   def reset(): Unit = {
-    cpu.reset()
     ioBus.reset()
+    cpu.reset()
   }
 }
 

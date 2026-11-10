@@ -36,6 +36,7 @@ object PicoSdk {
   def sleep_ms(ms: CInt): Unit = extern
   def pico_epd_init(): Unit = extern
   def pico_epd_is_busy(): CBool = extern
+  def pico_epd_power_off(): Unit = extern
   def pico_epd_set_controller(ctrlType: CInt): Unit = extern
   def pico_epd_upload_planes(bwPlane: Ptr[Byte], redPlane: Ptr[Byte], mode: CInt): Unit = extern
   def pico_epd_poll_buttons(): CInt = extern
@@ -219,6 +220,9 @@ object Rp2040Main {
     } else if (isRun) {
       // Bright Green (+RUN): 240 kHz Clock Running
       setNeoAndLed(0, 64, 0, ledOn = ledToggle)
+    } else if (oledAsleep) {
+      // Low-power inactivity sleep: turn off both WS2812 NeoPixel and status LED
+      setNeoAndLed(0, 0, 0, ledOn = false)
     } else if (PicoSdk.pico_stdio_usb_connected()) {
       // Dim Green: USB Serial connected & Ready in Customer Engineer console
       setNeoAndLed(0, 16, 0, ledOn = false)
@@ -342,6 +346,10 @@ object Rp2040Main {
         val usbConnectedNow = PicoSdk.pico_stdio_usb_connected()
         if (usbConnectedNow && !usbWasConnected) {
           // Fresh USB CDC terminal connection detected: brief settle delay then redraw console
+          oledLastActivityUs = PicoSdk.pico_time_us_32()
+          oledAsleep = false
+          updateOledDisplay(system, consoleState)
+          updateHardwareLamps(system, isRunningLoop = false)
           PicoSdk.sleep_ms(120)
           needsRender = true
           forceFullRender = true
@@ -351,6 +359,9 @@ object Rp2040Main {
         // Poll FeatherWing physical buttons A (D11/D9), B (D12/D6), C (D13/D5)
         val btnMask = PicoSdk.pico_epd_poll_buttons()
         if (btnMask != 0) {
+          oledLastActivityUs = PicoSdk.pico_time_us_32()
+          oledAsleep = false
+          updateHardwareLamps(system, isRunningLoop = false)
           handleFeatherWingButtons(btnMask, system, consoleState, terminal)
           updateOledDisplay(system, consoleState)
           needsRender = true
@@ -365,19 +376,29 @@ object Rp2040Main {
           forceFullRender = false
         }
 
-        // Put OLED display into sleep after 30s without composition, button, or command activity
-        if (!oledAsleep && PicoSdk.pico_oled_is_present()) {
+        // Put OLED display, eInk charge pump, and status NeoPixel/LED into low-power sleep
+        // after 30s without composition, button, or command activity
+        if (!oledAsleep) {
           val idleUs = PicoSdk.pico_time_us_32() - oledLastActivityUs
           if (idleUs >= OledSleepTimeoutUs || idleUs < 0) {
             oledAsleep = true
-            PicoSdk.pico_oled_set_power(false)
+            if (PicoSdk.pico_oled_is_present()) {
+              PicoSdk.pico_oled_set_power(false)
+            }
+            if (!PicoSdk.pico_epd_is_busy()) {
+              PicoSdk.pico_epd_power_off()
+            }
+            updateHardwareLamps(system, isRunningLoop = false)
           }
         }
 
         PicoSdk.pico_set_boot_stage(15)
-        val ch = PicoSdk.pico_getchar_timeout_us(10000) // 10 ms poll
+        val ch = PicoSdk.pico_getchar_timeout_us(if (oledAsleep) 50000 else 10000)
         if (ch >= 0) {
           PicoSdk.pico_set_boot_stage(16)
+          oledLastActivityUs = PicoSdk.pico_time_us_32()
+          oledAsleep = false
+          updateHardwareLamps(system, isRunningLoop = false)
           val prevLines = system.paper.completedLinesCount
           val prevChars = system.paper.totalCharactersPrinted
           val cmd = readSerialCommand(ch)
@@ -456,7 +477,7 @@ object Rp2040Main {
       if (system.cpu.state.halted) {
         system.reset()
         EscapementRoutine.initializeTable(system.memory)
-        if (!system.rightTape.isTapeLoaded && defaultTapeRef != null) {
+        if (defaultTapeRef != null) {
           system.loadTape(Device.RightTape, defaultTapeRef)
         }
         System.gc()
@@ -493,7 +514,7 @@ object Rp2040Main {
       epdScrollOffsetLines = 0
       system.reset()
       EscapementRoutine.initializeTable(system.memory)
-      if (!system.rightTape.isTapeLoaded && defaultTapeRef != null) {
+      if (defaultTapeRef != null) {
         system.loadTape(Device.RightTape, defaultTapeRef)
       }
       System.gc()
@@ -661,12 +682,13 @@ object Rp2040Main {
 
     try {
       updateOledDisplay(system, consoleState)
+      lastOledUpdateUs = PicoSdk.pico_time_us_32()
       var lastPrintCount = system.translator.printCount
       var lastRightHead = system.rightTape.headPosition
       var lastLeftHead = system.leftTape.headPosition
       val hasBreakpoints = consoleState.breakpoints.nonEmpty
       val targetPeriodUs = delayMs.toInt * 1000
-      var lastPrintDeadlineUs = PicoSdk.pico_time_us_32()
+      var lastPrintDeadlineUs = lastOledUpdateUs
 
       while (res == StepResult.Normal && !hitBreakpoint && !interrupted && steps < 500000) {
         val prevPsar = system.memory.psarRaw
@@ -684,7 +706,8 @@ object Rp2040Main {
           updateHardwareLamps(system, isRunningLoop = true, mtPulse = tapeMoved)
           if (PicoSdk.pico_oled_is_present()) {
             val nowUs = PicoSdk.pico_time_us_32()
-            if (nowUs - lastOledUpdateUs >= 40000) {
+            val dtUs = nowUs - lastOledUpdateUs
+            if (dtUs >= 40000 || dtUs < 0) {
               lastOledUpdateUs = nowUs
               updateOledDisplay(system, consoleState)
             }
