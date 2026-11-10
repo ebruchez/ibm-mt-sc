@@ -39,6 +39,12 @@ void pico_oled_flush(const uint8_t *frame_buf);
 void pico_oled_set_flip(bool flip180);
 
 /**
+ * Turns the SSD1306 OLED panel and internal charge pump on (`on = true`) or puts it into
+ * zero-burn-in low-power sleep (`on = false`). No-op if the OLED is absent or already in the requested state.
+ */
+void pico_oled_set_power(bool on);
+
+/**
  * Returns diagnostic counters:
  * - index 0: 1 if OLED is present, 0 if absent
  * - index 1: total successful frame uploads

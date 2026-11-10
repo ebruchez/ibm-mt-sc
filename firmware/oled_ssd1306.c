@@ -44,6 +44,7 @@
 
 static bool oled_bus_initialized = false;
 static bool oled_present = false;
+static bool oled_awake = false;
 static bool oled_flip180 = false;
 static uint32_t oled_diag_frames = 0;
 static int32_t oled_diag_last_rc = 0;
@@ -124,14 +125,45 @@ void pico_oled_init(void) {
 
     if (!oled_write_cmd_list(init_cmds, sizeof(init_cmds))) {
         oled_present = false;
+        oled_awake = false;
         return;
     }
 
     oled_present = true;
+    oled_awake = true;
 }
 
 bool pico_oled_is_present(void) {
     return oled_present;
+}
+
+void pico_oled_set_power(bool on) {
+    if (!oled_present || oled_awake == on) {
+        return;
+    }
+    if (on) {
+        const uint8_t wake_cmds[3] = {
+            SSD1306_CHARGEPUMP, 0x14,
+            SSD1306_DISPLAYON
+        };
+        if (!oled_write_cmd_list(wake_cmds, sizeof(wake_cmds))) {
+            oled_present = false;
+            oled_awake = false;
+            return;
+        }
+        oled_awake = true;
+    } else {
+        const uint8_t sleep_cmds[3] = {
+            SSD1306_DISPLAYOFF,
+            SSD1306_CHARGEPUMP, 0x10
+        };
+        if (!oled_write_cmd_list(sleep_cmds, sizeof(sleep_cmds))) {
+            oled_present = false;
+            oled_awake = false;
+            return;
+        }
+        oled_awake = false;
+    }
 }
 
 void pico_oled_set_flip(bool flip180) {
@@ -145,12 +177,19 @@ void pico_oled_set_flip(bool flip180) {
     };
     if (!oled_write_cmd_list(flip_cmds, sizeof(flip_cmds))) {
         oled_present = false;
+        oled_awake = false;
     }
 }
 
 void pico_oled_flush(const uint8_t *frame_buf) {
     if (!oled_present || frame_buf == NULL) {
         return;
+    }
+    if (!oled_awake) {
+        pico_oled_set_power(true);
+        if (!oled_present) {
+            return;
+        }
     }
 
     const uint8_t win_cmds[6] = {

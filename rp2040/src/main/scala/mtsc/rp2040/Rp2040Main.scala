@@ -44,6 +44,7 @@ object PicoSdk {
   def pico_oled_is_present(): CBool = extern
   def pico_oled_flush(frameBuf: Ptr[Byte]): Unit = extern
   def pico_oled_set_flip(flip180: CBool): Unit = extern
+  def pico_oled_set_power(on: CBool): Unit = extern
   def pico_oled_get_diag(index: CInt): CInt = extern
 }
 
@@ -109,8 +110,13 @@ object Rp2040Main {
   private val oledFrameBuf: Array[Byte] = new Array[Byte](OledView.BufferBytes)
   private var oledFlip180: Boolean = false
   private var lastOledUpdateUs: Int = 0
+  private var oledLastActivityUs: Int = 0
+  private var oledAsleep: Boolean = false
+  private final val OledSleepTimeoutUs: Int = 30000000 // 30 seconds of inactivity before blanking OLED
 
   private def updateOledDisplay(system: MtscSystem, consoleState: CeConsoleState): Unit = {
+    oledLastActivityUs = PicoSdk.pico_time_us_32()
+    oledAsleep = false
     if (!PicoSdk.pico_oled_is_present()) {
       return
     }
@@ -352,12 +358,20 @@ object Rp2040Main {
 
         if (needsRender) {
           PicoSdk.pico_set_boot_stage(13)
-          updateOledDisplay(system, consoleState)
           CeConsoleView.render(terminal, system.cpu, consoleState)
           PicoSdk.pico_set_boot_stage(14)
           flushTerminal(terminal, forceFull = forceFullRender)
           needsRender = false
           forceFullRender = false
+        }
+
+        // Put OLED display into sleep after 30s without composition, button, or command activity
+        if (!oledAsleep && PicoSdk.pico_oled_is_present()) {
+          val idleUs = PicoSdk.pico_time_us_32() - oledLastActivityUs
+          if (idleUs >= OledSleepTimeoutUs || idleUs < 0) {
+            oledAsleep = true
+            PicoSdk.pico_oled_set_power(false)
+          }
         }
 
         PicoSdk.pico_set_boot_stage(15)
@@ -646,6 +660,7 @@ object Rp2040Main {
     }
 
     try {
+      updateOledDisplay(system, consoleState)
       var lastPrintCount = system.translator.printCount
       var lastRightHead = system.rightTape.headPosition
       var lastLeftHead = system.leftTape.headPosition
