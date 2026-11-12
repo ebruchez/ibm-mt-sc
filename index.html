@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IBM MT/SC (Model 6310/6320) — Interactive Console &amp; Composer Emulator</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="mtsc-app" class="app-shell">
+
+    <!-- Top Control Bar -->
+    <header class="top-bar">
+      <div class="brand-block">
+        <span class="ibm-badge">IBM</span>
+        <div>
+          <h1>Magnetic Tape “Selectric” Composer <span class="model-tag">6310 / 6320 CCU</span></h1>
+          <p id="console-mode-badge" class="mode-subtitle">OPERATOR MODE (FACEPLATE INSTALLED)</p>
+        </div>
+      </div>
+
+      <div class="toolbar-actions">
+        <button id="btn-toggle-faceplate" class="btn-faceplate" title="Shortcut: [F]">
+          Unlatch Operator Faceplate (Reveal CE Console)
+        </button>
+
+        <div class="control-group">
+          <button id="btn-run-toggle" class="btn-primary">Run Composition</button>
+          <button id="btn-step" class="btn-secondary" title="Shortcut: [S]">Step</button>
+          <button id="btn-setup-seq" class="btn-secondary">Setup Prompt</button>
+        </div>
+
+        <div class="control-group speed-group" role="group" aria-label="Pacing Speed">
+          <button id="speed-1x" class="btn-chip active" title="14 cps authentic speed">1x (14 cps)</button>
+          <button id="speed-2x" class="btn-chip" title="28 cps">2x</button>
+          <button id="speed-5x" class="btn-chip" title="70 cps">5x</button>
+          <button id="speed-max" class="btn-chip" title="Instant">MAX</button>
+        </div>
+
+        <select id="select-program" class="program-select" aria-label="Select Microprogram">
+          <option value="0">0: Continuous Document Composition (Justified)</option>
+          <option value="1">1: End-to-End Single Line Composition</option>
+          <option value="2">2: Proportional Escapement &amp; Deficit Divide</option>
+          <option value="3">3: 16-Bit Software Math Subroutines</option>
+          <option value="4">4: Tape Bootstrap Loader</option>
+          <option value="5">5: ALU &amp; SCAT Diagnostic</option>
+          <option value="6">6: Branch &amp; Bit Control Diagnostic</option>
+        </select>
+
+        <button id="btn-engine-toggle" class="btn-chip active" title="Toggle CCU Execution Engine between Gate-Level ILD (0303–0312) and Behavioral ISA">Engine: ILD</button>
+        <button id="btn-sound-toggle" class="btn-chip">Sound: ON</button>
+      </div>
+    </header>
+
+    <!-- Status Banner -->
+    <div id="status-banner" class="status-banner" role="status" aria-live="polite">
+      Ready. Click Run Composition or press Unlatch Operator Faceplate to inspect the CE Console underneath.
+    </div>
+
+    <!-- Main Hardware Console Unit (Dual-Layer Physical Unit) -->
+    <section class="console-section" aria-label="MT/SC Console Unit">
+      <div id="console-unit" class="console-unit">
+
+        <!-- Exposed Customer Engineer (CE) Top Row (Visible when Faceplate is Removed) -->
+        <div class="ce-top-bay">
+          <div class="ce-top-buttons">
+            <div class="ce-btn-col">
+              <span class="ce-metal-label">Step</span>
+              <button id="ce-btn-step" class="ce-plunger-btn" title="Single-step clock"></button>
+            </div>
+            <div class="ce-display-bracket">
+              <div class="ce-bracket-header">
+                <span>4</span><span class="bracket-line"></span>
+                <span>3</span><span class="bracket-line">— Display —</span>
+                <span>2</span><span class="bracket-line"></span>
+                <span>1</span>
+              </div>
+              <div class="ce-display-btns">
+                <button id="ce-btn-dply-4" class="ce-plunger-btn" title="Display 4: Rdy, Mpx, QB 4..1, PB 4..1"></button>
+                <button id="ce-btn-dply-3" class="ce-plunger-btn" title="Display 3: Inh, -Low, Eq, OP 7..1"></button>
+                <button id="ce-btn-dply-2" class="ce-plunger-btn" title="Display 2: EOT, Busy, O 8..1"></button>
+                <button id="ce-btn-dply-1" class="ce-plunger-btn active" title="Display 1: Memory Address Y 11..1"></button>
+              </div>
+            </div>
+            <div class="ce-btn-col">
+              <span class="ce-metal-label">Clear</span>
+              <button id="ce-btn-clear" class="ce-plunger-btn" title="Clear register / Reset indicators"></button>
+            </div>
+            <div class="ce-btn-col">
+              <span class="ce-metal-label">Clock</span>
+              <button id="ce-btn-dply-0" class="ce-plunger-btn" title="Default Clock/Test row (ID..IA, B, A)"></button>
+            </div>
+          </div>
+
+          <!-- Silk-screened INITIAL LOADER Table on Right Flange -->
+          <div class="ce-initial-loader">
+            <div class="loader-header">
+              <span>INITIAL LOADER</span>
+              <div class="loader-actions">
+                <button id="ce-btn-zero-ram" type="button" class="btn-key-loader btn-zero-ram" title="Zero all 2,048 bytes of Core Memory (0x000..0x7FF) for a cold boot">Zero RAM</button>
+                <button id="ce-btn-init-loader-left" type="button" class="btn-key-loader" title="Auto-key bytes 40..47 for Left Station (m=1) into Core Memory">Key Left</button>
+                <button id="ce-btn-init-loader" type="button" class="btn-key-loader" title="Auto-key bytes 40..47 for Right Station (m=0) into Core Memory">Key Right</button>
+              </div>
+            </div>
+            <table class="loader-table">
+              <tbody>
+                <tr><td>40</td><td>0000</td><td>0000</td></tr>
+                <tr><td>41</td><td>0000</td><td>0000</td></tr>
+                <tr><td>42</td><td>p000</td><td>0010</td></tr>
+                <tr><td>43</td><td>0001</td><td>100m</td></tr>
+                <tr><td>44</td><td>0000</td><td>0011</td></tr>
+                <tr><td>45</td><td>0111</td><td>1010</td></tr>
+                <tr><td>46</td><td>0010</td><td>1010</td></tr>
+                <tr><td>47</td><td>0000</td><td>0000</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Core Console Body (Shared Power Rocker + 11 Lamps + 12 Keys, with Removable Operator Faceplate Overlay) -->
+        <div class="console-core-row">
+
+          <!-- Left: Red 3-Position Power Rocker Switch -->
+          <div class="power-switch-assembly">
+            <div class="power-title">POWER</div>
+            <div class="power-rocker-group">
+              <div class="power-labels">
+                <span>RESET</span>
+                <span>ON</span>
+                <span>OFF</span>
+              </div>
+              <div class="power-rocker-housing">
+                <button id="pwr-reset" class="rocker-seg seg-top" title="Momentary Master Reset"></button>
+                <button id="pwr-on" class="rocker-seg seg-mid active" title="Power ON"></button>
+                <button id="pwr-off" class="rocker-seg seg-bot" title="Power OFF"></button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: 11 Indicator Lamps + Legends + 12-Key Keyboard -->
+          <div class="lamps-and-keys-bay">
+
+            <!-- OPERATOR FACEPLATE TOP WHITE LEGENDS (Visible when Faceplate is ON) -->
+            <div class="operator-overlay op-top-legends">
+              <div class="op-col"></div>
+              <div class="op-col"></div>
+              <div class="op-col"></div>
+              <div class="op-col"></div>
+              <div class="op-col">CLEAR</div>
+              <div class="op-col">MERGE</div>
+              <div class="op-col">MODE</div>
+              <div class="op-col">LINE<br>COUNT</div>
+              <div class="op-col">MEASURE</div>
+              <div class="op-col">LINE<br>INDENT</div>
+              <div class="op-col">PARA<br>INDENT</div>
+            </div>
+
+            <!-- CE UPPER BEVEL LIP LABELS (Visible when Faceplate is OFF) -->
+            <div id="ce-row-lip" class="ce-underlay ce-lip-row">
+              <div class="ce-col">Reset</div>
+              <div class="ce-col">Test 4</div>
+              <div class="ce-col nibble-sep">Test 3</div>
+              <div class="ce-col">Test 2</div>
+              <div class="ce-col">Test 1</div>
+              <div class="ce-col">ID</div>
+              <div class="ce-col nibble-sep">IC</div>
+              <div class="ce-col">IB</div>
+              <div class="ce-col">IA</div>
+              <div class="ce-col ce-col-bit-ctr">
+                <span class="ce-bit-ctr-title">Bit Ctr</span>
+                <div class="ce-bit-ctr-subs">
+                  <span class="ce-sub-col">B</span>
+                  <span class="ce-sub-col">A</span>
+                </div>
+              </div>
+              <div class="ce-row-tag">Clock</div>
+            </div>
+
+            <!-- THE 11 PHYSICAL INDICATOR LAMPS (Shared Hardware across Operator & CE views) -->
+            <div class="lamp-strip-housing">
+              <button id="lamp-1"  class="console-lamp white-lens" title="Lamp 1: RESET / HYPHEN (CE: Reset / Y 11)"></button>
+              <button id="lamp-2"  class="console-lamp white-lens" title="Lamp 2: EOT / TYPE (CE: Test 4 / Rdy / Inh / EOT / Y 10)"></button>
+              <button id="lamp-3"  class="console-lamp white-lens" title="Lamp 3: (CE: Test 3 / Mpx / -Low / Busy / Y 9)"></button>
+              <button id="lamp-4"  class="console-lamp red-lens"   title="Lamp 4 (Red): SETUP (CE: Test 2 / QB 4 / Eq / O 8 / Y 8)"></button>
+              <button id="lamp-5"  class="console-lamp white-lens" title="Lamp 5: CLEAR / LEADER SPACE (CE: Test 1 / QB 3 / OP 7 / O 7 / Y 7)"></button>
+              <button id="lamp-6"  class="console-lamp white-lens" title="Lamp 6: MERGE / MIN IW (CE: ID / QB 2 / OP 6 / O 6 / Y 6)"></button>
+              <button id="lamp-7"  class="console-lamp white-lens" title="Lamp 7: MODE / MAX IW (CE: IC / QB 1 / OP 5 / O 5 / Y 5)"></button>
+              <button id="lamp-8"  class="console-lamp white-lens" title="Lamp 8: LINE COUNT / MAX QUAD (CE: IB / PB 4 / OP 4 / O 4 / Y 4)"></button>
+              <button id="lamp-9"  class="console-lamp white-lens" title="Lamp 9: MEASURE / MIN HYPHEN (CE: IA / PB 3 / OP 3 / O 3 / Y 3)"></button>
+              <button id="lamp-10" class="console-lamp white-lens" title="Lamp 10: LINE INDENT / DEAD KEY (CE: Bit Ctr B / PB 2 / OP 2 / O 2 / Y 2)"></button>
+              <button id="lamp-11" class="console-lamp white-lens" title="Lamp 11: PARA INDENT (CE: Bit Ctr A / PB 1 / OP 1 / O 1 / Y 1)"></button>
+            </div>
+
+            <!-- OPERATOR FACEPLATE BOTTOM LEGENDS (Visible when Faceplate is ON) -->
+            <div class="operator-overlay op-bottom-legends">
+              <div class="op-col white-sub"><span>RESET</span><span class="sub-lower">HYPHEN</span></div>
+              <div class="op-col white-sub"><span>EOT</span><span class="sub-lower">TYPE</span></div>
+              <div class="op-col"></div>
+              <div class="op-col red-sub">SETUP</div>
+              <div class="op-col red-sub">LEADER<br>SPACE</div>
+              <div class="op-col red-sub">MIN IW</div>
+              <div class="op-col red-sub">MAX IW</div>
+              <div class="op-col red-sub">MAX QUAD</div>
+              <div class="op-col red-sub">MIN<br>HYPHEN</div>
+              <div class="op-col red-sub">DEAD<br>KEY</div>
+              <div class="op-col"></div>
+            </div>
+
+            <!-- CE 4-ROW SILK-SCREENED DISPLAY MATRIX (Visible when Faceplate is OFF) -->
+            <div class="ce-underlay ce-matrix-grid">
+              <!-- Display 4 Row -->
+              <div id="ce-row-dply-4" class="ce-matrix-row">
+                <div class="ce-col"></div>
+                <div class="ce-col">Rdy</div>
+                <div class="ce-col nibble-sep">Mpx</div>
+                <div class="ce-col">QB 4</div>
+                <div class="ce-col">QB 3</div>
+                <div class="ce-col">QB 2</div>
+                <div class="ce-col nibble-sep">QB 1</div>
+                <div class="ce-col">PB 4</div>
+                <div class="ce-col">PB 3</div>
+                <div class="ce-col">PB 2</div>
+                <div class="ce-col">PB 1</div>
+                <div class="ce-row-tag">Display 4</div>
+              </div>
+              <!-- Display 3 Row (with circular chassis holes under Lamp 2/Test 4 and Lamp 9/IA) -->
+              <div id="ce-row-dply-3" class="ce-matrix-row">
+                <div class="ce-col"></div>
+                <div class="ce-col hole-shifted"><span class="shifted-lbl">Inh</span><span class="chassis-hole"></span></div>
+                <div class="ce-col nibble-sep">-Low</div>
+                <div class="ce-col">Eq</div>
+                <div class="ce-col">OP 7</div>
+                <div class="ce-col">OP 6</div>
+                <div class="ce-col nibble-sep">OP 5</div>
+                <div class="ce-col">OP 4</div>
+                <div class="ce-col hole-shifted"><span class="shifted-lbl">OP 3</span><span class="chassis-hole"></span></div>
+                <div class="ce-col">OP 2</div>
+                <div class="ce-col">OP 1</div>
+                <div class="ce-row-tag">Display 3</div>
+              </div>
+              <!-- Display 2 Row -->
+              <div id="ce-row-dply-2" class="ce-matrix-row">
+                <div class="ce-col"></div>
+                <div class="ce-col hole-shifted"><span class="shifted-lbl">EOT</span></div>
+                <div class="ce-col nibble-sep">Busy</div>
+                <div class="ce-col">O 8</div>
+                <div class="ce-col">O 7</div>
+                <div class="ce-col">O 6</div>
+                <div class="ce-col nibble-sep">O 5</div>
+                <div class="ce-col">O 4</div>
+                <div class="ce-col hole-shifted"><span class="shifted-lbl">O 3</span></div>
+                <div class="ce-col">O 2</div>
+                <div class="ce-col">O 1</div>
+                <div class="ce-row-tag">Display 2</div>
+              </div>
+              <!-- Display 1 Row (Default active) -->
+              <div id="ce-row-dply-1" class="ce-matrix-row active-row">
+                <div class="ce-col">Y 11</div>
+                <div class="ce-col">Y 10</div>
+                <div class="ce-col nibble-sep">Y 9</div>
+                <div class="ce-col">Y 8</div>
+                <div class="ce-col">Y 7</div>
+                <div class="ce-col">Y 6</div>
+                <div class="ce-col nibble-sep">Y 5</div>
+                <div class="ce-col">Y 4</div>
+                <div class="ce-col">Y 3</div>
+                <div class="ce-col">Y 2</div>
+                <div class="ce-col">Y 1</div>
+                <div class="ce-row-tag">Display 1</div>
+              </div>
+            </div>
+
+            <!-- THE 12-KEY SCULPTED CONSOLE KEYBOARD -->
+            <div class="keyboard-strip">
+              <div class="key-unit">
+                <button id="key-start" class="sculpted-key key-start">START</button>
+                <span class="key-sub-label"></span>
+              </div>
+              <div class="key-unit">
+                <button id="key-0" class="sculpted-key">0</button>
+                <span class="key-sub-label">TAPE</span>
+              </div>
+              <div class="key-unit">
+                <button id="key-1" class="sculpted-key">1</button>
+                <span class="key-sub-label">NO</span>
+              </div>
+              <div class="key-unit">
+                <button id="key-2" class="sculpted-key">2</button>
+                <span class="key-sub-label">YES</span>
+              </div>
+              <div class="key-unit">
+                <button id="key-3" class="sculpted-key">3</button>
+                <span class="key-sub-label"></span>
+              </div>
+              <div class="key-unit">
+                <button id="key-4" class="sculpted-key">4</button>
+                <span class="key-sub-label">J</span>
+              </div>
+              <div class="key-unit">
+                <button id="key-5" class="sculpted-key">5</button>
+                <span class="key-sub-label">L</span>
+              </div>
+              <div class="key-unit">
+                <button id="key-6" class="sculpted-key">6</button>
+                <span class="key-sub-label">C</span>
+              </div>
+              <div class="key-unit">
+                <button id="key-7" class="sculpted-key">7</button>
+                <span class="key-sub-label">R</span>
+              </div>
+              <div class="key-unit">
+                <button id="key-8" class="sculpted-key">8</button>
+                <span class="key-sub-label">D</span>
+              </div>
+              <div class="key-unit">
+                <button id="key-9" class="sculpted-key">9</button>
+                <span class="key-sub-label"></span>
+              </div>
+              <div class="key-unit">
+                <button id="key-r" class="sculpted-key">R</button>
+                <span class="key-sub-label">LINE<br>STOP</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Exposed CE Bottom Slide Switches (Visible when Faceplate is Removed) -->
+        <div class="ce-bottom-sliders">
+          <!-- Left 5-Position Slide Switch: Bit / Word / P.S. / Jump / Auto -->
+          <div class="ce-slider-unit">
+            <div class="slider-slot">
+              <div id="slider-left-thumb" class="slider-knob" style="--pos: 4"></div>
+            </div>
+            <div class="slider-positions">
+              <button id="slider-left-0" class="slider-pos-btn pos-lower">Bit</button>
+              <button id="slider-left-1" class="slider-pos-btn pos-upper">Word</button>
+              <button id="slider-left-2" class="slider-pos-btn pos-lower">P.S.</button>
+              <button id="slider-left-3" class="slider-pos-btn pos-upper">Jump</button>
+              <button id="slider-left-4" class="slider-pos-btn pos-lower active">Auto</button>
+            </div>
+          </div>
+
+          <div class="ce-chassis-scrawl">C.E. Test</div>
+
+          <!-- Right 5-Position Slide Switch: Proc / Edit / Addr / Data / Prog -->
+          <div class="ce-slider-unit">
+            <div class="slider-slot">
+              <div id="slider-right-thumb" class="slider-knob" style="--pos: 0"></div>
+            </div>
+            <div class="slider-positions">
+              <button id="slider-right-0" class="slider-pos-btn pos-lower active">Proc</button>
+              <button id="slider-right-1" class="slider-pos-btn pos-upper">Edit</button>
+              <button id="slider-right-2" class="slider-pos-btn pos-lower">Addr</button>
+              <button id="slider-right-3" class="slider-pos-btn pos-upper">Data</button>
+              <button id="slider-right-4" class="slider-pos-btn pos-lower">Prog</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live Operator Setup Summary Strip -->
+        <div class="operator-telemetry-strip">
+          <div class="telem-pills">
+            <span><strong>MODE:</strong> <em id="op-val-mode">J (Justified)</em></span>
+            <span><strong>MEASURE:</strong> <em id="op-val-measure">252 u</em></span>
+            <span><strong>LINE COUNT:</strong> <em id="op-val-lines">60</em></span>
+            <span><strong>INDENT:</strong> <em id="op-val-indent">L:0u / P:18u</em></span>
+            <span><strong>SPACES:</strong> <em id="op-val-iw">4..16 u (Quad 36u)</em></span>
+          </div>
+          <div id="op-active-prompt" class="telem-prompt">
+            Click any lamp label or press [Setup Prompt] to configure job parameters
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Middle Workbench: Left = Tape Reader Console, Right = Selectric Composer Galley Proof -->
+    <main class="workbench-grid">
+
+      <!-- Left Column: Magnetic Tape Transport Console -->
+      <section class="tape-console-card" aria-label="Magnetic Tape Reader Console">
+        <div class="card-header">
+          <h2>Magnetic Tape Reader Console <span class="sub-tag">Model 6310</span></h2>
+          <span id="tape-cover-status" class="cover-pin-badge">COVER PIN LOCKED</span>
+        </div>
+
+        <!-- The 2x4 Square Cream Pushbuttons -->
+        <div class="tape-buttons-chassis">
+          <div class="tape-btn-row">
+            <button id="tape-btn-reread" class="tape-square-btn">REREAD</button>
+            <button id="tape-btn-skip" class="tape-square-btn">SKIP</button>
+            <button id="tape-btn-search" class="tape-square-btn">SEARCH</button>
+            <button id="tape-btn-cover-unlock" class="tape-square-btn">COVER<br>UNLOCK</button>
+          </div>
+          <div class="tape-btn-row">
+            <button id="tape-btn-unload-left" class="tape-square-btn">UNLOAD<br>LEFT</button>
+            <button id="tape-btn-load-left" class="tape-square-btn">LOAD<br>LEFT</button>
+            <button id="tape-btn-unload-right" class="tape-square-btn">UNLOAD<br>RIGHT</button>
+            <button id="tape-btn-load-right" class="tape-square-btn lit-green">LOAD<br>RIGHT</button>
+          </div>
+        </div>
+
+        <!-- Station Telemetry -->
+        <div class="tape-stations-info">
+          <div class="station-box" id="station-box-left">
+            <div class="station-box-top">
+              <span class="station-lbl">LEFT STATION (Merge / Alt)</span>
+              <div class="station-mini-group">
+                <button id="btn-quick-prog-left" type="button" class="station-mini-btn station-mini-prog" title="Mount bootable binary Factory Program Tape on Left Station">Program<span class="visually-hidden"> (Left Station)</span></button>
+                <button id="btn-quick-sample-left" type="button" class="station-mini-btn" title="Mount authentic sample revision tape on Left Station">Sample<span class="visually-hidden"> (Left Station)</span></button>
+              </div>
+            </div>
+            <span id="tape-left-status" class="station-val">No Cartridge</span>
+          </div>
+          <div class="station-box" id="station-box-right">
+            <div class="station-box-top">
+              <span class="station-lbl">RIGHT STATION (Primary Input)</span>
+              <div class="station-mini-group">
+                <button id="btn-quick-prog-right" type="button" class="station-mini-btn station-mini-prog" title="Mount bootable binary Factory Program Tape on Right Station">Program<span class="visually-hidden"> (Right Station)</span></button>
+                <button id="btn-quick-sample-right" type="button" class="station-mini-btn" title="Mount authentic sample manuscript tape on Right Station">Sample<span class="visually-hidden"> (Right Station)</span></button>
+              </div>
+            </div>
+            <span id="tape-right-status" class="station-val">Historical MT Tape (LOADED)</span>
+          </div>
+        </div>
+
+        <!-- ILD 0301–0302 Magnetic Tape Counter, Data Latches, 3-Group Parity & Solenoid Strip -->
+        <div id="ild-mt-strip" class="ild-translator-strip" aria-label="ILD 0301-0302 Magnetic Tape Hardware Telemetry">
+          <div class="ild-tsltr-group">
+            <span class="ild-tsltr-lbl" title="ILD 0302 (AA191/AA192): 5-Bit Magnetic Tape Counter (MT CTR A..E) driven by MPS A &amp; MPS B">ILD 0302 CTR:</span>
+            <div class="ild-mag-pills">
+              <span id="ild-mt-ctr-a" class="ild-sig-pill" title="MT Counter A (AA192)">A</span>
+              <span id="ild-mt-ctr-b" class="ild-sig-pill" title="MT Counter B (AA192)">B</span>
+              <span id="ild-mt-ctr-c" class="ild-sig-pill" title="MT Counter C (AA192)">C</span>
+              <span id="ild-mt-ctr-d" class="ild-sig-pill" title="MT Counter D (AA192)">D</span>
+              <span id="ild-mt-ctr-e" class="ild-sig-pill" title="MT Counter E (AA191)">E</span>
+            </div>
+            <span id="ild-mt-ctr-dec" class="ild-byte-readout" title="Decoded MT Counter State (Count 0..10, 13 Unload, 14 Search, 15 Load)">CT 0 (00010)</span>
+          </div>
+          <div class="ild-tsltr-group">
+            <span class="ild-tsltr-lbl" title="ILD 0302 (AA211): 9-Bit Magnetic Tape Data Latches (DL 9..1)">DATA LTH 9..1:</span>
+            <div class="ild-mag-pills">
+              <span id="ild-mt-dl-9" class="ild-sig-pill" title="Data Latch 9 (Count 8: Track CK / Parity Check Only)">9:CK</span>
+              <span id="ild-mt-dl-8" class="ild-sig-pill" title="Data Latch 8 (Count 5: Track SCH -> MT BIT 8)">8:SCH</span>
+              <span id="ild-mt-dl-7" class="ild-sig-pill" title="Data Latch 7 (Count 9: Track SHIFT -> MT BIT 7)">7:SH</span>
+              <span id="ild-mt-dl-6" class="ild-sig-pill" title="Data Latch 6 (Count 7: Track T2 -> MT BIT 4)">6:T2</span>
+              <span id="ild-mt-dl-5" class="ild-sig-pill" title="Data Latch 5 (Count 6: Track T1 -> MT BIT 3)">5:T1</span>
+              <span id="ild-mt-dl-4" class="ild-sig-pill" title="Data Latch 4 (Count 4: Track R5 -> MT BIT 1)">4:R5</span>
+              <span id="ild-mt-dl-3" class="ild-sig-pill" title="Data Latch 3 (Count 3: Track R2A -> MT BIT 6)">3:R2A</span>
+              <span id="ild-mt-dl-2" class="ild-sig-pill" title="Data Latch 2 (Count 2: Track R2 -> MT BIT 2)">2:R2</span>
+              <span id="ild-mt-dl-1" class="ild-sig-pill" title="Data Latch 1 (Count 1: Track R1 -> MT BIT 5)">1:R1</span>
+            </div>
+            <span id="ild-mt-byte" class="ild-byte-readout" title="8-Bit Character Decoded by MT BITS (AA211)">MT: 0x00</span>
+          </div>
+          <div class="ild-tsltr-group">
+            <span class="ild-tsltr-lbl" title="ILD 0301–0302 (AA191..AA212): 3-Group Odd Parity (X/Y/Z -> ODD) &amp; Transport Latches">PRTY / DECK:</span>
+            <span id="ild-mt-prty-x" class="ild-sig-pill" title="X Parity (DL 1^2^3, AA212)">X</span>
+            <span id="ild-mt-prty-y" class="ild-sig-pill" title="Y Parity (DL 4^5^6, AA212)">Y</span>
+            <span id="ild-mt-prty-z" class="ild-sig-pill" title="Z Parity (DL 7^8^9, AA212)">Z</span>
+            <span id="ild-mt-odd" class="ild-sig-pill" title="+ODD Parity (X^Y^Z | SKIP, AA212)">ODD</span>
+            <span id="ild-mt-char-rdy" class="ild-sig-pill" title="+CHARACTER READY (ILD 0311)">CHAR RDY</span>
+            <span id="ild-mt-sta" class="ild-sig-pill" title="Active Station Latch (STA RT / STA LF, AA202)">STA RT</span>
+            <span id="ild-mt-incr" class="ild-sig-pill" title="+INCREMENT Flip-Flop (AA191)">INCR</span>
+            <span id="ild-mt-rd" class="ild-sig-pill" title="+MT READ Flip-Flop (AA191)">MT RD</span>
+            <span id="ild-mt-sch" class="ild-sig-pill" title="+SEARCH / +TRF SCH STA (AA202)">SCH</span>
+            <span id="ild-mt-setlo" class="ild-sig-pill pill-warn" title="+MT SET LO Flip-Flop (AA193: set by SKIP, sets CCU +LOW LATCH at I-5)">SET LO</span>
+            <span id="ild-mt-err" class="ild-sig-pill pill-warn" title="+ERROR LIGHT (AA202: EOT/Unload or Even Parity at 10 Count)">ERR LT</span>
+          </div>
+        </div>
+
+        <!-- Custom Copy Tape Mounter (Dual Station) -->
+        <div class="custom-tape-box">
+          <div class="custom-tape-header">
+            <div class="custom-tape-title-row">
+              <label for="custom-tape-text">Mount Tape on Station:</label>
+              <div class="tape-station-pills" role="group" aria-label="Target Tape Station">
+                <button type="button" class="tape-pill-btn" id="pill-station-left" aria-pressed="false" title="Target Left Station (Merge / Revision Tape)">Left Station</button>
+                <button type="button" class="tape-pill-btn active" id="pill-station-right" aria-pressed="true" title="Target Right Station (Primary Input)">Right Station</button>
+              </div>
+            </div>
+            <div class="custom-tape-btns">
+              <button id="btn-mount-program-tape" type="button" class="btn-chip" title="Mount bootable 8-bit Factory Program Tape on selected station">Mount Program Tape</button>
+              <button id="btn-mount-sample-tape" type="button" class="btn-chip" title="Mount authentic sample text on selected station">Mount Sample</button>
+              <button id="btn-inject-parity" type="button" class="btn-chip" title="Corrupt current tape track on target station to test parity error halt">Inject Parity Fault</button>
+              <button id="btn-mount-custom-tape" type="button" class="btn-secondary">Mount &amp; Load Tape</button>
+            </div>
+          </div>
+          <textarea id="custom-tape-text" rows="3" placeholder="Type or paste any multi-paragraph text here and click 'Mount &amp; Load Tape' to watch the MT/SC justify and print it at 14 characters/sec..."></textarea>
+        </div>
+      </section>
+
+      <!-- Right Column: IBM Selectric Composer Galley Proof Sheet -->
+      <section class="galley-card" aria-label="Selectric Composer Galley Proof">
+        <div class="card-header">
+          <div>
+            <h2>IBM “Selectric” Composer — Camera-Ready Galley Proof</h2>
+            <p id="galley-meta" class="galley-meta">Lines: 0 • Printed Chars: 0 • Measure: 140 units (11p 8u)</p>
+          </div>
+          <button id="btn-clear-galley" class="btn-chip">Fresh Galley Sheet</button>
+        </div>
+
+        <!-- ILD 0311 Selectric Composer Translator Magnet & Clutch Telemetry Strip -->
+        <div id="ild-translator-strip" class="ild-translator-strip" aria-label="ILD 0311 Translator Magnet and Clutch Telemetry">
+          <div class="ild-tsltr-group">
+            <span class="ild-tsltr-lbl" title="ILD 0311 (AA181): 7 Selectric Composer Translator Select Magnets (TSLTR SEL MAG 7..1) and Output Register byte">ILD 0311 MAGS:</span>
+            <div class="ild-mag-pills">
+              <span id="ild-mag-7" class="ild-sig-pill" title="Translator Select Magnet 7 (Bit 6 / Weight 64)">M7</span>
+              <span id="ild-mag-6" class="ild-sig-pill" title="Translator Select Magnet 6 (Bit 5 / Weight 32)">M6</span>
+              <span id="ild-mag-5" class="ild-sig-pill" title="Translator Select Magnet 5 (Bit 4 / Weight 16)">M5</span>
+              <span id="ild-mag-4" class="ild-sig-pill" title="Translator Select Magnet 4 (Bit 3 / Weight 8)">M4</span>
+              <span id="ild-mag-3" class="ild-sig-pill" title="Translator Select Magnet 3 (Bit 2 / Weight 4 - Function)">M3</span>
+              <span id="ild-mag-2" class="ild-sig-pill" title="Translator Select Magnet 2 (Bit 1 / Weight 2)">M2</span>
+              <span id="ild-mag-1" class="ild-sig-pill" title="Translator Select Magnet 1 (Bit 0 / Weight 1)">M1</span>
+            </div>
+            <span id="ild-tsltr-out-byte" class="ild-byte-readout" title="8-bit Output Register (OUT 8..1)">OUT: 0x00</span>
+          </div>
+          <div class="ild-tsltr-group">
+            <span class="ild-tsltr-lbl">DECODE:</span>
+            <span id="ild-tsltr-ord" class="ild-sig-pill" title="+ORDINARY CHARACTER (AA171)">ORD CHAR</span>
+            <span id="ild-tsltr-fn" class="ild-sig-pill" title="+FUNCTION (AA181: OUT 3 set)">FN</span>
+            <span id="ild-tsltr-tabcrn" class="ild-sig-pill" title="+TAB + CARRIAGE RETURN (AA181)">TAB+CRN</span>
+            <span id="ild-tsltr-dummy" class="ild-sig-pill" title="+DUMMY / +DMY FN (AA172)">DUMMY</span>
+            <span id="ild-tsltr-halt" class="ild-sig-pill pill-warn" title="-HALT (AA031: OUT 1..8 = 0xFF End-of-Multiplex)">HALT 0xFF</span>
+          </div>
+          <div class="ild-tsltr-group">
+            <span class="ild-tsltr-lbl">CLUTCH / IO:</span>
+            <span id="ild-tsltr-sel" class="ild-sig-pill" title="+TRANSLATOR SELECT (AA172)">TSLTR SEL</span>
+            <span id="ild-tsltr-cyccl" class="ild-sig-pill" title="+TRANSLATOR CYCLE CLUTCH (AA181)">CYC CL</span>
+            <span id="ild-tsltr-pr" class="ild-sig-pill" title="+TRANSLATOR PRINT (AA181)">PRINT</span>
+            <span id="ild-tsltr-mpx" class="ild-sig-pill" title="+MULTIPLEX (AA141)">MPX</span>
+            <span id="ild-tsltr-bsy" class="ild-sig-pill" title="+BUSY (AA142)">BSY</span>
+            <span id="ild-tsltr-rdy" class="ild-sig-pill" title="+READY (AA142)">RDY</span>
+          </div>
+        </div>
+
+        <div class="galley-roller-frame">
+          <div class="galley-paper-sheet">
+            <div class="galley-paper-header">
+              <div id="galley-ruler" class="galley-ruler">
+                <span>0p</span><span>3p</span><span>6p</span><span>9p</span><span>12p</span><span>15p</span><span>18p</span><span>21p</span>
+              </div>
+            </div>
+            <div id="galley-scroll-viewport" class="galley-scroll-viewport">
+              <div id="galley-lines" class="galley-lines"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Bottom Collapsible Customer Engineer (CE) Hardware Internals Drawer -->
+    <details class="ce-drawer" open>
+      <summary class="ce-drawer-summary">
+        <span>Customer Engineer (CE) CCU 6320 Hardware Internals</span>
+        <div class="ce-quick-regs">
+          <span>ENGINE: <strong id="ce-reg-engine">ILD</strong></span>
+          <span>PHASE: <strong id="ce-reg-phase">I-0 • B1-4</strong></span>
+          <span>PSAR: <strong id="ce-reg-psar">0x222</strong></span>
+          <span>MAL: <strong id="ce-reg-mal">0x222</strong></span>
+          <span>AW: <strong id="ce-reg-aw">0x0000</strong></span>
+          <span>BW: <strong id="ce-reg-bw">0x0000</strong></span>
+          <span>OUT: <strong id="ce-reg-out">0x00</strong></span>
+          <span>CYC: <strong id="ce-reg-cyc">0</strong></span>
+        </div>
+      </summary>
+
+      <div class="ce-subsections-stack">
+        <!-- Collapsible Section 1: Gate-Level ILD 0303-0312 Backplane, 4-Bit Serial ALU, 3D Core Matrix & CE Test Probe Inspector -->
+        <details id="ce-ild-inspector" class="ce-subsection" open>
+          <summary class="ce-subsection-summary">
+            <div class="ce-subsection-title">
+              <span>Gate-Level SLD Backplane &amp; 3D Coincident-Current Core Array Telemetry (ILDs 0303–0312)</span>
+              <span class="ild-sheet-tag">ILD 0303–0312</span>
+            </div>
+            <span id="ce-ild-step-hint" class="ce-ild-hint">Tip: Set Left CE Slide Switch to [Bit] or [Word] and click [Step] to trace individual nibble and instruction times</span>
+          </summary>
+
+          <div class="ce-subsection-body">
+            <div class="ce-ild-grid">
+              <!-- Card 1: Clock, Instruction Time & Permute (ILD 0303 - 0304) -->
+              <div class="ce-panel ild-card">
+                <h3>Clock, I-Time &amp; Permute <span class="ild-sheet-tag">ILD 0303–0304</span></h3>
+                <div class="ild-sub-label">Instruction Time Counter (INSN T 0..9) &amp; Next Steering: <strong id="ild-str-itime">STR → I-1</strong></div>
+                <div id="ild-itime-strip" class="ild-step-strip">
+                  <span id="ild-it-0" class="ild-step-cell active">I-0</span>
+                  <span id="ild-it-1" class="ild-step-cell">I-1</span>
+                  <span id="ild-it-2" class="ild-step-cell">I-2</span>
+                  <span id="ild-it-3" class="ild-step-cell">I-3</span>
+                  <span id="ild-it-4" class="ild-step-cell">I-4</span>
+                  <span id="ild-it-5" class="ild-step-cell">I-5</span>
+                  <span id="ild-it-6" class="ild-step-cell">I-6</span>
+                  <span id="ild-it-7" class="ild-step-cell">I-7</span>
+                  <span id="ild-it-8" class="ild-step-cell">I-8</span>
+                  <span id="ild-it-9" class="ild-step-cell">I-9</span>
+                </div>
+
+                <div class="ild-sub-label">Bit Time Counter (B1-4 .. B13-16) &amp; Cycle Phase</div>
+                <div class="ild-btime-row">
+                  <div id="ild-btime-strip" class="ild-step-strip">
+                    <span id="ild-bt-0" class="ild-step-cell active">B1-4</span>
+                    <span id="ild-bt-1" class="ild-step-cell">B5-8</span>
+                    <span id="ild-bt-2" class="ild-step-cell">B9-12</span>
+                    <span id="ild-bt-3" class="ild-step-cell">B13-16</span>
+                  </div>
+                  <div class="ild-phase-pills">
+                    <span id="ild-sig-ponly" class="ild-sig-pill" title="+P ONLY (33.3 µs P-Only vs 50.0 µs P&Q Bit Time)">P-ONLY</span>
+                    <span id="ild-sig-ptime" class="ild-sig-pill" title="+P TIME Latch">P-TIME</span>
+                    <span id="ild-sig-cenbt" class="ild-sig-pill" title="+CENTRAL BIT TIME Latch">CEN BT</span>
+                    <span id="ild-sig-twr" class="ild-sig-pill" title="+TIME WRITE Latch">TWR</span>
+                  </div>
+                </div>
+
+                <div class="ild-sub-label">Opcode Class &amp; Permute Matrix (OPL CDE 1..7)</div>
+                <div class="ild-pill-wrap">
+                  <span id="ild-sig-ath" class="ild-sig-pill" title="+ARITHMETIC OPERATION (OPL 1 + OPL 2)">ATH OP</span>
+                  <span id="ild-sig-imm" class="ild-sig-pill" title="+IMMEDIATE (OPL 1 & OPL 2)">IMM</span>
+                  <span id="ild-sig-jmp" class="ild-sig-pill" title="+JUMP">JMP</span>
+                  <span id="ild-sig-prgctl" class="ild-sig-pill" title="+PROGRAM CONTROL (SBP / RBP / TBP)">PRG CTL</span>
+                  <span id="ild-sig-in" class="ild-sig-pill" title="+INPUT">INPUT</span>
+                  <span id="ild-sig-out" class="ild-sig-pill" title="+OUTPUT">OUTPUT</span>
+                  <span id="ild-sig-prmt" class="ild-sig-pill pill-amber" title="+PERMUTE (Non-sequential I-Time transition)">PERMUTE</span>
+                  <span id="ild-sig-set9" class="ild-sig-pill pill-amber" title="+SET 9 (Jump I-Time Counter to I-9)">SET 9</span>
+                  <span id="ild-sig-tkn" class="ild-sig-pill pill-amber" title="+TAKEN (Branch / Incr Jump Taken)">TAKEN</span>
+                  <span id="ild-sig-edit" class="ild-sig-pill" title="+EDIT Mode Latch">EDIT</span>
+                </div>
+              </div>
+
+              <!-- Card 2: 4-Bit Serial Dataflow, Sense Amps & ALU (ILD 0305, 0308 - 0310) -->
+              <div class="ce-panel ild-card">
+                <h3>4-Bit Serial Dataflow &amp; ALU <span class="ild-sheet-tag">ILD 0305, 0308–0310</span></h3>
+                <div class="ild-dataflow-rows">
+                  <div class="ild-df-row">
+                    <span class="ild-df-name">P-BUFFER (PB 4..1)</span>
+                    <span id="ild-df-pbfr" class="ild-df-val">0000 (0x0)</span>
+                  </div>
+                  <div class="ild-df-row">
+                    <span class="ild-df-name">Q-BUFFER (QB 4..1)</span>
+                    <span id="ild-df-qbfr" class="ild-df-val">0000 (0x0)</span>
+                  </div>
+                  <div class="ild-df-row">
+                    <span class="ild-df-name">ACCUMULATOR (ACC 4..1)</span>
+                    <span id="ild-df-acc" class="ild-df-val">0000 (0x0)</span>
+                  </div>
+                  <div class="ild-df-row">
+                    <span class="ild-df-name">RIPPLE CARRY (CAR 4..1)</span>
+                    <span id="ild-df-car" class="ild-df-val">0000 • OVR: 0</span>
+                  </div>
+                  <div class="ild-df-row">
+                    <span class="ild-df-name">SENSE INHIBIT (4..1)</span>
+                    <span id="ild-df-inh-lines" class="ild-df-val">EV: 0000 • ODD: 0000</span>
+                  </div>
+                </div>
+
+                <div class="ild-sub-label">ALU, Bit Sampling &amp; Core Write Gates</div>
+                <div class="ild-pill-wrap">
+                  <span id="ild-sig-add" class="ild-sig-pill" title="+ADD (True = Add, False = Complement Subtract)">+ADD</span>
+                  <span id="ild-sig-sub" class="ild-sig-pill pill-amber" title="-ADD (1's Complement Borrow Subtractor active at I-9)">-ADD (SUB)</span>
+                  <span id="ild-sig-carover" class="ild-sig-pill" title="+CARRY OVER Latch">CAR OVER</span>
+                  <span id="ild-sig-acceqz" class="ild-sig-pill" title="+ACCUMULATOR EQUAL ZERO">ACC = 0</span>
+                  <span id="ild-sig-inhrd" class="ild-sig-pill" title="+INHIBIT READ (Clear destructive read)">INH RD</span>
+                  <span id="ild-sig-sambt" class="ild-sig-pill" title="+SAMPLED BIT TIME (Y11,Y10 = BT B,A)">SAM BT</span>
+                  <span id="ild-sig-sambpos" class="ild-sig-pill" title="+SAMPLED BIT POSITION">SAM B POS</span>
+                  <span id="ild-sig-wrpbfr" class="ild-sig-pill pill-green" title="+WRITE P BUFFER to Core Planes">WR P BFR</span>
+                  <span id="ild-sig-wracc" class="ild-sig-pill pill-green" title="+WRITE ACCUMULATOR to Core Planes">WR ACC</span>
+                </div>
+              </div>
+
+              <!-- Card 3: 3D 4-Plane Coincident-Current Core Matrix (ILD 0306 - 0307) -->
+              <div class="ce-panel ild-card">
+                <h3>3D 4-Plane Core Matrix <span class="ild-sheet-tag">ILD 0306–0307</span></h3>
+                <div class="ild-sub-label">Active Core Address Selection</div>
+                <div class="ild-pill-wrap">
+                  <span id="ild-sig-selpsar" class="ild-sig-pill" title="+SELECT PROGRAM STEP ADDRESS (Special Y-Drv 8)">SEL PSAR</span>
+                  <span id="ild-sig-selawd" class="ild-sig-pill" title="+SELECT A WORD (Special Y-Drv 7)">SEL A-WD</span>
+                  <span id="ild-sig-selbwd" class="ild-sig-pill" title="+SELECT B WORD (Special Y-Drv 6)">SEL B-WD</span>
+                  <span id="ild-sig-selmemup" class="ild-sig-pill" title="+SELECT MEMORY UPPER (Full 11-bit Y1..Y11 vs Regs Y2..Y6)">SEL MEM UP</span>
+                  <span id="ild-sig-rewo" class="ild-sig-pill" title="REWO: Read Even (Bits 1..4) / Write Odd">REWO (EV)</span>
+                  <span id="ild-sig-rowe" class="ild-sig-pill" title="ROWE: Read Odd (Bits 5..8) / Write Even">ROWE (ODD)</span>
+                </div>
+
+                <div class="ild-dataflow-rows">
+                  <div class="ild-df-row">
+                    <span class="ild-df-name">X COINCIDENT LINE</span>
+                    <span id="ild-core-x" class="ild-df-val">X-DRV 8 × X-SW 8 (X: 63)</span>
+                  </div>
+                  <div class="ild-df-row">
+                    <span class="ild-df-name">Y COINCIDENT LINE</span>
+                    <span id="ild-core-y" class="ild-df-val">Y-DRV 8 × Y-SW 3 (Y: 30)</span>
+                  </div>
+                  <div class="ild-df-row">
+                    <span class="ild-df-name">TARGET CORE LOC</span>
+                    <span id="ild-core-target" class="ild-df-val">SPEC: PSAR Low • Byte: 0x00</span>
+                  </div>
+                  <div class="ild-df-row">
+                    <span class="ild-df-name">4 CORE PLANES (P4..P1)</span>
+                    <span id="ild-core-planes" class="ild-df-val">EV: 0000 • ODD: 0000</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Card 4: CE Test 4..1 Backplane Logic Probe Patch Bay (ILD 0312) -->
+              <div class="ce-panel ild-card">
+                <div class="ild-probe-header">
+                  <h3>CE Test 4..1 Logic Probes <span class="ild-sheet-tag">ILD 0312</span></h3>
+                  <button id="btn-probe-view-clock" type="button" class="btn-chip" title="Expose CE Chassis and switch top display row to [Clock] (Display 0) so Lamps 2..5 show Test 4..1">Show on Lamps [Clock]</button>
+                </div>
+                <p class="ild-probe-desc">Assign any internal backplane signal to <strong>Test 4..1</strong> (Lamps 2–5 in <em>Clock</em> mode):</p>
+                <div class="ild-probe-list">
+                  <div class="ild-probe-row">
+                    <label for="ce-probe-select-4" class="ild-probe-lbl">Test 4 <span class="probe-lamp-tag">(Lamp 2)</span></label>
+                    <select id="ce-probe-select-4" class="ild-probe-select"></select>
+                    <span id="ce-probe-led-4" class="ild-probe-led" title="Live Test 4 signal level">0</span>
+                  </div>
+                  <div class="ild-probe-row">
+                    <label for="ce-probe-select-3" class="ild-probe-lbl">Test 3 <span class="probe-lamp-tag">(Lamp 3)</span></label>
+                    <select id="ce-probe-select-3" class="ild-probe-select"></select>
+                    <span id="ce-probe-led-3" class="ild-probe-led" title="Live Test 3 signal level">0</span>
+                  </div>
+                  <div class="ild-probe-row">
+                    <label for="ce-probe-select-2" class="ild-probe-lbl">Test 2 <span class="probe-lamp-tag">(Lamp 4)</span></label>
+                    <select id="ce-probe-select-2" class="ild-probe-select"></select>
+                    <span id="ce-probe-led-2" class="ild-probe-led" title="Live Test 2 signal level">0</span>
+                  </div>
+                  <div class="ild-probe-row">
+                    <label for="ce-probe-select-1" class="ild-probe-lbl">Test 1 <span class="probe-lamp-tag">(Lamp 5)</span></label>
+                    <select id="ce-probe-select-1" class="ild-probe-select"></select>
+                    <span id="ce-probe-led-1" class="ild-probe-led" title="Live Test 1 signal level">0</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <!-- Collapsible Section 2: Sub-Bit-Time (240 kHz Single-Shot SSA/SSB) Oscilloscope & Timing Diagram (MDM 0601–0602) -->
+        <details id="ce-ild-scope-panel" class="ce-subsection" open>
+          <summary class="ce-subsection-summary">
+            <div class="ce-subsection-title">
+              <span>240 kHz Single-Shot (SSA/SSB) Timing Diagram &amp; Oscilloscope</span>
+              <span class="ild-sheet-tag">MDM 0601–0602</span>
+            </div>
+            <span id="ild-scope-cursor-info" class="ild-scope-cursor-readout">Hover any waveform column to inspect sub-bit-time (2.08 µs) state</span>
+          </summary>
+
+          <div class="ce-subsection-body ild-scope-card">
+            <div class="ild-scope-toolbar">
+              <div class="ild-scope-controls">
+                <label class="ild-scope-ctl-lbl">Channels:
+                  <select id="ild-scope-preset" class="ild-probe-select ild-scope-select">
+                    <option value="0601" selected>MDM 0601: Basic Clock &amp; Timing (15 ch)</option>
+                    <option value="0602">MDM 0602: Core Memory &amp; Write Gates (15 ch)</option>
+                    <option value="probes">Clock Ref + CE Test 4..1 Probes (13 ch)</option>
+                  </select>
+                </label>
+                <label class="ild-scope-ctl-lbl">Span:
+                  <select id="ild-scope-span" class="ild-probe-select ild-scope-select">
+                    <option value="24">1 Bit Time (16–24 sub-phases • 33–50 µs)</option>
+                    <option value="96" selected>1 Word Time / 4 Bit Times (64–96 sub-phases)</option>
+                    <option value="192">2 Word Times / 8 Bit Times (128–192 sub-phases)</option>
+                  </select>
+                </label>
+                <button id="btn-scope-step-bit" type="button" class="btn-chip" title="Step 1 Bit Time (8 P-Only or 12 P&amp;Q single-shot pulses) and capture trace">+1 Bit Time</button>
+                <button id="btn-scope-step-word" type="button" class="btn-chip" title="Step 1 Word Time (4 Bit Times: B1-4..B13-16) and capture trace">+1 Word Time</button>
+                <button id="btn-scope-clear" type="button" class="btn-chip" title="Clear recorded oscilloscope trace buffer">Clear Trace</button>
+              </div>
+            </div>
+            <div id="ild-scope-viewport" class="ild-scope-viewport" aria-label="240 kHz SSA/SSB Timing Diagram"></div>
+          </div>
+        </details>
+
+        <!-- Collapsible Section 3: Electronic Gate Swing-Out Frame: BOARD A1 (Core Memory) & BOARD B1 (SLD Card Cage) (MDM 1201 & LR010) -->
+        <details id="ce-ild-cage-panel" class="ce-subsection" open>
+          <summary class="ce-subsection-summary">
+            <div class="ce-subsection-title">
+              <span>Electronic Gate Swing-Out Frame</span>
+              <span class="ild-sheet-tag">BOARD A1 &amp; BOARD B1 • MDM 1201 • LR010</span>
+            </div>
+            <span class="ild-scope-cursor-readout">Click any SLD card, GMS driver, or ribbon cable in BOARD B1 (Cols A..N × Rows 1..7) to inspect live pins &amp; attach CE Test Probes</span>
+          </summary>
+
+          <div class="ce-subsection-body ild-cage-card">
+            <div class="ild-scope-toolbar">
+              <div class="ild-scope-controls">
+                <label class="ild-scope-ctl-lbl">Highlight Subsystem:
+                  <select id="ild-cage-filter" class="ild-probe-select ild-scope-select">
+                    <option value="all" selected>All Subsystems (29 Cards + 8 Cables)</option>
+                    <option value="clock">Clock, Osc &amp; I-Time (0303–0304)</option>
+                    <option value="core">Core Array &amp; X/Y Drivers (0306–0307)</option>
+                    <option value="sense">Sense Amps, Inhibit &amp; Protect (0305, 0310)</option>
+                    <option value="alu">4-Bit Serial Data Flow &amp; ALU (0308–0309)</option>
+                    <option value="mt">Magnetic Tape Reader Logic (0301–0302)</option>
+                    <option value="io">Console, Lights &amp; Translator I/O (0311–0312)</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <!-- 2-Bay Cast-Aluminum Swing-Out Gate Frame (BOARD A1 Left + BOARD B1 Right) -->
+            <div id="ild-cage-viewport" class="ild-cage-viewport"></div>
+
+            <!-- Selected SLD Card & Backplane Pin Inspector -->
+            <div id="ild-card-inspector" class="ild-card-inspector"></div>
+          </div>
+        </details>
+
+        <!-- Collapsible Section 4: 32 Working Registers, Live Microprogram Disassembly & Core Memory (2,048 Bytes) -->
+        <details id="ce-regs-mem-panel" class="ce-subsection" open>
+          <summary class="ce-subsection-summary">
+            <div class="ce-subsection-title">
+              <span>32 Working Registers, Live Microprogram Disassembly &amp; Core Memory (2,048 Bytes)</span>
+              <span class="ild-sheet-tag">0x000–0x7FF</span>
+            </div>
+            <span class="ce-ild-hint">R00–R31 (Bytes 0..63) • Initial Loader (Bytes 40..47) • Program Storage (0x040–0x7FF)</span>
+          </summary>
+
+          <div class="ce-subsection-body">
+            <div class="ce-drawer-grid">
+              <!-- 32 Working Registers -->
+              <div class="ce-panel">
+                <h3>32 Working Registers (Bytes 0..63)</h3>
+                <div id="ce-registers-grid" class="registers-grid"></div>
+              </div>
+
+              <!-- Live Disassembly -->
+              <div class="ce-panel">
+                <h3>Live Microprogram Disassembly</h3>
+                <div id="ce-disassembly-list" class="disassembly-list"></div>
+              </div>
+
+              <!-- Core Storage Hex + ASCII Inspector -->
+              <div class="ce-panel">
+                <div class="mem-panel-header">
+                  <h3>Core Memory (2,048 Bytes • 0x000–0x7FF)</h3>
+                  <div class="mem-nav">
+                    <button id="btn-mem-zero" type="button" class="btn-chip" title="Clear all 2,048 bytes of Core Memory to 0x00">Zero Core Memory</button>
+                    <button id="btn-mem-psar" type="button" class="btn-chip" title="Scroll view to current program counter (PSAR)">Jump to PSAR</button>
+                    <button id="btn-mem-expand" type="button" class="btn-chip" title="Expand to full 2,048-byte matrix overlay">⛶ Expand Map</button>
+                  </div>
+                </div>
+                <div id="ce-memory-dump" class="memory-dump"></div>
+              </div>
+            </div>
+          </div>
+        </details>
+      </div>
+    </details>
+
+    <!-- Full 2,048-Byte Core Storage Matrix Modal Dialog -->
+    <dialog id="mem-overlay-dialog" class="mem-overlay-dialog" closedby="any" aria-labelledby="mem-overlay-title">
+      <div class="mem-overlay-content">
+        <header class="mem-overlay-header">
+          <div class="mem-overlay-title-group">
+            <h2 id="mem-overlay-title">IBM CCU 6320 — Core Memory (Full 2,048-Byte Map)</h2>
+            <div class="mem-overlay-badges">
+              <span class="overlay-badge">PSAR: <strong id="overlay-psar">0x222</strong></span>
+              <span class="overlay-badge">MAL: <strong id="overlay-mal">0x222</strong></span>
+              <span class="overlay-badge">Non-Zero: <strong id="overlay-nz-count">0</strong> B</span>
+              <span class="overlay-badge legend-reg">R00–R31 (0x000–0x03F)</span>
+              <span class="overlay-badge legend-loader">Loader (40–47)</span>
+              <span class="overlay-badge legend-psar">● Current PC</span>
+            </div>
+          </div>
+          <div class="mem-overlay-actions">
+            <div class="mem-layout-toggles">
+              <button id="btn-mem-layout-2x1k" class="btn-chip active" title="Show two 1,024-byte blocks (32x32 each) side-by-side">2 × 1 KB (32×32)</button>
+              <button id="btn-mem-layout-64x32" class="btn-chip" title="Show one continuous 2,048-byte block (64x32)">1 × 2 KB (64×32)</button>
+              <button id="btn-mem-toggle-ascii" class="btn-chip" title="Toggle ASCII character column">ASCII: Off</button>
+            </div>
+            <button id="btn-close-mem-overlay" class="btn-chip btn-close" title="Close overlay (or press Escape)">&times; Close [Esc]</button>
+          </div>
+        </header>
+
+        <div id="mem-overlay-body" class="mem-overlay-body layout-2x1k"></div>
+      </div>
+    </dialog>
+
+  </div>
+
+  <!-- Compiled Scala.js Bundle -->
+  <script src="main.js"></script>
+</body>
+</html>
