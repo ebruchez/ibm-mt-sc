@@ -19,9 +19,13 @@
 #define EPD_ECS_PIN  9  // Feather D9   (SSD1680 E-Ink Chip Select, active LOW)
 #define EPD_DC_PIN   10 // Feather D10  (SSD1680 Data/Command: LOW=Cmd, HIGH=Data)
 
-#define EPD_BTN_A_PIN 11 // Feather D11 (Button A, active LOW)
-#define EPD_BTN_B_PIN 12 // Feather D12 (Button B, active LOW)
-#define EPD_BTN_C_PIN 13 // Feather D13 (Button C, active LOW — shared with Feather Red LED)
+#define EPD_BTN_A_PIN 12 // Feather D12 (Green  Button 1: START / STOP, active LOW)
+#define EPD_BTN_B_PIN 13 // Feather D13 (Yellow Button 2: STEP, active LOW — shared with Feather Red LED)
+#define EPD_BTN_C_PIN 6  // Feather D4  (Red    Button 3: TAPE / RESET, active LOW)
+#define EPD_BTN_4_PIN 11 // Feather D11 (White  Button 4: GALLEY UP, active LOW)
+#define EPD_BTN_5_PIN 26 // Feather A0  (Blue   Button 5: GALLEY DOWN / PROOF, active LOW)
+#define EPD_BTN_6_PIN 27 // Feather A1  (Black  Button 6: CE MODE / MEASURE, active LOW)
+#define EPD_NUM_BUTTONS 6
 
 // ============================================================================
 // Solomon Systech SSD1680 Register Definitions
@@ -231,9 +235,12 @@ static bool epd_power_is_on = false;
 static uint8_t prev_mono_ram[MTSC_EPD_PLANE_BYTES];
 static bool has_prev_mono_frame = false;
 
-// Button debounce state
+// 6-button debounce and short/long-press state
 static uint8_t prev_btn_mask = 0;
-static uint64_t last_btn_edge_us[3] = {0, 0, 0};
+static uint64_t last_btn_edge_us[EPD_NUM_BUTTONS] = {0, 0, 0, 0, 0, 0};
+static uint64_t btn_press_start_us[EPD_NUM_BUTTONS] = {0, 0, 0, 0, 0, 0};
+static uint64_t btn_last_repeat_us[EPD_NUM_BUTTONS] = {0, 0, 0, 0, 0, 0};
+static bool btn_long_fired[EPD_NUM_BUTTONS] = {false, false, false, false, false, false};
 
 // ============================================================================
 // Low-Level SPI Helpers
@@ -795,19 +802,19 @@ void pico_epd_init(void) {
     // Park SDCS (D5/GPIO7), SRCS (D6/GPIO8), and ECS (D9/GPIO9) according to whether OLED is stacked
     epd_park_cs_pins();
 
-    // 5. Configure FeatherWing Buttons A (D11/GPIO11), B (D12/GPIO12), C (D13/GPIO13)
+    // 5. Configure 6 Operator Panel Pushbuttons:
+    //    Button 1: D11 (GPIO 11), Button 2: D12 (GPIO 12), Button 3: D13 (GPIO 13),
+    //    Button 4: D4  (GPIO 6),  Button 5: A0  (GPIO 26), Button 6: A1  (GPIO 27)
     //    as inputs with internal pull-ups (active LOW when pressed).
-    gpio_init(EPD_BTN_A_PIN);
-    gpio_set_dir(EPD_BTN_A_PIN, GPIO_IN);
-    gpio_pull_up(EPD_BTN_A_PIN);
-
-    gpio_init(EPD_BTN_B_PIN);
-    gpio_set_dir(EPD_BTN_B_PIN, GPIO_IN);
-    gpio_pull_up(EPD_BTN_B_PIN);
-
-    gpio_init(EPD_BTN_C_PIN);
-    gpio_set_dir(EPD_BTN_C_PIN, GPIO_IN);
-    gpio_pull_up(EPD_BTN_C_PIN);
+    static const uint btn_pins[EPD_NUM_BUTTONS] = {
+        EPD_BTN_A_PIN, EPD_BTN_B_PIN, EPD_BTN_C_PIN,
+        EPD_BTN_4_PIN, EPD_BTN_5_PIN, EPD_BTN_6_PIN
+    };
+    for (int i = 0; i < EPD_NUM_BUTTONS; i++) {
+        gpio_init(btn_pins[i]);
+        gpio_set_dir(btn_pins[i], GPIO_IN);
+        gpio_pull_up(btn_pins[i]);
+    }
 
     for (uint32_t i = 0; i < MTSC_EPD_PLANE_BYTES; i++) {
         prev_mono_ram[i] = 0xFFu; // All white in inverted monochrome convention
@@ -924,13 +931,22 @@ uint32_t pico_epd_get_diag(uint32_t index) {
 static uint8_t epd_sample_raw_buttons(bool oled_btns) {
     uint8_t mask = 0;
     if (!gpio_get(EPD_BTN_A_PIN) || (oled_btns && !gpio_get(EPD_ECS_PIN))) {
-        mask |= MTSC_EPD_BTN_A_MASK;
+        mask |= MTSC_EPD_BTN_1_SHORT;
     }
     if (!gpio_get(EPD_BTN_B_PIN) || (oled_btns && !gpio_get(EPD_SRCS_PIN))) {
-        mask |= MTSC_EPD_BTN_B_MASK;
+        mask |= MTSC_EPD_BTN_2_SHORT;
     }
     if (!gpio_get(EPD_BTN_C_PIN) || (oled_btns && !gpio_get(EPD_SDCS_PIN))) {
-        mask |= MTSC_EPD_BTN_C_MASK;
+        mask |= MTSC_EPD_BTN_3_SHORT;
+    }
+    if (!gpio_get(EPD_BTN_4_PIN)) {
+        mask |= MTSC_EPD_BTN_4_SHORT;
+    }
+    if (!gpio_get(EPD_BTN_5_PIN)) {
+        mask |= MTSC_EPD_BTN_5_SHORT;
+    }
+    if (!gpio_get(EPD_BTN_6_PIN)) {
+        mask |= MTSC_EPD_BTN_6_SHORT;
     }
     return mask;
 }
@@ -947,7 +963,7 @@ bool pico_epd_any_button_low(void) {
     if (!epd_initialized) {
         return false;
     }
-    return epd_sample_raw_buttons(pico_oled_is_present()) != 0;
+    return prev_btn_mask != 0 || epd_sample_raw_buttons(pico_oled_is_present()) != 0;
 }
 
 void pico_epd_set_button_wake_irq(bool enable) {
@@ -967,11 +983,49 @@ void pico_epd_set_button_wake_irq(bool enable) {
     }
     gpio_set_irq_enabled(EPD_BTN_B_PIN, GPIO_IRQ_EDGE_FALL, enable);
     gpio_set_irq_enabled(EPD_BTN_C_PIN, GPIO_IRQ_EDGE_FALL, enable);
+    gpio_set_irq_enabled(EPD_BTN_4_PIN, GPIO_IRQ_EDGE_FALL, enable);
+    gpio_set_irq_enabled(EPD_BTN_5_PIN, GPIO_IRQ_EDGE_FALL, enable);
+    gpio_set_irq_enabled(EPD_BTN_6_PIN, GPIO_IRQ_EDGE_FALL, enable);
     if (pico_oled_is_present()) {
         gpio_set_irq_enabled(EPD_ECS_PIN,  GPIO_IRQ_EDGE_FALL, enable);
         gpio_set_irq_enabled(EPD_SRCS_PIN, GPIO_IRQ_EDGE_FALL, enable);
         gpio_set_irq_enabled(EPD_SDCS_PIN, GPIO_IRQ_EDGE_FALL, enable);
     }
+}
+
+// Fast non-blocking check called inside runPacedRp2040() to pause on Button 1 (START/STOP)
+// or abort/reset on Button 3 (TAPE/RESET). Marks btn_long_fired so releasing the button
+// after pausing does not re-trigger the short-press action.
+uint32_t pico_epd_poll_run_interrupt(void) {
+    if (!epd_initialized) {
+        return 0;
+    }
+    bool oled_btns = pico_oled_is_present();
+    uint8_t cur_mask = epd_sample_raw_buttons(oled_btns) & (MTSC_EPD_BTN_1_SHORT | MTSC_EPD_BTN_3_SHORT);
+    if (cur_mask != 0) {
+        for (int s = 0; s < 8 && cur_mask != 0; s++) {
+            sleep_us(500);
+            cur_mask &= epd_sample_raw_buttons(oled_btns);
+        }
+    }
+    uint64_t now = time_us_64();
+    // Check Button 1 (START/STOP, index 0) and Button 3 (TAPE/RESET, index 2)
+    const int indices[2] = {0, 2};
+    const uint8_t masks[2] = {MTSC_EPD_BTN_1_SHORT, MTSC_EPD_BTN_3_SHORT};
+    for (int k = 0; k < 2; k++) {
+        int i = indices[k];
+        uint8_t m = masks[k];
+        bool is_down = (cur_mask & m) != 0;
+        bool was_down = (prev_btn_mask & m) != 0;
+        if (is_down && !was_down && (now - last_btn_edge_us[i]) > 60000ULL) {
+            prev_btn_mask |= m;
+            last_btn_edge_us[i] = now;
+            btn_press_start_us[i] = now;
+            btn_long_fired[i] = true; // Consume release so it won't re-trigger START/RESET
+            return (k == 0) ? 1u : 3u;
+        }
+    }
+    return 0;
 }
 
 uint32_t pico_epd_poll_buttons(void) {
@@ -993,19 +1047,46 @@ uint32_t pico_epd_poll_buttons(void) {
     }
 
     uint64_t now = time_us_64();
-    uint32_t pressed_edges = 0;
-    const uint8_t masks[3] = {MTSC_EPD_BTN_A_MASK, MTSC_EPD_BTN_B_MASK, MTSC_EPD_BTN_C_MASK};
-    for (int i = 0; i < 3; i++) {
-        uint8_t m = masks[i];
+    uint32_t events = 0;
+    for (int i = 0; i < EPD_NUM_BUTTONS; i++) {
+        uint8_t m = (uint8_t)(1u << i);
         bool is_down = (cur_mask & m) != 0;
         bool was_down = (prev_btn_mask & m) != 0;
-        if (is_down && !was_down && (now - last_btn_edge_us[i]) > 45000ULL) {
-            pressed_edges |= m;
-            last_btn_edge_us[i] = now;
-        } else if (!is_down && was_down && (now - last_btn_edge_us[i]) > 45000ULL) {
-            last_btn_edge_us[i] = now;
+
+        if (is_down && !was_down) {
+            if ((now - last_btn_edge_us[i]) > 45000ULL) {
+                prev_btn_mask |= m;
+                last_btn_edge_us[i] = now;
+                btn_press_start_us[i] = now;
+                btn_last_repeat_us[i] = now;
+                btn_long_fired[i] = false;
+                events |= MTSC_EPD_BTN_WAKE;
+            }
+        } else if (is_down && was_down) {
+            uint64_t held_us = now - btn_press_start_us[i];
+            if (i == 1) {
+                // Button 2 (STEP): continuous ~10 Hz auto-step after 500 ms hold
+                if (held_us >= 500000ULL && (now - btn_last_repeat_us[i]) >= 100000ULL) {
+                    btn_long_fired[i] = true;
+                    btn_last_repeat_us[i] = now;
+                    events |= MTSC_EPD_BTN_2_LONG;
+                }
+            } else {
+                // Buttons 1, 3, 4, 5, 6: fire long-press action once at 700 ms threshold
+                if (!btn_long_fired[i] && held_us >= 700000ULL) {
+                    btn_long_fired[i] = true;
+                    events |= (1u << (i + 8));
+                }
+            }
+        } else if (!is_down && was_down) {
+            if ((now - last_btn_edge_us[i]) > 30000ULL) {
+                prev_btn_mask &= (uint8_t)~m;
+                last_btn_edge_us[i] = now;
+                if (!btn_long_fired[i]) {
+                    events |= (uint32_t)m;
+                }
+            }
         }
     }
-    prev_btn_mask = cur_mask;
-    return pressed_edges;
+    return events;
 }

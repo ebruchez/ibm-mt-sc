@@ -5,7 +5,7 @@ import scala.scalanative.runtime.GC
 import scala.scalanative.unsafe.*
 
 import mtsc.cli.Main
-import mtsc.console.{AnsiTerminal, CeConsoleState, CeConsoleView}
+import mtsc.console.{AnsiTerminal, CeConsoleState, CeConsoleView, CeDisplayMode}
 import mtsc.cpu.{CcuEngineMode, StepResult}
 import mtsc.diag.{DiagnosticPrograms, EscapementRoutine}
 import mtsc.periph.{GalleyFont, MtscSystem, OledView, TapeCartridge}
@@ -40,6 +40,7 @@ object PicoSdk {
   def pico_epd_set_controller(ctrlType: CInt): Unit = extern
   def pico_epd_upload_planes(bwPlane: Ptr[Byte], redPlane: Ptr[Byte], mode: CInt): Unit = extern
   def pico_epd_poll_buttons(): CInt = extern
+  def pico_epd_poll_run_interrupt(): CInt = extern
   def pico_epd_get_diag(index: CInt): CInt = extern
   def pico_oled_init(): Unit = extern
   def pico_oled_is_present(): CBool = extern
@@ -92,6 +93,31 @@ object Rp2040Main {
   private var consoleStateRef: CeConsoleState = null
   private var terminalRef: AnsiTerminal = null
   private var defaultTapeRef: TapeCartridge = null
+  private var tapeCatalogRef: Array[TapeCartridge] = null
+  private var activeTapeIndex: Int = 0
+  private var selectedMeasure: Int = 140
+
+  private final val PressRomanSpecimenText: String =
+    "IBM SELECTRIC COMPOSER — 11-PT PRESS ROMAN SPECIMEN\n\n" +
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789\n\n" +
+    "Proportional escapement assigns 3 to 9 units (1/72 inch per unit) to each character, " +
+    "while the 6320 Composer Control Unit distributes line remainder across interword spaces."
+
+  // 6-Button Operator Panel event masks (matching firmware/epd_ssd1680.h)
+  private final val Btn1Short: Int = 0x00001 // D11: START / STOP (Run / Pause)
+  private final val Btn2Short: Int = 0x00002 // D12: STEP (Single-step CCU instruction)
+  private final val Btn3Short: Int = 0x00004 // D13: TAPE / RESET (Rewind & Reset)
+  private final val Btn4Short: Int = 0x00008 // D4:  GALLEY UP (Scroll up 4 lines)
+  private final val Btn5Short: Int = 0x00010 // A0:  GALLEY DOWN / PROOF (Scroll down 4 lines / Proof)
+  private final val Btn6Short: Int = 0x00020 // A1:  CE MODE (Cycle OLED 11-lamp rotary mode)
+
+  private final val Btn1Long: Int  = 0x00100 // D11 hold: Toggle Pacing (14 cps vs Full-Speed Batch)
+  private final val Btn2Long: Int  = 0x00200 // D12 hold: Auto-Step (~10 Hz continuous while held)
+  private final val Btn3Long: Int  = 0x00400 // D13 hold: Next Tape Cartridge
+  private final val Btn4Long: Int  = 0x00800 // D4  hold: Jump to Top of Galley
+  private final val Btn5Long: Int  = 0x01000 // A0  hold: Jump to Bottom of Galley
+  private final val Btn6Long: Int  = 0x02000 // A1  hold: Cycle Line Measure (140u -> 170u -> 110u)
+  private final val BtnWake: Int   = 0x10000 // Immediate press-down wake flag
 
   // Pre-allocated 296x128 SSD1680 eInk bitplanes (2 * 4,736 = 9,472 bytes) rooted in module fields
   private val epdBwPlane: Array[Byte] = new Array[Byte](GalleyFont.PlaneBytes)
@@ -130,11 +156,24 @@ object Rp2040Main {
     PicoSdk.pico_oled_flush(oledFrameBuf.at(0))
   }
 
+  private def applySelectedMeasure(system: MtscSystem): Unit = {
+    val wrapThreshold = math.max(20, selectedMeasure - 30)
+    system.operatorPanel.measure = selectedMeasure
+    system.memory.writeWord(Address(56), Word(wrapThreshold))
+    system.memory.writeWord(Address(60), Word(selectedMeasure))
+    // If ContinuousComposerRoutine is loaded at 0x222 (546: MOVI R28, imm; 548: MOVI R30, imm),
+    // also update its immediate operand bytes (547 and 549) so INIT uses the selected measure.
+    if ((system.memory.readByte(Address(546)) & 0xff) == 0x9c && (system.memory.readByte(Address(548)) & 0xff) == 0x9e) {
+      system.memory.writeByte(Address(547), wrapThreshold)
+      system.memory.writeByte(Address(549), selectedMeasure)
+    }
+  }
+
   private def currentTargetMeasure(system: MtscSystem): Int = {
     val r30 = system.memory.readWord(Address(60)).unsigned
     if (r30 >= 30 && r30 <= 240) r30
     else if (system.operatorPanel.measure >= 30 && system.operatorPanel.measure <= 240) system.operatorPanel.measure
-    else 140
+    else selectedMeasure
   }
 
   private def requestEpdRefresh(
@@ -314,14 +353,23 @@ object Rp2040Main {
     PicoSdk.pico_set_boot_stage(8)
     EscapementRoutine.initializeTable(system.memory)
 
-    // Stage 9: TapeCartridge.fromText(HistoricalSampleText)
+    // Stage 9: Pre-allocate built-in magnetic tape cartridge catalog
     PicoSdk.pico_set_boot_stage(9)
-    val tape = TapeCartridge.fromText(TapeCartridge.HistoricalSampleText, "Historical MT Tape")
-    defaultTapeRef = tape
+    val tape1 = TapeCartridge.fromText(TapeCartridge.HistoricalSampleText, "Historical MT Tape")
+    val tape2 = TapeCartridge.fromText(TapeCartridge.HistoricalMergeSampleText, "6310 Merge Tape")
+    val tape3 = TapeCartridge.fromText(PressRomanSpecimenText, "Press Roman Specimen")
+    val catalog = new Array[TapeCartridge](3)
+    catalog(0) = tape1
+    catalog(1) = tape2
+    catalog(2) = tape3
+    tapeCatalogRef = catalog
+    activeTapeIndex = 0
+    defaultTapeRef = tape1
+    applySelectedMeasure(system)
 
-    // Stage 10: system.loadTape(Device.RightTape, tape)
+    // Stage 10: system.loadTape(Device.RightTape, tape1)
     PicoSdk.pico_set_boot_stage(10)
-    system.loadTape(Device.RightTape, tape)
+    system.loadTape(Device.RightTape, tape1)
     consoleState.log("Mounted historical 4-paragraph MT cartridge on Right Tape Reader.")
 
     // Stage 11: Formatting initial status message & updating lamps + eInk Galley + OLED
@@ -333,7 +381,7 @@ object Rp2040Main {
     consoleState.log(s"2.9\" eInk (#4777): ${epdDiagSummary()}")
     consoleState.log(s"128x32 OLED (#2900): ${oledDiagSummary()}")
     consoleState.statusMessage =
-      s"Ready (${heapSummary()}). [r/BtnA] Run, [s] Step, [e/BtnB] eInk, [o] OLED, [BtnC] Reset."
+      s"Ready (${heapSummary()}). [Btn1] Start/Stop, [Btn2] Step, [Btn3] Tape/Reset, [Btn4/5] Galley, [Btn6] Mode/Meas."
 
     var usbWasConnected = PicoSdk.pico_stdio_usb_connected()
     var needsRender = usbWasConnected
@@ -461,12 +509,62 @@ object Rp2040Main {
     firstChar.toChar.toString
   }
 
+  private def resetAndRewindTape(
+    system: MtscSystem,
+    consoleState: CeConsoleState,
+    refreshEpd: Boolean = true
+  ): Unit = {
+    epdScrollOffsetLines = 0
+    system.reset()
+    EscapementRoutine.initializeTable(system.memory)
+    applySelectedMeasure(system)
+    if (defaultTapeRef != null) {
+      system.loadTape(Device.RightTape, defaultTapeRef)
+    }
+    System.gc()
+    epdLastRenderedLines = 0
+    epdLastRenderedChars = 0L
+    if (refreshEpd) {
+      requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false)
+    }
+  }
+
+  private def stepSingleInstruction(
+    system: MtscSystem,
+    consoleState: CeConsoleState,
+    isAutoRepeat: Boolean
+  ): Unit = {
+    if (system.cpu.state.halted) {
+      val msg = "CCU is halted. Press [Btn1] to restart or [Btn3] to reset."
+      consoleState.statusMessage = msg
+      return
+    }
+    val prevLines = system.paper.completedLinesCount
+    val prevChars = system.paper.totalCharactersPrinted
+    val res = system.step()
+    ledToggle = !ledToggle
+    updateHardwareLamps(system, isRunningLoop = true)
+    if (system.paper.completedLinesCount != prevLines || system.paper.totalCharactersPrinted != prevChars) {
+      epdScrollOffsetLines = 0
+      requestEpdRefresh(system, mode = EpdModeFastMono, showCursor = true)
+    }
+    val hexPsar = Fmt.hex3(system.memory.psar.unsigned)
+    val prefix = if (isAutoRepeat) "Auto-Step" else "Step"
+    val msg = s"[$prefix] PC=0x$hexPsar ($res) MT=${system.rightTape.headPosition}"
+    if (!isAutoRepeat) {
+      consoleState.log(msg)
+    }
+    consoleState.statusMessage = msg
+  }
+
   /**
-   * Handles physical tactile buttons A (`D11`), B (`D12`), and C (`D13`) on the
-   * Adafruit 2.9" Grayscale eInk FeatherWing (#4777):
-   * - **Button A (`0x01`)**: Start / Resume composition (or restart if already halted)
-   * - **Button B (`0x02`)**: Scroll through completed galley lines (4 lines per press) or force 4-Grayscale refresh
-   * - **Button C (`0x04`)**: Master Reset CCU, rewind tape cartridge, and clear galley sheet
+   * Handles the 6-Button Operator Panel:
+   * - **Button 1 (Green  `D12` / `GPIO 12`)**: Short = `START / STOP`, Hold = Toggle Pacing (`14 cps` vs `Batch`)
+   * - **Button 2 (Yellow `D13` / `GPIO 13`)**: Short = `STEP` single instruction, Hold = Auto-Step (`~10 Hz`)
+   * - **Button 3 (Red    `D4`  / `GPIO 6`)**:  Short = `TAPE / RESET` (Rewind & Reset), Hold = Next Tape Cartridge
+   * - **Button 4 (White  `D11` / `GPIO 11`)**: Short = `GALLEY ▲` (Scroll up 4 lines), Hold = Jump to Top
+   * - **Button 5 (Blue   `A0`  / `GPIO 26`)**: Short = `GALLEY ▼` (Scroll down 4 lines / Proof), Hold = Jump to Bottom
+   * - **Button 6 (Black  `A1`  / `GPIO 27`)**: Short = `CE MODE` (Cycle OLED 11-lamp rotary mode), Hold = Cycle Measure
    */
   private def handleFeatherWingButtons(
     btnMask: Int,
@@ -474,57 +572,124 @@ object Rp2040Main {
     consoleState: CeConsoleState,
     terminal: AnsiTerminal
   ): Unit = {
-    if ((btnMask & 0x01) != 0) {
-      // Button A: Start / Resume Composition
+    val actionMask = btnMask & ~BtnWake
+    if (actionMask == 0) {
+      return
+    }
+
+    if ((actionMask & Btn1Short) != 0) {
+      // Button 1 Click: START / STOP (Run or restart if halted)
       epdScrollOffsetLines = 0
       if (system.cpu.state.halted) {
-        system.reset()
-        EscapementRoutine.initializeTable(system.memory)
-        if (defaultTapeRef != null) {
-          system.loadTape(Device.RightTape, defaultTapeRef)
-        }
-        System.gc()
-        epdLastRenderedLines = 0
-        epdLastRenderedChars = 0L
+        resetAndRewindTape(system, consoleState, refreshEpd = false)
+      } else {
+        applySelectedMeasure(system)
       }
-      consoleState.log("FeatherWing [Button A]: Starting composition...")
-      consoleState.statusMessage = "FeatherWing [Button A]: Composing to 2.9\" eInk Galley..."
+      consoleState.log("[Btn1 START]: Starting composition...")
+      consoleState.statusMessage = "[Btn1 START]: Composing to 2.9\" eInk Galley..."
       runPacedRp2040(system, consoleState, terminal)
-    } else if ((btnMask & 0x02) != 0) {
-      // Button B: Scroll Galley or Force 4-Grayscale Proof Refresh
+    } else if ((actionMask & Btn1Long) != 0) {
+      // Button 1 Hold: Toggle 14 cps Real-Time Pacing vs Full-Speed Batch
+      consoleState.realTimePacing = !consoleState.realTimePacing
+      val modeStr = if (consoleState.realTimePacing) "14 cps Selectric Real-Time" else "Full-Speed CCU Batch"
+      val msg = s"[Btn1 Hold]: Pacing set to $modeStr."
+      consoleState.log(msg)
+      consoleState.statusMessage = msg
+    } else if ((actionMask & (Btn2Short | Btn2Long)) != 0) {
+      // Button 2 Click / Hold: Single-Step or ~10 Hz Auto-Step
+      stepSingleInstruction(system, consoleState, isAutoRepeat = (actionMask & Btn2Long) != 0)
+    } else if ((actionMask & Btn3Short) != 0) {
+      // Button 3 Click: Rewind & Master Reset
+      resetAndRewindTape(system, consoleState, refreshEpd = true)
+      val msg = s"[Btn3 RESET]: Master Reset & '${defaultTapeRef.label}' rewound."
+      consoleState.log(msg)
+      consoleState.statusMessage = msg
+    } else if ((actionMask & Btn3Long) != 0) {
+      // Button 3 Hold: Cycle Next Tape Cartridge
+      if (tapeCatalogRef != null && tapeCatalogRef.length > 0) {
+        activeTapeIndex = (activeTapeIndex + 1) % tapeCatalogRef.length
+        defaultTapeRef = tapeCatalogRef(activeTapeIndex)
+      }
+      resetAndRewindTape(system, consoleState, refreshEpd = true)
+      val idx = activeTapeIndex + 1
+      val total = if (tapeCatalogRef != null) tapeCatalogRef.length else 1
+      val msg = s"[Btn3 Hold]: Mounted tape [$idx/$total] '${defaultTapeRef.label}'."
+      consoleState.log(msg)
+      consoleState.statusMessage = msg
+    } else if ((actionMask & Btn4Short) != 0) {
+      // Button 4 Click: Scroll Galley UP 4 lines (towards L01)
       val totalLines = system.paper.lineCount
-      if (totalLines > GalleyFont.MaxVisibleLines) {
-        val maxScroll = totalLines - GalleyFont.MaxVisibleLines
-        if (epdScrollOffsetLines >= maxScroll) {
-          epdScrollOffsetLines = 0
-        } else {
-          epdScrollOffsetLines = math.min(maxScroll, epdScrollOffsetLines + 4)
-        }
-        // Always use 4-Grayscale (EpdModeGray4) when scrolling via Button B so scrolled pages
-        // render with full Press Roman grayscale anti-aliasing, gray line numbers, and zero ghosting.
+      val maxScroll = math.max(0, totalLines - GalleyFont.MaxVisibleLines)
+      epdScrollOffsetLines = math.min(maxScroll, epdScrollOffsetLines + 4)
+      requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false, forceNow = true)
+      val msg = s"[Btn4 GALLEY UP]: Scroll offset = -$epdScrollOffsetLines (of $totalLines lines)."
+      consoleState.log(msg)
+      consoleState.statusMessage = msg
+    } else if ((actionMask & Btn4Long) != 0) {
+      // Button 4 Hold: Jump to Top of Galley (L01)
+      val totalLines = system.paper.lineCount
+      val maxScroll = math.max(0, totalLines - GalleyFont.MaxVisibleLines)
+      epdScrollOffsetLines = maxScroll
+      requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false, forceNow = true)
+      val msg = s"[Btn4 Hold]: Jumped to top of Galley (-$epdScrollOffsetLines of $totalLines lines)."
+      consoleState.log(msg)
+      consoleState.statusMessage = msg
+    } else if ((actionMask & Btn5Short) != 0) {
+      // Button 5 Click: Scroll Galley DOWN 4 lines (towards bottom) or Force 4-Gray Proof Refresh
+      val totalLines = system.paper.lineCount
+      if (epdScrollOffsetLines > 0) {
+        epdScrollOffsetLines = math.max(0, epdScrollOffsetLines - 4)
         requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false, forceNow = true)
-        val msg = s"FeatherWing [Button B]: Galley scroll offset = -$epdScrollOffsetLines lines (of $totalLines)."
+        val msg = s"[Btn5 GALLEY DOWN]: Scroll offset = -$epdScrollOffsetLines (of $totalLines lines)."
         consoleState.log(msg)
         consoleState.statusMessage = msg
       } else {
-        requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false)
-        val msg = "FeatherWing [Button B]: Triggered 4-Grayscale camera-ready eInk refresh."
+        requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false, forceNow = true)
+        val msg = "[Btn5 PROOF]: Triggered 4-Grayscale camera-ready eInk proof refresh."
         consoleState.log(msg)
         consoleState.statusMessage = msg
       }
-    } else if ((btnMask & 0x04) != 0) {
-      // Button C: Master Reset & Rewind Tape
+    } else if ((actionMask & Btn5Long) != 0) {
+      // Button 5 Hold: Jump to Bottom of Galley
       epdScrollOffsetLines = 0
-      system.reset()
-      EscapementRoutine.initializeTable(system.memory)
-      if (defaultTapeRef != null) {
-        system.loadTape(Device.RightTape, defaultTapeRef)
+      requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false, forceNow = true)
+      val msg = "[Btn5 Hold]: Jumped to bottom of Galley (latest lines)."
+      consoleState.log(msg)
+      consoleState.statusMessage = msg
+    } else if ((actionMask & Btn6Short) != 0) {
+      // Button 6 Click: Cycle CE Rotary Selector on OLED (DP1 -> DP2 -> DP3 -> DP4 -> CLK -> OPR -> DP1)
+      if (consoleState.faceplateInstalled) {
+        consoleState.faceplateInstalled = false
+        consoleState.displayMode = CeDisplayMode.Display1
+      } else {
+        consoleState.displayMode match {
+          case CeDisplayMode.Display1 =>
+            consoleState.displayMode = CeDisplayMode.Display2
+          case CeDisplayMode.Display2 =>
+            consoleState.displayMode = CeDisplayMode.Display3
+          case CeDisplayMode.Display3 =>
+            consoleState.displayMode = CeDisplayMode.Display4
+          case CeDisplayMode.Display4 =>
+            consoleState.displayMode = CeDisplayMode.ClockDefault
+          case CeDisplayMode.ClockDefault =>
+            consoleState.faceplateInstalled = true
+        }
       }
-      System.gc()
-      epdLastRenderedLines = 0
-      epdLastRenderedChars = 0L
-      requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false)
-      val msg = "FeatherWing [Button C]: Master Reset & tape rewound. Galley cleared."
+      val modeLabel =
+        if (consoleState.faceplateInstalled) "OPR (Operator Faceplate)"
+        else s"${consoleState.displayMode.rowLabel} (${consoleState.displayMode.description})"
+      val msg = s"[Btn6 CE MODE]: $modeLabel"
+      consoleState.log(msg)
+      consoleState.statusMessage = msg
+    } else if ((actionMask & Btn6Long) != 0) {
+      // Button 6 Hold: Cycle Line Justification Measure (140u -> 170u -> 110u)
+      selectedMeasure =
+        if (selectedMeasure == 140) 170
+        else if (selectedMeasure == 170) 110
+        else 140
+      applySelectedMeasure(system)
+      requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false, forceNow = true)
+      val msg = s"[Btn6 Hold]: Target line measure set to ${selectedMeasure}u."
       consoleState.log(msg)
       consoleState.statusMessage = msg
     }
@@ -676,6 +841,7 @@ object Rp2040Main {
     var hitBreakpoint = false
     var res: StepResult = StepResult.Normal
     var interrupted = false
+    var resetDuringRun = false
     val delayMs = consoleState.printDelayMs
 
     if (consoleState.realTimePacing && delayMs > 0) {
@@ -761,12 +927,16 @@ object Rp2040Main {
             lastPrintDeadlineUs = nowUs
           }
 
-          if (PicoSdk.pico_getchar_timeout_us(0) >= 0 || (PicoSdk.pico_epd_poll_buttons() & 0x05) != 0) {
+          val runInt = PicoSdk.pico_epd_poll_run_interrupt()
+          if (runInt != 0 || PicoSdk.pico_getchar_timeout_us(0) >= 0) {
             interrupted = true
+            resetDuringRun = (runInt == 3)
           }
         } else if ((steps & 0x1ff) == 0) {
-          if (PicoSdk.pico_getchar_timeout_us(0) >= 0 || (PicoSdk.pico_epd_poll_buttons() & 0x05) != 0) {
+          val runInt = PicoSdk.pico_epd_poll_run_interrupt()
+          if (runInt != 0 || PicoSdk.pico_getchar_timeout_us(0) >= 0) {
             interrupted = true
+            resetDuringRun = (runInt == 3)
           }
         }
 
@@ -786,7 +956,12 @@ object Rp2040Main {
     }
 
     val hexPsar = Fmt.hex3(system.memory.psar.unsigned)
-    if (interrupted) {
+    if (resetDuringRun) {
+      resetAndRewindTape(system, consoleState, refreshEpd = true)
+      val msg = s"[Btn3 RESET]: Aborted composition, reset CCU & rewound '${defaultTapeRef.label}'."
+      consoleState.log(msg)
+      consoleState.statusMessage = msg
+    } else if (interrupted) {
       requestEpdRefresh(system, mode = EpdModeFastMono, showCursor = true)
       consoleState.statusMessage =
         s"Paused by user at 0x$hexPsar after $steps steps (${heapSummary()})."

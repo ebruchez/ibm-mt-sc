@@ -215,6 +215,7 @@ int pico_getchar_timeout_us(uint32_t timeout_us) {
     }
     if (pico_epd_any_button_low()) {
         pico_restore_full_clock();
+        sleep_ms(5);
         return PICO_ERROR_TIMEOUT;
     }
 
