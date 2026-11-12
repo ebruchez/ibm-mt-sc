@@ -98,10 +98,12 @@ object Rp2040Main {
   private var selectedMeasure: Int = 140
 
   private final val PressRomanSpecimenText: String =
-    "IBM SELECTRIC COMPOSER — 11-PT PRESS ROMAN SPECIMEN\n\n" +
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789\n\n" +
-    "Proportional escapement assigns 3 to 9 units (1/72 inch per unit) to each character, " +
-    "while the 6320 Composer Control Unit distributes line remainder across interword spaces."
+    "11-PT PRESS ROMAN:\n" +
+    "ABCDEFGHIJKLM NOPQRST\n" +
+    "UVWXYZ 0123456789 &%$\n" +
+    "abcdefghijklmnopqrstuvwxyz\n" +
+    "!\"#'()*+,-./:;<=>?@[\\]^_`{|}~\n" +
+    "Each glyph is 3 to 9 units (1/72 in.) and justified by the 6320 CCU across spaces."
 
   // 6-Button Operator Panel event masks (matching firmware/epd_ssd1680.h)
   private final val Btn1Short: Int = 0x00001 // D11: START / STOP (Run / Pause)
