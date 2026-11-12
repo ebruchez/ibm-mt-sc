@@ -400,9 +400,9 @@ object GalleyFont {
     val totalLines = completedCount + (if (hasCurrent) 1 else 0)
 
     if (totalLines == 0) {
-      // Blank galley sheet: render a subtle centered prompt in Press Roman
-      drawCenteredPrompt(bwPlane, redPlane, "IBM MT/SC GALLEY READY", 48, flip180)
-      drawCenteredPrompt(bwPlane, redPlane, "Press [A] or [r] to Compose", 68, flip180)
+      // Blank galley sheet: render the 4-level grayscale IBM MT/SC workstation splash photo
+      // on the left (x = 0..151, y = 13..127) and the Press Roman title card on the right.
+      drawSplashScreen(bwPlane, redPlane, measureX, flip180)
       return
     }
 
@@ -463,10 +463,64 @@ object GalleyFont {
     }
   }
 
-  private def drawCenteredPrompt(
+  private def drawSplashScreen(
+    bwPlane: Array[Byte],
+    redPlane: Array[Byte],
+    measureX: Int,
+    flip180: Boolean
+  ): Unit = {
+    val bwWords = SplashPhoto.bwWords
+    val redWords = SplashPhoto.redWords
+    var row = 0
+    while (row < SplashPhoto.HeightPx) {
+      val py = 13 + row
+      val rowWordBase = row * SplashPhoto.WordsPerRow
+      var col = 0
+      while (col < SplashPhoto.WidthPx) {
+        val wordIdx = rowWordBase + (col >> 5)
+        val bitShift = col & 31
+        val bwBit = (bwWords(wordIdx) >>> bitShift) & 1
+        val redBit = (redWords(wordIdx) >>> bitShift) & 1
+        val shade = bwBit | (redBit << 1)
+        if (shade != ShadeWhite) {
+          setPixelInPlanes(bwPlane, redPlane, col, py, shade, flip180)
+        }
+        col += 1
+      }
+      // 1-px vertical frame line separating the photo pane from the title card
+      setPixelInPlanes(bwPlane, redPlane, SplashPhoto.WidthPx, py, ShadeBlack, flip180)
+      row += 1
+    }
+
+    val rightStart = SplashPhoto.WidthPx + 2
+    val rightEnd = math.min(WidthPx - 4, measureX - 1)
+    drawCenteredInRange(bwPlane, redPlane, "IBM MT/SC", rightStart, rightEnd, 24, flip180)
+
+    var rx = rightStart + 14
+    val rxEnd = rightEnd - 14
+    while (rx < rxEnd) {
+      setPixelInPlanes(bwPlane, redPlane, rx, 42, ShadeDarkGray, flip180)
+      rx += 1
+    }
+
+    drawCenteredInRange(bwPlane, redPlane, "Selectric", rightStart, rightEnd, 49, flip180)
+    drawCenteredInRange(bwPlane, redPlane, "Composer", rightStart, rightEnd, 65, flip180)
+
+    rx = rightStart + 14
+    while (rx < rxEnd) {
+      setPixelInPlanes(bwPlane, redPlane, rx, 84, ShadeDarkGray, flip180)
+      rx += 1
+    }
+
+    drawCenteredInRange(bwPlane, redPlane, "[Green] Start", rightStart, rightEnd, 94, flip180)
+  }
+
+  private def drawCenteredInRange(
     bwPlane: Array[Byte],
     redPlane: Array[Byte],
     text: String,
+    xMin: Int,
+    xMax: Int,
     y0: Int,
     flip180: Boolean
   ): Unit = {
@@ -476,7 +530,7 @@ object GalleyFont {
       totalW += glyphWidthPx(text.charAt(i))
       i += 1
     }
-    var x = math.max(4, (WidthPx - totalW) / 2)
+    var x = math.max(xMin, xMin + ((xMax - xMin) - totalW) / 2)
     i = 0
     while (i < text.length) {
       val ch = text.charAt(i)
