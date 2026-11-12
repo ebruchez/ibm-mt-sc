@@ -35,7 +35,9 @@ This project emulates the complete MT/SC playback station at two selectable leve
 
 ### 1. Web UI (Scala.js)
 
-Compile the Scala.js bundle and serve the root directory with any static HTTP server:
+- **Live Online Demo (GitHub Pages)**: [https://ebruchez.github.io/ibm-mt-sc/](https://ebruchez.github.io/ibm-mt-sc/)
+
+To build and run locally during development, compile the Scala.js bundle and serve the root directory with any static HTTP server:
 
 ```bash
 sbt coreJS/fastLinkJS
@@ -43,6 +45,13 @@ python3 -m http.server 8000
 ```
 
 Then open `http://localhost:8000/web/` in your browser.
+
+To package the optimized (`fullLinkJS`) static site into `target/site/` and deploy it to the `gh-pages` branch on GitHub:
+
+```bash
+sbt buildWebSite     # Builds self-contained production bundle in target/site/
+sbt publishGhPages   # Builds and pushes target/site/ to origin/gh-pages
+```
 
 ### 2. Terminal Console (JVM)
 

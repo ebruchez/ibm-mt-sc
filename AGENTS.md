@@ -34,6 +34,11 @@ sbt coreJS/fastLinkJS
 python3 -m http.server 8000
 # Open http://localhost:8000/web/
 ```
+To package the optimized (`fullLinkJS`) static web bundle into `target/site/` and deploy to GitHub Pages (`origin/gh-pages`):
+```bash
+sbt buildWebSite
+sbt publishGhPages
+```
 
 ### Terminal Console (JVM)
 ```bash

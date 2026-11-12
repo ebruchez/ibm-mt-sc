@@ -16,6 +16,14 @@ lazy val checkRp2040Lint = taskKey[Unit](
   "Verify RP2040 firmware ELF against forbidden heavy symbols, hot-path allocations, and XIP cache footprint limits"
 )
 
+lazy val buildWebSite = taskKey[File](
+  "Build the production Scala.js web emulator bundle into target/site/ for GitHub Pages"
+)
+
+lazy val publishGhPages = taskKey[Unit](
+  "Build the production web emulator and push target/site/ to the gh-pages branch on origin"
+)
+
 def runRp2040Lint(elfFile: File, log: sbt.util.Logger): Unit = {
   if (!elfFile.exists()) {
     sys.error(s"RP2040 ELF file not found: $elfFile (run buildFeatherRp2040 first)")
@@ -110,7 +118,60 @@ lazy val root = project
     name := "ibm-mt-sc-emulator",
     publish / skip := true,
     buildFeatherRp2040 := (rp2040 / buildFeatherRp2040).value,
-    checkRp2040Lint := (rp2040 / checkRp2040Lint).value
+    checkRp2040Lint := (rp2040 / checkRp2040Lint).value,
+    buildWebSite := {
+      val log = streams.value.log
+      val _ = (core.js / Compile / fullLinkJS).value
+      val jsOutDir = (core.js / Compile / fullLinkJS / scalaJSLinkerOutputDirectory).value
+      val baseDir = (ThisBuild / baseDirectory).value
+      val webDir = baseDir / "web"
+      val siteDir = baseDir / "target" / "site"
+
+      IO.delete(siteDir)
+      IO.createDirectory(siteDir)
+
+      val indexHtml = IO.read(webDir / "index.html")
+      val prodHtml = indexHtml.replaceAll(
+        """\.\./core/js/target/[^"]+/main\.js""",
+        "main.js"
+      )
+      IO.write(siteDir / "index.html", prodHtml)
+      IO.copyFile(webDir / "styles.css", siteDir / "styles.css")
+      IO.copyFile(jsOutDir / "main.js", siteDir / "main.js")
+      val mapFile = jsOutDir / "main.js.map"
+      if (mapFile.exists()) {
+        IO.copyFile(mapFile, siteDir / "main.js.map")
+      }
+      IO.write(siteDir / ".nojekyll", "")
+
+      val jsKb = (siteDir / "main.js").length() / 1024
+      log.info(s"Built production web site in $siteDir (main.js: ${jsKb} KB)")
+      siteDir
+    },
+    publishGhPages := {
+      val log = streams.value.log
+      val siteDir = buildWebSite.value
+      val baseDir = (ThisBuild / baseDirectory).value
+      val remoteUrl = Process(Seq("git", "remote", "get-url", "origin"), baseDir).!!.trim
+      val headSha = Process(Seq("git", "rev-parse", "--short", "HEAD"), baseDir).!!.trim
+
+      def runGit(args: String*): Unit = {
+        val code = Process(Seq("git") ++ args, siteDir).!(log)
+        if (code != 0) {
+          sys.error(s"git ${args.mkString(" ")} failed with exit code $code")
+        }
+      }
+
+      try {
+        runGit("init", "-b", "gh-pages")
+        runGit("add", "-A")
+        runGit("commit", "-m", s"Deploy IBM MT/SC Web Emulator ($headSha)")
+        runGit("push", "--force", remoteUrl, "gh-pages:gh-pages")
+        log.info(s"Published target/site/ ($headSha) to $remoteUrl (branch gh-pages)")
+      } finally {
+        IO.delete(siteDir / ".git")
+      }
+    }
   )
 
 lazy val core = crossProject(JSPlatform, JVMPlatform, NativePlatform)
