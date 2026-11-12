@@ -22,6 +22,7 @@ A technical summary of the hardware, logic packaging, timing, memory, instructio
 | **Master Clock Frequency** | **240 kHz** | Crystal oscillator driving alternating `SSA` / `SSB` **2.4 µs** single-shots (`8.33 µs` cycle) |
 | **Core Memory Capacity** | **2,048 bytes** | **1,024 16-bit words** (**16,384** general ferrite cores + **48** special-register cores) |
 | **Core Memory Cycle Time** | **25 µs** | **33.3 µs** per `RWW` (P-only) nibble; **50 µs** per `RRWW` (P+Q) nibble (~8 µs intrinsic core speed) |
+| **Instruction Execution Speed** | **682 – 3,000 IPS (~1,485 avg.)** | `333.3 µs`–`1,466.7 µs` per instruction (`~673 µs` weighted avg.; **~45–70 ms** to justify a line) |
 | **Word / Instruction Width** | **16 bits** | 2 bytes per word/instruction, processed **4 bits (1 nibble)** at a time |
 | **Instruction Classes / Operations** | **8 classes / 24 ops** | Full Branch, Incremental Branch, Bit Control, Immediate SCAT, Register SCAT, Byte Indirect, Output, Input |
 | **Working Registers** | **32 × 16-bit (`R0`–`R31`)** | Memory-mapped in the lowest **64 bytes** (`0x000`–`0x03F`) of core storage |
@@ -114,24 +115,29 @@ In IBM SLT/SLD documentation, there are three distinct packaging levels:
 | **P-Only Word Time (`I-0`, etc.)** | **133.3 µs** | 4 × `33.3 µs` `RWW` nibble cycles (`I-0` always runs `P ONLY`) |
 | **Full P+Q Word Time (`I-1`, `I-9`, etc.)** | **200.0 µs** | 4 × `50.0 µs` `RRWW` nibble cycles |
 | **Word Times per Instruction** | **2 to 10 Word Times** | Sequenced across `I-0` through `I-9`; unused states skipped by **Permute** logic (`ILD 0304`) |
-| **Instruction Execution Time** | **333.3 µs – 1,533.3 µs** | **~650 to 3,000 instructions/sec** depending on instruction type and indirect addressing |
+| **Instruction Execution Time** | **333.3 µs – 1,466.7 µs** | **682 to 3,000 instructions/sec** (`80`–`352` `SSA`/`SSB` pulses @ 240 kHz) |
+| **Average Instruction Rate** | **~1,485 instructions/sec** | **~673 µs** (`~161.5` pulses) weighted average across the microprogram / justification instruction mix |
+| **Line Justification Compute Time** | **~45 – 70 ms per line** | ~60–100 instructions for escapement, deficit division, and space expansion (completes within a single ~150–250 ms Selectric carrier return) |
 
 ### Execution Timing by Instruction Class
 
-| Instruction Class | Word Times Executed (`I-0`–`I-9`) | Total Word Times | Execution Time (µs) |
-|---|---|:---:|:---:|
-| **Branch (Not Taken)** | `I-0`, `I-1` | **2** | **333.3 µs** |
-| **Branch (Taken, No Link)** | `I-0`, `I-1`, `I-9` | **3** | **533.3 µs** |
-| **Branch with Link (`JMPL`)** | `I-0`, `I-1`, `I-2`, `I-3`, `I-9` | **5** | **866.7 µs** |
-| **Incremental Branch (Not Taken)** | `I-0`, `I-1`, `I-2`, `I-3` | **4** | **666.7 µs** |
-| **Incremental Branch (Taken)** | `I-0`, `I-1`, `I-2`, `I-3`, `I-9` | **5** | **866.7 µs** |
-| **Bit Control (`TBIT`, `SBIT`, `RBIT`, `PBIT`)** | `I-0`, `I-1`, `I-2`, `I-3` | **4** | **666.7 µs** |
-| **Immediate Arithmetic (`MOVI`, `ADDI`, `SUBI`, `CMPI`)** | `I-0`, `I-1`, `I-6`, `I-9` | **4** | **666.7 µs** |
-| **Register Direct Arithmetic (`MOV`, `ADD`, `SUB`, `CMP`)** | `I-0`, `I-1`, `I-2`, `I-5`, `I-6`, `I-9` | **6** | **1,000.0 µs** (1.0 ms) |
-| **Input / Output (Direct)** | `I-0`, `I-1`, `I-2`, `I-5` | **4** | **666.7 µs** |
-| **Input / Output (Indirect / Multiplex `[R0]++`)** | `I-0`, `I-1`, `I-2`, `I-3`, `I-4`, `I-5` | **6** | **1,000.0 µs** (1.0 ms) |
-| **Byte Indirect (Q-Indirect only)** | `I-0`, `I-1`, `I-2`, `I-3`, `I-4`, `I-5`, `I-6`, `I-9` | **8** | **1,266.7 µs** |
-| **Byte Indirect (P-Indirect & Q-Indirect)** | `I-0`, `I-1`, `I-2`, `I-3`, `I-4`, `I-5`, `I-6`, `I-7`, `I-8`, `I-9` | **10** | **1,533.3 µs** |
+Per ALD `[AA092 CS4]` (`+P ONLY = !I-1 && !I-9 && (!JMP || !I-3)`), only `I-1`, `I-9`, and `I-3` (during `JMPL`) run `200.0 µs` (`48`-pulse `RRWW` `P&Q`) Word Times; all other Word Times run `133.3 µs` (`32`-pulse `RWW` `P-Only`) Word Times:
+
+| Instruction Class | Word Times Executed (`I-0`–`I-9`) | Total Word Times | `SSA`/`SSB` Pulses | Execution Time (µs) | Speed (IPS) |
+|---|---|:---:|:---:|:---:|:---:|
+| **Branch (Not Taken)** | `I-0`, `I-1` | **2** | **80** | **333.3 µs** | **3,000 / sec** |
+| **Branch (Taken, No Link)** | `I-0`, `I-1`, `I-9` | **3** | **128** | **533.3 µs** | **1,875 / sec** |
+| **Incremental Branch (Not Taken)** | `I-0`, `I-1`, `I-2`, `I-3` | **4** | **144** | **600.0 µs** | **1,667 / sec** |
+| **Bit Control (`TBIT`, `SBIT`, `RBIT`, `PBIT`)** | `I-0`, `I-1`, `I-2`, `I-3` | **4** | **144** | **600.0 µs** | **1,667 / sec** |
+| **Input / Output (Direct)** | `I-0`, `I-1`, `I-2`, `I-5` | **4** | **144** | **600.0 µs** | **1,667 / sec** |
+| **Immediate Arithmetic (`MOVI`, `ADDI`, `SUBI`, `CMPI`)** | `I-0`, `I-1`, `I-6`, `I-9` | **4** | **160** | **666.7 µs** | **1,500 / sec** |
+| **Incremental Branch (Taken)** | `I-0`, `I-1`, `I-2`, `I-3`, `I-9` | **5** | **192** | **800.0 µs** | **1,250 / sec** |
+| **Branch with Link (`JMPL`)** | `I-0`, `I-1`, `I-2`, `I-3`, `I-9` | **5** | **208** | **866.7 µs** | **1,154 / sec** |
+| **Input / Output (Indirect / Multiplex `[R0]++`)** | `I-0`, `I-1`, `I-2`, `I-3`, `I-4`, `I-5` | **6** | **208** | **866.7 µs** | **1,154 / sec** |
+| **Register Direct Arithmetic (`MOV`, `ADD`, `SUB`, `CMP`)** | `I-0`, `I-1`, `I-2`, `I-5`, `I-6`, `I-9` | **6** | **224** | **933.3 µs** | **1,071 / sec** |
+| **Byte Indirect (P-Indirect or Q-Indirect only)** | 8 Word Times (`6 P-Only + 2 P&Q`) | **8** | **288** | **1,200.0 µs** (1.2 ms) | **833 / sec** |
+| **Byte Indirect (P-Indirect & Q-Indirect)** | `I-0`, `I-1`, `I-2`, `I-3`, `I-4`, `I-5`, `I-6`, `I-7`, `I-8`, `I-9` | **10** | **352** | **1,466.7 µs** | **682 / sec** |
+| **Weighted Average (Microprogram / Justification Mix)** | **~4.1 Word Times (~16.4 Bit-Times)** | **~4.1** | **~161.5** | **~673.0 µs** | **~1,485 / sec** |
 
 ---
 
