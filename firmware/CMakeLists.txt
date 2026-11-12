@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.13)
 
 if (NOT DEFINED PICO_SDK_PATH)
-    set(PICO_SDK_PATH "/Users/ebruchez/Projects/pico/pico-sdk")
+    set(PICO_SDK_PATH "$ENV{HOME}/Projects/pico/pico-sdk")
 endif()
 
 if (NOT DEFINED PICO_BOARD)

@@ -149,7 +149,7 @@ Exactly 12 bytes across three specific memory regions are skipped or overwritten
 
 3. **The Trampoline Slot: Bytes `194..195` (when `entryPoint >= 256`)**:
    - The exit jump instruction at byte 46 has an 8-bit page-0 target displacement (`< 256`). It cannot directly jump to high memory (such as power-on microprogram entry at `546` / `0x222`).
-   - [`TapeCartridge.fromCoreImage`](file:///Users/ebruchez/Projects/ibm-mt-sc/core/shared/src/main/scala/mtsc/periph/TapeCartridge.scala#L176-L189) dynamically finds an unused 2-byte slot in low memory (preferring `194..195`, which sits in the unused gap between proportional escapement tables at `64..191` and line buffers starting at `198`), and places a `JMP entryPoint` instruction there.
+   - [`TapeCartridge.fromCoreImage`](../../core/shared/src/main/scala/mtsc/periph/TapeCartridge.scala#L176-L189) dynamically finds an unused 2-byte slot in low memory (preferring `194..195`, which sits in the unused gap between proportional escapement tables at `64..191` and line buffers starting at `198`), and places a `JMP entryPoint` instruction there.
    - Core memory at `194..195` therefore contains the 2-byte trampoline jump rather than whatever original data was in `CoreImage`.
 
 #### Core Memory State Summary at Boot Completion
@@ -164,4 +164,4 @@ Exactly 12 bytes across three specific memory regions are skipped or overwritten
 |      **`194..195`**       | Trampoline gap                | **No** (unless already matching) | `JMP entryPoint` (if `entryPoint >= 256`)                  |
 |      **`196..2047`**      | Line buffers & microcode      |             **Yes**              | Loaded in Upper Core pass                                  |
 
-Because of this hardware reality, MT/SC microcode (such as [`ContinuousComposerRoutine`](file:///Users/ebruchez/Projects/ibm-mt-sc/core/shared/src/main/scala/mtsc/diag/ContinuousComposerRoutine.scala#L48-L50)) starts by explicitly re-initializing `R20`, `R22`, and any working registers it needs, never relying on low bootstrap registers surviving cold boot.
+Because of this hardware reality, MT/SC microcode (such as [`ContinuousComposerRoutine`](../../core/shared/src/main/scala/mtsc/diag/ContinuousComposerRoutine.scala#L48-L50)) starts by explicitly re-initializing `R20`, `R22`, and any working registers it needs, never relying on low bootstrap registers surviving cold boot.

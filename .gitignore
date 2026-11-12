@@ -10,3 +10,5 @@ firmware/build-*/
 *.log
 .DS_Store
 .scala-build/
+docs/*.pdf
+docs/produced/code-examples.md

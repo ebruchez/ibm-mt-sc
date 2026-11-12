@@ -72,10 +72,13 @@ This produces `firmware/build-feather-rp2040/mtsc_feather_rp2040.uf2` (and `.elf
   - Plugs directly onto the Feather RP2040 (`SPI0`: `SCK=GPIO18`, `MOSI=GPIO19`, `ECS=D9/GPIO9`, `D/C=D10/GPIO10`, `SRCS=D6/GPIO8`, `SDCS=D5/GPIO7`).
   - **Proportional Press Roman Serif Galley Output**: Renders the Selectric Composer galley sheet in Landscape (`296×128`) at `2 px = 1 escapement unit` (`6–18 px` character widths matching the `3–9 unit` escapement table), complete with a top pica ruler (`0p`–`12p`), target measure pointer (`▼ 140u`), vertical margin guideline, and 2-digit non-repro line numbers.
   - **Progressive & Hybrid eInk Refresh**: Progressive non-flashing differential updates (`450 ms`) as characters and words are composed, automatic clean 8-line page turns, and a 4-level grayscale camera-ready proof refresh when composition halts (or via `[e]` / `epd` and `epd flip` in the console).
-  - **FeatherWing Tactile Buttons (`A` = `D11/GPIO11`, `B` = `D12/GPIO12`, `C` = `D13/GPIO13`)**:
-    - **Button A**: Start / Pause / Restart composition.
-    - **Button B**: Scroll through completed galley lines or trigger a 4-grayscale proof refresh.
-    - **Button C**: Master Reset CCU, rewind tape cartridge, and clear galley sheet.
+  - **6-Button Color-Coded Operator & CE Control Panel** (see the [RP2040 User Manual](docs/produced/rp2040-user-manual.md)):
+    - **1 — Green (`D12/GPIO12`)**: Click = `START / PAUSE`, Hold = Toggle Pacing (`14.1 cps` vs. Full-Speed Batch).
+    - **2 — Yellow (`D13/GPIO13`)**: Click = `SINGLE STEP`, Hold = `~10 Hz` Auto-Step.
+    - **3 — Red (`D4/GPIO6`)**: Click = `TAPE / MASTER RESET`, Hold = Cycle Next Tape Cartridge (`[1/3]`–`[3/3]`).
+    - **4 — White (`D11/GPIO11`)**: Click = `GALLEY ▲` (scroll up 4 lines), Hold = Jump to Top.
+    - **5 — Blue (`A0/GPIO26`)**: Click = `GALLEY ▼ / PROOF` (scroll down 4 lines or 4-gray proof refresh), Hold = Jump to Bottom.
+    - **6 — Black (`A1/GPIO27`)**: Click = `CE DISPLAY MODE` (`DP1..4`, `CLK`, `OPR`), Hold = Cycle Line Measure (`140u` / `170u` / `110u`).
 - **Adafruit 128×32 Monochrome OLED FeatherWing (`PID 2900`, `SSD1306`, `I2C1` `0x3C`)**:
   - Can be stacked simultaneously alongside the 2.9" eInk FeatherWing (`SDA=GPIO2`, `SCL=GPIO3` on `I2C1`; zero bus conflict with `SPI0`) or omitted entirely (auto-detected via bounded-timeout I2C probe with internal pull-up verification).
   - **High-Speed Live Telemetry (`128×32`)**:
@@ -120,7 +123,7 @@ sbt coreJVM/test
     ├── ccu-assembly-reference.md
     ├── bootloading.md
     ├── mtsc-in-numbers.md
-    └── code-examples.md
+    └── rp2040-user-manual.md
 ```
 
 ---
@@ -134,6 +137,7 @@ sbt coreJVM/test
 
 ### Project Reference Docs
 
+- [RP2040 Hardware Emulator User Manual](docs/produced/rp2040-user-manual.md) — Operating guide for the 2.9" eInk galley display, 128×32 OLED console, and 6-button control panel.
 - [The IBM MT/SC in Technical Numbers](docs/produced/mtsc-in-numbers.md) — Hardware, gate/card counts, clock timing, memory map, and physical specifications.
 - [CCU Assembly Language Reference](docs/produced/ccu-assembly-reference.md) — Complete ISA guide, binary encodings, addressing modes, and annotated assembly examples.
 - [Cold-Booting & Initial Loader Guide](docs/produced/bootloading.md) — How the 3-step front-panel bootstrap loader and two-pass self-relocating program tape work.
