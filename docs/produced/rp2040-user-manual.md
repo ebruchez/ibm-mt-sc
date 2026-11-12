@@ -45,7 +45,7 @@ All 6 pushbuttons are wired **active-LOW** between their Feather pin and `GND` (
 | **3** | **Red** | `D4` (`GPIO 6`) | **TAPE / MASTER RESET**<br>Abort any active run, perform a 6320 **Master Reset** (`PSAR = 0x036`), rewind the current magnetic tape cartridge to frame `0000`, and clear the galley sheet. | **NEXT TAPE CARTRIDGE**<br>Cycle through the 3 built-in magnetic tape cartridges (`[1/3]` → `[2/3]` → `[3/3]`), mount on the Right Tape Reader, rewind, and reset. |
 | **4** | **White** | `D11` (`GPIO 11`) | **GALLEY UP (`▲`)**<br>Scroll the eInk galley viewport **up 4 lines** toward line `01` and render a 4-level grayscale proof view. | **JUMP TO TOP OF GALLEY**<br>Jump immediately to the first 8 lines (`01`–`08`) at the top of the composed galley sheet. |
 | **5** | **Blue** | `A0` (`GPIO 26`) | **GALLEY DOWN (`▼`) / PROOF**<br>Scroll the eInk galley viewport **down 4 lines** toward the bottom. If already at the bottom, triggers a full **4-level grayscale proof refresh**. | **JUMP TO BOTTOM OF GALLEY**<br>Jump immediately to the most recently composed lines at the bottom of the galley sheet. |
-| **6** | **Black** | `A1` (`GPIO 27`) | **CE DISPLAY MODE**<br>Cycle the 11-lamp rotary indicator mode on the top band of the OLED: `DP1` → `DP2` → `DP3` → `DP4` → `CLK` → `OPR`. | **CYCLE LINE MEASURE**<br>Cycle the target justification width between **`140u`** (`11.7 picas`), **`170u`** (`14.2 picas`), and **`110u`** (`9.2 picas`), updating both displays. |
+| **6** | **Black** | `A1` (`GPIO 27`) | **CE DISPLAY MODE**<br>Cycle the 11-lamp rotary indicator mode on the top band of the OLED: `DP1` → `DP2` → `DP3` → `DP4` → `CLK` → `OPR`. | **CYCLE LINE MEASURE**<br>Cycle the target justification width between **`140u`** (`11.7 picas`), **`110u`** (`9.2 picas`), and **`90u`** (`7.5 picas`), updating both displays. |
 
 > [!TIP]
 > **Interrupting a Run**: While the CCU is actively composing, pressing **Green** or **Yellow** pauses execution cleanly at the current instruction boundary (preserving your partial galley so you can single-step with **Yellow** or resume with **Green**), whereas pressing **Red** immediately aborts the run, resets the CCU, and rewinds the tape.
@@ -85,7 +85,7 @@ The 128×32 monochrome OLED acts as a miniature **IBM 6320 Customer Engineer & O
 ### Band 2 (Middle): Line Number & Live Escapement / Justification Gauge
 - **`L01`..`L99` (left)**: Current galley line number being composed.
 - **Progress Bar (center)**: Fills from left to right as characters (`3`–`9` escapement units each) are buffered into the current line toward the right margin.
-- **`084/140U` (right)**: Exact escapement units accumulated on the current line versus the active target line measure (`140U`, `170U`, or `110U`).
+- **`084/140U` (right)**: Exact escapement units accumulated on the current line versus the active target line measure (`140U`, `110U`, or `090U`).
 
 ### Band 3 (Bottom): Live Machine Counters
 - **`PC:xxx`**: 11-bit hexadecimal **Program Counter** (`PSAR`, `000`–`7FF`).
@@ -101,7 +101,7 @@ The 296×128 eInk display represents the physical **Selectric Composer camera-re
 
 - **Top Pica Ruler Bar (`y = 0..13`)**:
   - Marked in **picas** (`0p`, `3p`, `6p`, `9p`, `12p`, where `1 pica = 12 units = 24 pixels`), with `6-unit` half-pica ticks and `3-unit` quarter-pica ticks.
-  - **Target Measure Badge (`▼ 140`)**: Indicates the active right-margin justification setting (`140u`, `170u`, or `110u`) and projects a vertical **dotted right-margin guideline** down the sheet.
+  - **Target Measure Badge (`▼ 140`)**: Indicates the active right-margin justification setting (`140u`, `110u`, or `90u`) and projects a vertical **dotted right-margin guideline** down the sheet.
 - **Galley Viewport (`8` Lines Visible, `Up to 64` Lines Retained)**:
   - Each line is labeled in the left margin with a 2-digit non-repro proof line number (`01`..`64`).
   - Characters are rendered in an anti-aliased 4-level grayscale **Press Roman** proportional serif font whose pixel widths (`6 px` to `18 px`) match the authentic IBM Composer `3`–`9` unit escapement table.

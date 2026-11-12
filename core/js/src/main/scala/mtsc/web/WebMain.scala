@@ -7,7 +7,7 @@ import mtsc.isa.{Decoder, Instruction}
 import mtsc.cpu.{CcuEngineMode, StepResult}
 import mtsc.cpu.ild.{BackplaneCardCage, BackplaneCardSpec, CardPinSignal, IldScopeChannel, IldTimingSample, OscSubPhase}
 import mtsc.asm.Disassembler
-import mtsc.diag.{DiagnosticPrograms, EscapementRoutine}
+import mtsc.diag.{ContinuousComposerRoutine, DiagnosticPrograms, EscapementRoutine}
 import mtsc.periph.*
 import mtsc.console.*
 
@@ -118,8 +118,7 @@ object WebMain {
 
     if (prog == DiagnosticPrograms.ContinuousCompositionDemo) {
       system.operatorPanel.measure = 140
-      system.memory.writeReg(RegId(30), Word(140))
-      system.memory.writeReg(RegId(28), Word(110))
+      ContinuousComposerRoutine.setMeasure(system.memory, 140)
       if (!system.rightTape.isTapeLoaded && !system.leftTape.isTapeLoaded) {
         system.loadTape(
           Device.RightTape,
@@ -833,11 +832,10 @@ object WebMain {
     consoleState.statusMessage = msg
     consoleState.log(s"Keypad [${key.topLegend}]: $msg")
 
-    // Sync measure into R30/R28 if Measure was just updated for the Continuous Composer demo
+    // Sync measure into R30/R28 and INIT instructions if Measure was just updated for the Continuous Composer demo
     if (hadActiveSetup && system.memory.readWord(Address(546)).unsigned != 0) {
       val m = math.min(240, math.max(60, system.operatorPanel.measure))
-      system.memory.writeReg(RegId(30), Word(m))
-      system.memory.writeReg(RegId(28), Word(math.max(40, m - 30)))
+      ContinuousComposerRoutine.setMeasure(system.memory, m)
     }
 
     // If START or 0/TAPE was pressed with no active setup prompt, start composition!

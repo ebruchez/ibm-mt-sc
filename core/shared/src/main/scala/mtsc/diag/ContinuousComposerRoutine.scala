@@ -14,10 +14,49 @@ import mtsc.memory.CoreMemory
 object ContinuousComposerRoutine {
 
   /**
+   * Address of the `MOVI R28, imm` wrap-threshold instruction at `INIT` (byte 546).
+   */
+  val WrapThresholdInstructionAddress: Address = Address(546)
+
+  /**
+   * Address of the `MOVI R30, imm` target-measure instruction at `INIT` (byte 548).
+   */
+  val TargetMeasureInstructionAddress: Address = Address(548)
+
+  /**
    * Address of the `IN R4, TAPE_R` instruction within the microprogram (byte 558).
    * Bit 8 (the `m` bit) selects Right Tape (0) vs Left Tape (1).
    */
   val TapeInputInstructionAddress: Address = Address(558)
+
+  /**
+   * Updates both the working registers (`R28` wrap threshold, `R30` target measure)
+   * and the `INIT` immediate instructions at addresses 546 (`MOVI R28, imm`) and 548 (`MOVI R30, imm`)
+   * when `ContinuousComposerRoutine` is loaded in `memory`.
+   */
+  def setMeasure(memory: CoreMemory, targetMeasure: Int): Unit = {
+    val clampedMeasure = math.max(30, math.min(254, targetMeasure))
+    val wrapThreshold = math.max(20, clampedMeasure - 6)
+    memory.writeReg(RegId(28), Word(wrapThreshold))
+    memory.writeReg(RegId(30), Word(clampedMeasure))
+    // In little-endian CoreMemory, MOVI R28 (0xFE) has its opcode at 547 and immediate at 546;
+    // MOVI R30 (0xFF) has its opcode at 549 and immediate at 548.
+    if (
+      memory.readByte(WrapThresholdInstructionAddress + 1) == 0xfe &&
+      memory.readByte(TargetMeasureInstructionAddress + 1) == 0xff
+    ) {
+      memory.writeByte(WrapThresholdInstructionAddress, wrapThreshold)
+      memory.writeByte(TargetMeasureInstructionAddress, clampedMeasure)
+    }
+  }
+
+  def getMeasure(memory: CoreMemory): Int = {
+    if (memory.readByte(TargetMeasureInstructionAddress + 1) == 0xff) {
+      memory.readByte(TargetMeasureInstructionAddress)
+    } else {
+      memory.readReg(RegId(30)).unsigned
+    }
+  }
 
   /**
    * Patches the input instruction at address 558 to read from either RightTape or LeftTape.
@@ -38,7 +77,7 @@ object ContinuousComposerRoutine {
     s"""
       .org 546
       INIT:
-          MOVI    R28, 110         ; Threshold for line wrap: 110 units
+          MOVI    R28, 134         ; Threshold for immediate space wrap: 134 units (measure - 6)
           MOVI    R30, 140         ; Target measure: 140 units
 
       NEW_LINE:
@@ -60,13 +99,16 @@ object ContinuousComposerRoutine {
           CMPI    R4, 32           ; Space?
           JMP.NE  PROCESS_CHAR
 
-          ; Space encountered! Check if accumulated units reached threshold
+          ; Space encountered! Check if accumulated units reached immediate threshold
           CMP     R20, R28
           JMP.LO  ACCUM_SPACE
           ; Line is full! Break line here (drop trailing space)
+          MOVI    R18, 0           ; No partial word carry
           JMP     JUSTIFY_LINE
 
       ACCUM_SPACE:
+          MOV     R24, R8          ; Save buffer pointer at this space (word break point)
+          MOV     R26, R20         ; Save accumulated units before this space
           ADDI    R22, 1           ; Space count++
           ; Fall through to PROCESS_CHAR for space
 
@@ -75,11 +117,25 @@ object ContinuousComposerRoutine {
           MOVB    [R8]++, R4
 
           ; Lookup character escapement width from table at R4 + 64
-          MOV     R2, R4
-          ADDI    R2, 64
-          MOVB    R10, [R2]
+          ADDI    R4, 64
+          MOVB    R10, [R4]
           ADD     R20, R10         ; Total units += width
+
+          ; If this character pushed accumulated units past target measure R30, wrap at last space
+          CMP     R30, R20
+          JMP.LO  WORD_OVERFLOW
           JMP     READ_CHAR_LOOP
+
+      WORD_OVERFLOW:
+          ; If no space has been seen on this line yet (R22 == 0), keep reading single long word
+          CMPI    R22, 0
+          JMP.EQ  READ_CHAR_LOOP
+          ; Rewind line to the last space (R24) and carry [R24+1 .. R8-1] to the next line
+          MOV     R18, R8          ; Save end of partial word in R18
+          MOV     R8, R24          ; Truncate current line at the space
+          MOV     R20, R26         ; Restore accumulated units prior to the space
+          SUBI    R22, 1           ; Exclude the dropped space from space count
+          JMP     JUSTIFY_LINE
 
       LINE_ENDED_CR:
           ; Carrier return (paragraph break). If line has no text, print blank line
@@ -111,10 +167,6 @@ object ContinuousComposerRoutine {
           JMP     TRANSFER_OUTPUT
 
       DEFICIT_ZERO:
-          MOVI    R14, 0
-          MOVI    R16, 0
-          JMP     TRANSFER_OUTPUT
-
       PRINT_RAW_LINE:
           MOVI    R14, 0
           MOVI    R16, 0
@@ -175,11 +227,30 @@ object ContinuousComposerRoutine {
       PRINT_BLANK_LINE:
           MOVI    R4, 13
           OUT     TRANSLATOR, R4
-          JMP     LINE_COMPLETED
 
       LINE_COMPLETED:
-          ; Loop back to process next line
-          JMP     NEW_LINE
+          ; If a partial word overflowed the previous line (R18 != 0),
+          ; copy its characters [R24+1 .. R18-1] to the start of the new line buffer.
+          CMPI    R18, 0
+          JMP.EQ  NEW_LINE
+          MOVI    R8, 60
+          SBIT    R8, 8
+          MOVI    R20, 0
+          MOVI    R22, 0
+          MOV     R6, R24
+          ADDI    R6, 1            ; Advance past the sentinel at [R24]
+      CARRY_LOOP:
+          CMP     R6, R18
+          JMP.EQ  CARRY_DONE
+          MOVB    R4, [R6]++
+          MOVB    [R8]++, R4
+          ADDI    R4, 64
+          MOVB    R10, [R4]
+          ADD     R20, R10
+          JMP     CARRY_LOOP
+      CARRY_DONE:
+          MOVI    R18, 0
+          JMP     READ_CHAR_LOOP
 
       ALL_DONE:
       IDLE_HALT:

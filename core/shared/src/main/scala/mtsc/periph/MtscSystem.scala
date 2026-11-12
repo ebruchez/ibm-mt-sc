@@ -395,8 +395,7 @@ object MtscSystem {
     EscapementRoutine.initializeTable(mem)
 
     if (prog == DiagnosticPrograms.ContinuousCompositionDemo) {
-      mem.writeReg(RegId(30), Word(measure))
-      mem.writeReg(RegId(28), Word(math.max(40, measure - 30)))
+      ContinuousComposerRoutine.setMeasure(mem, measure)
       ContinuousComposerRoutine.setInputStation(mem, station)
     } else if (prog == DiagnosticPrograms.EndToEndCompositionDemo) {
       mem.writeReg(RegId(30), Word(100))

@@ -221,6 +221,10 @@ object Main {
 
     if (consoleState.faceplateInstalled && (lower == "" || lower == "c" || lower == "start") && system.operatorPanel.activeSetupParam.isDefined) {
       val msg = system.operatorPanel.pressKey(ConsoleKey.Start)
+      if (system.memory.readWord(Address(546)).unsigned != 0) {
+        val m = math.min(240, math.max(30, system.operatorPanel.measure))
+        ContinuousComposerRoutine.setMeasure(system.memory, m)
+      }
       consoleState.statusMessage = msg
       consoleState.log(s"Operator START: $msg")
       return true

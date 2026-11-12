@@ -55,4 +55,45 @@ class ContinuousComposerSuite extends munit.FunSuite {
     assertEquals(res2, StepResult.Halted)
     assertEquals(system.paper.lines, printedLines)
   }
+
+  test("ContinuousComposerRoutine.setMeasure updates INIT immediates and justifies strictly to 140u, 110u, and 90u") {
+    val img = Assembler.assemble(ContinuousComposerRoutine.Source) match {
+      case Right(i) => i
+      case Left(err) => fail(s"Assembly failed: $err")
+    }
+
+    for (measure <- List(140, 110, 90)) {
+      val system = new MtscSystem()
+      system.loadProgram(img)
+      EscapementRoutine.initializeTable(system.memory)
+      ContinuousComposerRoutine.setMeasure(system.memory, measure)
+      assertEquals(ContinuousComposerRoutine.getMeasure(system.memory), measure)
+
+      val cartridge = TapeCartridge.fromText(TapeCartridge.HistoricalSampleText, "Historical Sample")
+      system.loadTape(Device.RightTape, cartridge)
+
+      val res = system.run(maxCycles = 250000)
+      assertEquals(res, StepResult.Halted, s"Should halt cleanly at measure=$measure")
+      assertEquals(system.memory.readReg(RegId(30)).unsigned, measure, s"R30 must remain $measure after INIT")
+
+      val galleyLines = system.paper.galleyLines.filter(_.text.nonEmpty)
+      assert(galleyLines.length >= 10, s"Expected >= 10 non-empty lines at measure=$measure, got ${galleyLines.length}")
+
+      val justifiedLines = galleyLines.filter(_.isJustified)
+      assert(justifiedLines.nonEmpty, s"Expected justified lines at measure=$measure")
+      for ((line, idx) <- justifiedLines.zipWithIndex) {
+        assertEquals(
+          line.totalUnits,
+          measure,
+          s"Justified line #$idx ('${line.text}') at measure=$measure had totalUnits=${line.totalUnits}"
+        )
+      }
+      for ((line, idx) <- galleyLines.zipWithIndex) {
+        assert(
+          line.totalUnits <= measure,
+          s"Line #$idx ('${line.text}') overflowed measure=$measure with totalUnits=${line.totalUnits}"
+        )
+      }
+    }
+  }
 }

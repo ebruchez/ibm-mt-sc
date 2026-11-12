@@ -7,7 +7,7 @@ import scala.scalanative.unsafe.*
 import mtsc.cli.Main
 import mtsc.console.{AnsiTerminal, CeConsoleState, CeConsoleView, CeDisplayMode}
 import mtsc.cpu.{CcuEngineMode, StepResult}
-import mtsc.diag.{DiagnosticPrograms, EscapementRoutine}
+import mtsc.diag.{ContinuousComposerRoutine, DiagnosticPrograms, EscapementRoutine}
 import mtsc.periph.{GalleyFont, MtscSystem, OledView, TapeCartridge}
 import mtsc.types.{Address, Device, Fmt, RegId, Word}
 
@@ -118,7 +118,7 @@ object Rp2040Main {
   private final val Btn3Long: Int  = 0x00400 // D13 hold: Next Tape Cartridge
   private final val Btn4Long: Int  = 0x00800 // D4  hold: Jump to Top of Galley
   private final val Btn5Long: Int  = 0x01000 // A0  hold: Jump to Bottom of Galley
-  private final val Btn6Long: Int  = 0x02000 // A1  hold: Cycle Line Measure (140u -> 170u -> 110u)
+  private final val Btn6Long: Int  = 0x02000 // A1  hold: Cycle Line Measure (140u -> 110u -> 90u)
   private final val BtnWake: Int   = 0x10000 // Immediate press-down wake flag
 
   // Pre-allocated 296x128 SSD1680 eInk bitplanes (2 * 4,736 = 9,472 bytes) rooted in module fields
@@ -159,16 +159,8 @@ object Rp2040Main {
   }
 
   private def applySelectedMeasure(system: MtscSystem): Unit = {
-    val wrapThreshold = math.max(20, selectedMeasure - 30)
     system.operatorPanel.measure = selectedMeasure
-    system.memory.writeWord(Address(56), Word(wrapThreshold))
-    system.memory.writeWord(Address(60), Word(selectedMeasure))
-    // If ContinuousComposerRoutine is loaded at 0x222 (546: MOVI R28, imm; 548: MOVI R30, imm),
-    // also update its immediate operand bytes (547 and 549) so INIT uses the selected measure.
-    if ((system.memory.readByte(Address(546)) & 0xff) == 0x9c && (system.memory.readByte(Address(548)) & 0xff) == 0x9e) {
-      system.memory.writeByte(Address(547), wrapThreshold)
-      system.memory.writeByte(Address(549), selectedMeasure)
-    }
+    ContinuousComposerRoutine.setMeasure(system.memory, selectedMeasure)
   }
 
   private def currentTargetMeasure(system: MtscSystem): Int = {
@@ -684,10 +676,10 @@ object Rp2040Main {
       consoleState.log(msg)
       consoleState.statusMessage = msg
     } else if ((actionMask & Btn6Long) != 0) {
-      // Button 6 Hold: Cycle Line Justification Measure (140u -> 170u -> 110u)
+      // Button 6 Hold: Cycle Line Justification Measure (140u -> 110u -> 90u)
       selectedMeasure =
-        if (selectedMeasure == 140) 170
-        else if (selectedMeasure == 170) 110
+        if (selectedMeasure == 140) 110
+        else if (selectedMeasure == 110) 90
         else 140
       applySelectedMeasure(system)
       requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false, forceNow = true)
@@ -808,6 +800,9 @@ object Rp2040Main {
           },
           runFn = () => runPacedRp2040(system, consoleState, terminal)
         )
+        if (system.operatorPanel.measure >= 30 && system.operatorPanel.measure <= 240) {
+          selectedMeasure = system.operatorPanel.measure
+        }
     }
   }
 
