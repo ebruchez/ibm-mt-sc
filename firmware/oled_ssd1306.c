@@ -15,9 +15,9 @@
 #define OLED_BAUDRATE   400000u // 400 kHz Fast-Mode I2C (~11 ms for 512B, rock-solid with internal/external pull-ups)
 
 // Bounded timeouts so an unconnected or unplugged OLED never blocks the emulator
-#define OLED_PROBE_TIMEOUT_US  2500u  // 2.5 ms timeout for initial 0x3C ACK probe
-#define OLED_CMD_TIMEOUT_US    5000u  // 5 ms timeout for short command packets
-#define OLED_DATA_TIMEOUT_US   25000u // 25 ms timeout for 513-byte framebuffer burst
+#define OLED_PROBE_TIMEOUT_US  10000u  // 10 ms timeout for initial 0x3C ACK probe
+#define OLED_CMD_TIMEOUT_US    15000u  // 15 ms timeout for short command packets
+#define OLED_DATA_TIMEOUT_US   100000u // 100 ms timeout for 513-byte framebuffer burst
 
 // SSD1306 Command Definitions
 #define SSD1306_DISPLAYOFF          0xAE
@@ -52,7 +52,17 @@ static int32_t oled_diag_last_rc = 0;
 // Pre-allocated 513-byte I2C burst buffer (0x40 data control byte + 512 framebuffer bytes)
 static uint8_t oled_tx_buf[1 + MTSC_OLED_BUFFER_BYTES];
 
+static void oled_recover_i2c_bus(void) {
+    i2c_deinit(OLED_I2C_PORT);
+    i2c_init(OLED_I2C_PORT, OLED_BAUDRATE);
+    gpio_set_function(OLED_SDA_PIN, GPIO_FUNC_I2C);
+    gpio_set_function(OLED_SCL_PIN, GPIO_FUNC_I2C);
+    gpio_pull_up(OLED_SDA_PIN);
+    gpio_pull_up(OLED_SCL_PIN);
+}
+
 static bool oled_write_cmd_list(const uint8_t *cmds, size_t len) {
+    pico_restore_full_clock();
     uint8_t buf[32];
     if (len + 1 > sizeof(buf)) {
         return false;
@@ -61,10 +71,15 @@ static bool oled_write_cmd_list(const uint8_t *cmds, size_t len) {
     memcpy(&buf[1], cmds, len);
     int rc = i2c_write_timeout_us(OLED_I2C_PORT, OLED_I2C_ADDR, buf, len + 1, false, OLED_CMD_TIMEOUT_US);
     oled_diag_last_rc = rc;
-    return rc == (int)(len + 1);
+    if (rc != (int)(len + 1)) {
+        oled_recover_i2c_bus();
+        return false;
+    }
+    return true;
 }
 
 void pico_oled_init(void) {
+    pico_restore_full_clock();
     if (!oled_bus_initialized) {
         // 1. Enable internal pull-ups on SDA (GPIO 2) and SCL (GPIO 3) BEFORE initializing I2C
         //    so that if no OLED FeatherWing is connected, the lines idle HIGH (3.3V) and never
@@ -147,20 +162,14 @@ void pico_oled_set_power(bool on) {
             SSD1306_MEMORYMODE, 0x00,
             SSD1306_DISPLAYON
         };
-        if (!oled_write_cmd_list(wake_cmds, sizeof(wake_cmds))) {
-            oled_present = false;
-            oled_awake = false;
-            return;
+        if (oled_write_cmd_list(wake_cmds, sizeof(wake_cmds))) {
+            oled_awake = true;
         }
-        oled_awake = true;
     } else {
         const uint8_t sleep_cmd = SSD1306_DISPLAYOFF;
-        if (!oled_write_cmd_list(&sleep_cmd, 1)) {
-            oled_present = false;
+        if (oled_write_cmd_list(&sleep_cmd, 1)) {
             oled_awake = false;
-            return;
         }
-        oled_awake = false;
     }
 }
 
@@ -173,19 +182,17 @@ void pico_oled_set_flip(bool flip180) {
         (uint8_t)(oled_flip180 ? SSD1306_SEGREMAP_FLIP : SSD1306_SEGREMAP_NORMAL),
         (uint8_t)(oled_flip180 ? SSD1306_COMSCANINC_FLIP : SSD1306_COMSCANDEC_NORMAL)
     };
-    if (!oled_write_cmd_list(flip_cmds, sizeof(flip_cmds))) {
-        oled_present = false;
-        oled_awake = false;
-    }
+    oled_write_cmd_list(flip_cmds, sizeof(flip_cmds));
 }
 
 void pico_oled_flush(const uint8_t *frame_buf) {
     if (!oled_present || frame_buf == NULL) {
         return;
     }
+    pico_restore_full_clock();
     if (!oled_awake) {
         pico_oled_set_power(true);
-        if (!oled_present) {
+        if (!oled_awake) {
             return;
         }
     }
@@ -195,7 +202,6 @@ void pico_oled_flush(const uint8_t *frame_buf) {
         SSD1306_PAGEADDR,   0, (uint8_t)(MTSC_OLED_PAGES - 1)
     };
     if (!oled_write_cmd_list(win_cmds, sizeof(win_cmds))) {
-        oled_present = false;
         return;
     }
 
@@ -212,7 +218,7 @@ void pico_oled_flush(const uint8_t *frame_buf) {
     );
     oled_diag_last_rc = rc;
     if (rc != (int)sizeof(oled_tx_buf)) {
-        oled_present = false;
+        oled_recover_i2c_bus();
         return;
     }
     oled_diag_frames++;

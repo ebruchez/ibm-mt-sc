@@ -20,6 +20,7 @@
  * - If no device ACKs `0x3C`, marks the OLED absent (`pico_oled_is_present() == false`) and returns
  *   immediately so all subsequent `pico_oled_flush` calls are zero-cost no-ops.
  */
+void pico_restore_full_clock(void);
 void pico_oled_init(void);
 
 /**
