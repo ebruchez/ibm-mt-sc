@@ -170,7 +170,7 @@ object TapeCartridge {
   val HistoricalSampleText: String =
     "The IBM Magnetic Tape Selectric Composer (MT/SC) is a system for preparing camera-ready copy for publication.\n\n" +
     "Input data is recorded on magnetic tape cartridges on a separate input station (MT/SR) and placed on the MT/SC tape console. Each tape cartridge holds approximately 4,000 words, read at 20 characters per second.\n\n" +
-    "The Composer Control Unit (CCU) is a simple computer build with IBM SLD (Solid Logic Dense) modules and 2KB of core memory. " +
+    "The Composer Control Unit (CCU) is a simple computer built with IBM SLD (Solid Logic Dense) modules and 2KB of core memory. " +
     "Its purpose is to read the tape, compute justification spaces, and output the result to a modified IBM Composer at 14 characters per second.\n\n" +
     "There is only one instance of the system known to have survived, including an input station with tape recorder, typewriter, and desk; and an output station with tape reader, control unit, Composer, and desk.\n\n" +
     "You are looking at a software simulation at the gate level of the CCU. It is written in Scala, running on an RP2040 microcontroller, and printing results to an eInk display."
