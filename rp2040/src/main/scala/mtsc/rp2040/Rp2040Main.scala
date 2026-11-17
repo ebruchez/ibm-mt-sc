@@ -191,7 +191,8 @@ object Rp2040Main {
       return false
     }
     val totalLines = system.paper.lineCount
-    val newStartLine = GalleyFont.visibleStartLine(totalLines, epdScrollOffsetLines)
+    val paginateSheet = epdPendingMode == EpdModeFastMono && epdScrollOffsetLines <= 0
+    val newStartLine = GalleyFont.visibleStartLine(totalLines, epdScrollOffsetLines, paginateSheet)
     // Whenever the visible top line shifts (e.g. advancing to a new 8-line page or scrolling),
     // promote FastMono to FullMono so the previous page's text is erased cleanly with zero ghosting.
     val modeToRun =
@@ -209,7 +210,8 @@ object Rp2040Main {
       redPlane = epdRedPlane,
       scrollOffsetLines = epdScrollOffsetLines,
       showCursor = showCursor,
-      flip180 = epdFlip180
+      flip180 = epdFlip180,
+      paginateSheet = paginateSheet
     )
     PicoSdk.pico_epd_upload_planes(epdBwPlane.at(0), epdRedPlane.at(0), modeToRun)
     true
@@ -319,7 +321,7 @@ object Rp2040Main {
     // Stage 3: Initializing IldCcu lazy val and SRAM optimizations
     PicoSdk.pico_set_boot_stage(3)
     system.cpu.ild.timingTrace.enabled = false
-    system.paper.maxRetainedLines = 64
+    system.paper.maxRetainedLines = 96
     system.paper.recordGlyphs = true
 
     // Stage 4: Constructing CeConsoleState & AnsiTerminal
@@ -614,7 +616,8 @@ object Rp2040Main {
       // Button 4 Click: Scroll Galley UP 4 lines (towards L01)
       val totalLines = system.paper.lineCount
       val maxScroll = math.max(0, totalLines - GalleyFont.MaxVisibleLines)
-      epdScrollOffsetLines = math.min(maxScroll, epdScrollOffsetLines + 4)
+      val targetStart = math.max(0, math.min(maxScroll, epdLastStartLine - 4))
+      epdScrollOffsetLines = maxScroll - targetStart
       requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false, forceNow = true)
       val msg = s"[Btn4 GALLEY UP]: Scroll offset = -$epdScrollOffsetLines (of $totalLines lines)."
       consoleState.log(msg)
@@ -631,13 +634,16 @@ object Rp2040Main {
     } else if ((actionMask & Btn5Short) != 0) {
       // Button 5 Click: Scroll Galley DOWN 4 lines (towards bottom) or Force 4-Gray Proof Refresh
       val totalLines = system.paper.lineCount
-      if (epdScrollOffsetLines > 0) {
-        epdScrollOffsetLines = math.max(0, epdScrollOffsetLines - 4)
+      val maxScroll = math.max(0, totalLines - GalleyFont.MaxVisibleLines)
+      if (epdScrollOffsetLines > 0 || (totalLines > GalleyFont.MaxVisibleLines && epdLastStartLine < maxScroll)) {
+        val targetStart = math.max(0, math.min(maxScroll, epdLastStartLine + 4))
+        epdScrollOffsetLines = maxScroll - targetStart
         requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false, forceNow = true)
         val msg = s"[Btn5 GALLEY DOWN]: Scroll offset = -$epdScrollOffsetLines (of $totalLines lines)."
         consoleState.log(msg)
         consoleState.statusMessage = msg
       } else {
+        epdScrollOffsetLines = 0
         requestEpdRefresh(system, mode = EpdModeGray4, showCursor = false, forceNow = true)
         val msg = "[Btn5 PROOF]: Triggered 4-Grayscale camera-ready eInk proof refresh."
         consoleState.log(msg)

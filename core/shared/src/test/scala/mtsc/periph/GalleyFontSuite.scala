@@ -144,4 +144,64 @@ class GalleyFontSuite extends FunSuite {
     assertEquals(GalleyFont.getPixelShade(bw, red, 17, 2), GalleyFont.ShadeBlack)
     assertEquals(GalleyFont.getPixelShade(bw, red, 17, 5), GalleyFont.ShadeWhite)
   }
+
+  test("visibleStartLine paginates 8-line sheets during live typing and shows continuous 8-line windows when scrolling or at bottom") {
+    // 43-line HistoricalSampleText at 140u:
+    // - Live sheet pagination (`paginateSheet = true`, `scrollOffsetLines = 0`) turns to page 6 at index 40 (L41..L43).
+    assertEquals(GalleyFont.visibleStartLine(totalLines = 43, scrollOffsetLines = 0, paginateSheet = true), 40)
+
+    // - Proof / Jump-to-Bottom (`paginateSheet = false`, `scrollOffsetLines = 0`) shows full 8-line bottom window 35..42 (L36..L43).
+    assertEquals(GalleyFont.visibleStartLine(totalLines = 43, scrollOffsetLines = 0, paginateSheet = false), 35)
+    assertEquals(GalleyFont.visibleStartLine(totalLines = 43, scrollOffsetLines = 4, paginateSheet = false), 31)
+
+    // Verify scrolling up and down in 4-line steps across any document length never skips a line
+    for (totalLines <- 1 to 75) {
+      val maxScroll = math.max(0, totalLines - GalleyFont.MaxVisibleLines)
+      val coveredUp = scala.collection.mutable.BitSet.empty
+      var lastStart = GalleyFont.visibleStartLine(totalLines, scrollOffsetLines = 0, paginateSheet = false)
+      for (i <- lastStart until math.min(totalLines, lastStart + GalleyFont.MaxVisibleLines)) coveredUp += i
+      while (lastStart > 0) {
+        val targetStart = math.max(0, math.min(maxScroll, lastStart - 4))
+        val offset = maxScroll - targetStart
+        lastStart = GalleyFont.visibleStartLine(totalLines, offset, paginateSheet = false)
+        for (i <- lastStart until math.min(totalLines, lastStart + GalleyFont.MaxVisibleLines)) coveredUp += i
+      }
+      assertEquals(coveredUp.size, totalLines, s"Scrolling up skipped lines for totalLines=$totalLines")
+
+      val coveredDown = scala.collection.mutable.BitSet.empty
+      for (i <- 0 until math.min(totalLines, GalleyFont.MaxVisibleLines)) coveredDown += i
+      while (lastStart < maxScroll) {
+        val targetStart = math.max(0, math.min(maxScroll, lastStart + 4))
+        val offset = maxScroll - targetStart
+        lastStart = GalleyFont.visibleStartLine(totalLines, offset, paginateSheet = false)
+        for (i <- lastStart until math.min(totalLines, lastStart + GalleyFont.MaxVisibleLines)) coveredDown += i
+      }
+      assertEquals(coveredDown.size, totalLines, s"Scrolling down skipped lines for totalLines=$totalLines")
+    }
+  }
+
+  test("HistoricalSampleText at 140u includes 'written in Scala, running on' in the bottom 8-line galley window") {
+    val system = new MtscSystem()
+    val img = mtsc.asm.Assembler.assemble(mtsc.diag.ContinuousComposerRoutine.Source) match {
+      case Right(i)  => i
+      case Left(err) => fail(s"Assembly failed: $err")
+    }
+    system.loadProgram(img)
+    EscapementRoutine.initializeTable(system.memory)
+    mtsc.diag.ContinuousComposerRoutine.setMeasure(system.memory, 140)
+    system.loadTape(mtsc.types.Device.RightTape, TapeCartridge.fromText(TapeCartridge.HistoricalSampleText, "Historical"))
+
+    val res = system.run(maxCycles = 250000)
+    assertEquals(res, mtsc.cpu.StepResult.Halted)
+
+    val lines = system.paper.lines
+    assertEquals(lines.length, 43)
+    val startBottom = GalleyFont.visibleStartLine(lines.length, scrollOffsetLines = 0, paginateSheet = false)
+    val bottomWindow = lines.slice(startBottom, startBottom + GalleyFont.MaxVisibleLines)
+    assertEquals(bottomWindow.length, 8)
+    assert(
+      bottomWindow.contains("written in Scala, running on"),
+      s"Expected bottom window to contain 'written in Scala, running on', got: $bottomWindow"
+    )
+  }
 }

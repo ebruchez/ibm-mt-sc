@@ -301,13 +301,21 @@ object GalleyFont {
 
   /**
    * Computes the top visible line index (`0`-based) for the 8-line e-Ink galley window:
-   * - When `scrollOffsetLines == 0` (live composition), paginates in 8-line sheets (`0`, `8`, `16`, ...)
-   *   so characters type progressively onto stationary white paper without shifting every line.
-   * - When `scrollOffsetLines > 0` (manual scrolling via Button B), offsets back from the last line.
+   * - When `paginateSheet == true` and `scrollOffsetLines <= 0` (live progressive `FastMono` typing),
+   *   paginates in 8-line sheets (`0`, `8`, `16`, ...) so characters type progressively onto stationary
+   *   white paper without shifting every line.
+   * - Otherwise (completed proof refresh, manual scrolling, or jumping to top/bottom), anchors the
+   *   8-line window to `maxStart = max(0, totalLines - MaxVisibleLines)` and offsets back by
+   *   `scrollOffsetLines`, so `scrollOffsetLines == 0` shows a full 8-line bottom window with zero
+   *   discontinuity or skipped lines when scrolling up or down.
    */
-  def visibleStartLine(totalLines: Int, scrollOffsetLines: Int): Int = {
+  def visibleStartLine(
+    totalLines: Int,
+    scrollOffsetLines: Int,
+    paginateSheet: Boolean = false
+  ): Int = {
     if (totalLines <= MaxVisibleLines) 0
-    else if (scrollOffsetLines <= 0) {
+    else if (paginateSheet && scrollOffsetLines <= 0) {
       ((totalLines - 1) / MaxVisibleLines) * MaxVisibleLines
     } else {
       val maxStart = math.max(0, totalLines - MaxVisibleLines)
@@ -331,7 +339,8 @@ object GalleyFont {
     redPlane: Array[Byte],
     scrollOffsetLines: Int = 0,
     showCursor: Boolean = false,
-    flip180: Boolean = false
+    flip180: Boolean = false,
+    paginateSheet: Boolean = false
   ): Unit = {
     clearPlanes(bwPlane, redPlane)
 
@@ -406,7 +415,7 @@ object GalleyFont {
       return
     }
 
-    val startLine = visibleStartLine(totalLines, scrollOffsetLines)
+    val startLine = visibleStartLine(totalLines, scrollOffsetLines, paginateSheet)
     val endLine = math.min(totalLines, startLine + MaxVisibleLines)
 
     var visIdx = 0

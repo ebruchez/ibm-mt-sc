@@ -9,7 +9,7 @@ A standalone hardware recreation of the **1966 IBM Magnetic Tape "Selectric" Com
 | Component | Role in the IBM MT/SC Emulator |
 | :--- | :--- |
 | **Adafruit Feather RP2040** (`125 MHz` Cortex-M0+) | Runs the gate-level **IBM 6320 CCU** (`ILD 0301–0312` + 3-D `16×16×64` magnetic core matrix), **Model 6310** tape transports, and **Selectric Composer** escapement/justification microprogram in bare-metal Scala Native (`~1.6×` faster than original 1966 hardware in unpaced mode, or locked to `14.1` chars/sec in real-time mode). |
-| **2.9" Grayscale eInk FeatherWing (`#4777`, `296×128`)** | **Selectric Composer Galley Proof Sheet** — renders proportional **Press Roman** serif type (`3`–`9` escapement units at `2 px/unit`) beneath a shaded pica ruler (`0p`–`12p`), right-margin target pointer (`▼ 140`), dotted margin guideline, and 2-digit non-repro line numbers (`01`–`64`). |
+| **2.9" Grayscale eInk FeatherWing (`#4777`, `296×128`)** | **Selectric Composer Galley Proof Sheet** — renders proportional **Press Roman** serif type (`3`–`9` escapement units at `2 px/unit`) beneath a shaded pica ruler (`0p`–`12p`), right-margin target pointer (`▼ 140`), dotted margin guideline, and 2-digit non-repro line numbers (`01`–`96`). |
 | **128×32 OLED FeatherWing (`#2900`, `SSD1306`)** | **Live 6320 CE & Operator Console** — shows the 11 incandescent indicator lamps (`LITE 11..1`), machine state badge (`RUN`, `INH`, `MPX`, `HLT`, `ERR`), graphical line-justification gauge, Program Step Address (`PC`), Magnetic Tape head position (`MT`), completed lines (`GL`), and character count (`C`). |
 | **6 Color-Coded Pushbuttons** | **Operator & Customer Engineer Control Panel** — full standalone control over starting/pausing composition, single-stepping instructions, rewinding/switching magnetic tapes, scrolling the galley sheet, cycling CE lamp modes, and changing line measure. |
 | **Onboard `WS2812` NeoPixel (`GPIO 16`)** | **Backplane Status Lamp** — `Green` (`+RUN`), `Blue` (`+MT CALL` tape read pulse), `Amber` (`LITE 11` Inhibit / Operator wait), or `Red` (`LITE 9` Parity / Instruction Check error). |
@@ -102,11 +102,11 @@ The 296×128 eInk display represents the physical **Selectric Composer camera-re
 - **Top Pica Ruler Bar (`y = 0..13`)**:
   - Marked in **picas** (`0p`, `3p`, `6p`, `9p`, `12p`, where `1 pica = 12 units = 24 pixels`), with `6-unit` half-pica ticks and `3-unit` quarter-pica ticks.
   - **Target Measure Badge (`▼ 140`)**: Indicates the active right-margin justification setting (`140u`, `110u`, or `90u`) and projects a vertical **dotted right-margin guideline** down the sheet.
-- **Galley Viewport (`8` Lines Visible, `Up to 64` Lines Retained)**:
-  - Each line is labeled in the left margin with a 2-digit non-repro proof line number (`01`..`64`).
+- **Galley Viewport (`8` Lines Visible, `Up to 96` Lines Retained)**:
+  - Each line is labeled in the left margin with a 2-digit non-repro proof line number (`01`..`96`).
   - Characters are rendered in an anti-aliased 4-level grayscale **Press Roman** proportional serif font whose pixel widths (`6 px` to `18 px`) match the authentic IBM Composer `3`–`9` unit escapement table.
   - When composition advances past line `08` (onto line `09`, `17`, etc.), the viewport automatically turns the page with a clean full refresh so there is zero ghosting from the previous page.
-  - Use **White (`▲`)** and **Blue (`▼`)** at any time after or between runs to scroll back and forth through all composed lines (`01`–`64`).
+  - Use **White (`▲`)** and **Blue (`▼`)** at any time after or between runs to scroll back and forth through all composed lines (`01`–`96`).
 
 ---
 
